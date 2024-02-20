@@ -1,0 +1,12 @@
+{
+  "$schema": "https://aka.ms/azure/static-web-apps-cli/schema",
+  "configurations": {
+    "caipi": {
+      "appLocation": "public",
+      "apiLocation": ".",
+      "outputLocation": "public",
+      "apiLanguage": "python",
+      "apiVersion": "3.10"
+    }
+  }
+}
