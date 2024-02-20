@@ -1,28 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends 'base.html' %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        [x-cloak] {
-            display: none
-        }
-    </style>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script src="https://unpkg.com/alpinejs@3.13.5" defer></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <title>
-        
-        caipi.ai
-        
-    </title>
-</head>
-
-<body>
-
-    
+{% block body %}
 
 <section class="w-full bg-white" x-data="{ showMenu: false }">
     <nav
@@ -94,7 +72,9 @@
                         Credits</span>
                     Get Started
                 </a>
-                
+                {# <a
+                    class="inline-block px-6 py-3 my-1 leading-normal text-center text-gray-700 no-underline align-middle bg-gray-100 rounded-full cursor-pointer select-none md:my-5 lg:py-3 lg:px-8 hover:bg-gray-800 hover:text-white"
+                    href="#features">Learn More</a> #}
             </div>
         </div>
         <div
@@ -187,19 +167,7 @@
 </section>
 
 <footer class="flex flex-col gap-2 sm:flex-row py-6 w-full shrink-0 items-center px-4 md:px-6 border-t">
-    <p class="text-xs text-gray-500 dark:text-gray-400">© 2024 caipi.ai. All rights reserved.</p>
-<nav class="sm:ml-auto flex gap-4 sm:gap-6">
-    <a class="text-xs hover:underline underline-offset-4" href="#" rel="ugc">
-        Terms of Service
-    </a>
-    <a class="text-xs hover:underline underline-offset-4" href="#" rel="ugc">
-        Privacy
-    </a>
-</nav>
+    {% include 'footer.html' %}
 </footer>
 
-
-
-</body>
-
-</html>
+{% endblock %}

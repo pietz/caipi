@@ -1,0 +1,104 @@
+{% macro button(label="Button", href="", light=False, attr="", icon=None) %}
+{% if light %}
+{% if href|length > 0 %}
+<a href="{{ href }}">
+    {% endif %}
+    <button {{ attr }}
+        class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium tracking-wide transition-colors duration-200 bg-white border rounded-md text-neutral-500 hover:text-neutral-700 border-neutral-200/70 hover:bg-neutral-100 active:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-200/60 focus:shadow-outline">
+        {% if icon %}
+        <img class="w-5 mr-2" src="https://unpkg.com/lucide-static@latest/icons/{{ icon }}.svg" />
+        {% endif %}
+        {{ label }}
+    </button>
+    {% if href|length > 0 %}
+</a>
+{% endif %}
+{% else %}
+{% if href|length > 0 %}
+<a href="{{ href }}">
+    {% endif %}
+    <button {{ attr }}
+        class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium tracking-wide text-white transition-colors duration-200 rounded-md bg-neutral-950 hover:bg-neutral-900 focus:ring-2 focus:ring-offset-2 focus:ring-neutral-900 focus:shadow-outline focus:outline-none">
+        {% if icon %}
+        <img class="w-5 mr-2" src="https://unpkg.com/lucide-static@latest/icons/{{ icon }}.svg" />
+        {% endif %}
+        {{ label }}
+    </button>
+    {% if href|length > 0 %}
+</a>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro textarea(label="text", value="", placeholder="Type something...", required=False) %}
+<label for="{{ label }}" class="pl-4 block mb-2 text-sm font-bold text-neutral-900">{{ label }}</label>
+<div class="w-full px-4">
+    <textarea name="{{ label }}" type="text" value="{{ value }}" {{ "required" if required else "" }}
+        placeholder="{{ placeholder }}"
+        class="flex w-full h-auto min-h-[80px] px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 placeholder:text-neutral-400 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50"></textarea>
+</div>
+{% endmacro %}
+
+{% macro select(items) %}
+<div x-data="{
+        selectOpen: false,
+        selectedItem: null,
+    }" @keydown.escape="selectOpen = false" @keydown.down.stop.prevent="selectOpen = true"
+    @keydown.up.stop.prevent="selectOpen = true" class="relative w-64">
+
+    <button @click="selectOpen = !selectOpen"
+        class="relative min-h-[38px] flex items-center justify-between w-full py-2 pl-3 pr-10 text-left bg-white border rounded-md shadow-sm cursor-default border-neutral-200 focus:outline-none text-sm">
+        <span x-text="selectedItem ?? 'Select Item'" class="truncate"></span>
+        <span class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+            <img class="w-4" src="https://unpkg.com/lucide-static@latest/icons/chevron-down.svg" />
+        </span>
+    </button>
+
+    <ul x-show="selectOpen" @click.away="selectOpen = false"
+        class="absolute w-full py-1 mt-1 overflow-auto text-sm bg-white rounded-md shadow-lg max-h-56 ring-1 ring-black ring-opacity-5 focus:outline-none"
+        x-cloak>
+        {% for model in items %}
+        <li @click="selectedItem = '{{ model }}'; selectOpen = false"
+            class="cursor-default select-none py-2 pl-10 pr-4 hover:bg-gray-100" x-text="'{{ model }}'">
+            <span class="ml-2 px-2 py-1 text-xs font-semibold text-green-500 bg-green-100 rounded-full">
+                active
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endmacro %}
+
+{% macro table(headers, rows) %}
+<div class="flex flex-col">
+    <div class="overflow-x-auto">
+        <div class="inline-block min-w-full">
+            <div class="overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead>
+                        <tr>
+                            {% for header in headers %}
+                            <th scope="col"
+                                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {{ header }}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for row in rows %}
+                        <tr class="hover:bg-neutral-100">
+                            {% for cell in row %}
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{ cell }}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

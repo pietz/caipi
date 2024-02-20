@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        [x-cloak] {
+            display: none
+        }
+    </style>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.13.5" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>
+        {% block title %}
+        caipi.ai
+        {% endblock %}
+    </title>
+</head>
+
+<body>
+
+    {% block body %}<!-- Default content -->{% endblock %}
+
+</body>
+
+</html>

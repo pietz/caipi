@@ -2,7 +2,7 @@
   "$schema": "https://aka.ms/azure/static-web-apps-cli/schema",
   "configurations": {
     "caipi": {
-      "appLocation": "public",
+      "appLocation": ".",
       "apiLocation": "api",
       "outputLocation": "public",
       "apiLanguage": "python",
