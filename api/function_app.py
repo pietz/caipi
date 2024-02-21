@@ -32,5 +32,5 @@ def dashboard(req: func.HttpRequest) -> func.HttpResponse:
     if isinstance(result, func.HttpResponse):
         # not authenticated
         return result
-    print(user.status_code)
+    print(result)
     return func.HttpResponse("OK", status_code=200)
