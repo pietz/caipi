@@ -9,8 +9,8 @@ def render(env, inp, out):
         f.write(output)
 
 
-# Initialize the Jinja2 environment
 env = Environment(loader=FileSystemLoader("api/templates"))
 
 render(env, "landing.html", "public/index.html")
-render(env, "dashboard.html", "public/app/index.html")
+render(env, "login.html", "public/login/index.html")
+# render(env, "dashboard.html", "public/app/index.html")
