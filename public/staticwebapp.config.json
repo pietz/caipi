@@ -51,7 +51,7 @@
     },
     "responseOverrides": {
         "401": {
-            "redirect": "/login",
+            "redirect": "/login?post_login_redirect_uri=.referrer",
             "statusCode": 302
         }
     }
