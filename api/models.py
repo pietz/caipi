@@ -1,4 +1,4 @@
-# from cosmos import Document
+from cosmos import Document
 
 class Users(Document):
     login: str
