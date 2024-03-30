@@ -2,6 +2,8 @@
 # The Python Worker is managed by Azure Functions platform
 # Manually managing azure-functions-worker may cause unexpected issues
 
+python-version==3.10
+
 azure-functions
 azure-cosmos
 marvin
