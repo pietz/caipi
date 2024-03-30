@@ -88,10 +88,11 @@
                     <tbody class="bg-white divide-y divide-gray-200">
                         {% for row in rows %}
                         <tr class="hover:bg-neutral-100">
-                            {% for cell in row %}
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {{ cell }}
-                            </td>
+                            {% for header in headers %}
+                                {% set cell_value = row[header] if row is mapping else row[loop.index0] %}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    {{ cell_value }}
+                                </td>
                             {% endfor %}
                         </tr>
                         {% endfor %}

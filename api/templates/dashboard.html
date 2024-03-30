@@ -24,7 +24,8 @@
     {{ tile("Invocations", user.invocations, "hash") }}
 </div>
 <div class="rounded-lg border bg-white shadow-sm">
-    {{ table(["Test", "Foobar"], [[1, 2], [3, 4]]) }}
+    {# {{ table(["name", "characters", "latency", "invocations"], projects) }} #}
+    {% include 'table.html' %}
 </div>
 
 {% endblock %}

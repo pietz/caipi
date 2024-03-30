@@ -1,0 +1,46 @@
+:root {
+    --pico-font-size: 80%;
+    /* Original: 100% */
+    --pico-form-element-spacing-vertical: 0.375rem;
+    /* Original: 1rem */
+    --pico-form-element-spacing-horizontal: 1.0rem;
+    /* Original: 1.25rem */
+    --pico-border-radius: 0.375rem;
+    /* Original: 0.25rem */
+    --pico-card-border-color: #888;
+}
+
+@media (min-width: 576px) {
+    :root {
+        --pico-font-size: 90%;
+        /* Original: 106.25% */
+    }
+}
+
+@media (min-width: 768px) {
+    :root {
+        --pico-font-size: 90%;
+        /* Original: 112.5% */
+    }
+}
+
+@media (min-width: 1024px) {
+    :root {
+        --pico-font-size: 90%;
+        /* Original: 118.75% */
+    }
+}
+
+@media (min-width: 1280px) {
+    :root {
+        --pico-font-size: 90%;
+        /* Original: 125% */
+    }
+}
+
+@media (min-width: 1536px) {
+    :root {
+        --pico-font-size: 90%;
+        /* Original: 131.25% */
+    }
+}

@@ -4,5 +4,5 @@
 
 azure-functions
 azure-cosmos
-jinja2
-pydantic
+marvin
+htpy

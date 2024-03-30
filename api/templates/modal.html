@@ -26,8 +26,8 @@
                     <p>Create and deploy a new endpoint by telling us what it should do</p>
                 </div>
             </div>
-            <form hx-post="/endpoints" hx-target="#table" hx-swap="outerHTML">
-                <div class="pt-6 grid gap-</form>2">
+            <form hx-post="/api/projects" hx-target="#table" hx-swap="outerHTML">
+                <div class="pt-6 grid gap-2">
                     <label class="text-sm font-bold">Endpoint Name</label>
                     <input required type="text" name="name" placeholder="Name"
                         class="flex w-full h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
@@ -39,18 +39,19 @@
                 </div>
                 <div class="pt-6 grid gap-2" x-data="{ params: 1 }">
                     <label class="text-sm font-bold">Request Parameter</label>
-                    <template x-for="(i, index) in params" :key="i">
+                    <div class="flex gap-4">
+                        <input required type="text" name="inpname" placeholder="Name" value="output"
+                            class="flex w-40 h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
+                        <input type="text" name="inpdefault" placeholder="Default"
+                            class="flex w-full h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
+                    </div>
+                    {# <template x-for="(i, index) in params" :key="i">
                         <div class="flex gap-4">
                             <input required type="text" name="inpname" placeholder="Name"
                                 :value="index === 0 ? 'input' : ''"
                                 class="flex w-40 h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
                             <input type="text" name="inpdefault" placeholder="Default"
                                 class="flex w-full h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
-                            {# <div class="flex items-center">
-                                <input type="checkbox" name="inpopt"
-                                    class="w-4 h-4 bg-gray-100 border-gray-300 rounded text-neutral-900 focus:ring-neutral-900">
-                                <label class="ml-2 text-sm font-medium text-gray-900">Opt.</label>
-                            </div> #}
                         </div>
                     </template>
                     <div class="flex gap-4 items-center justify-center"> <!-- Added justify-center class -->
@@ -62,7 +63,7 @@
                             class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium tracking-wide transition-colors duration-100 rounded-md text-neutral-500 bg-neutral-50 focus:ring-2 focus:ring-offset-2 focus:ring-neutral-100 hover:text-neutral-600 hover:bg-neutral-100">
                             <img class="w-4" src="https://unpkg.com/lucide-static@latest/icons/plus-circle.svg" />
                         </button>
-                    </div>
+                    </div> #}
                 </div>
                 <div class="pt-6 grid gap-2">
                     <label class="text-sm font-bold">Response Parameter</label>
@@ -71,15 +72,15 @@
                             class="flex w-40 h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
                         <input type="text" name="outdefault" placeholder="Default"
                             class="flex w-full h-10 px-3 py-2 text-sm bg-white border rounded-md border-neutral-300 ring-offset-background placeholder:text-neutral-500 focus:border-neutral-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50" />
-                        <div class="flex items-center">
+                        {# <div class="flex items-center">
                             <input name="outopt" type="checkbox"
                                 class="w-4 h-4 bg-gray-100 border-gray-300 rounded text-neutral-900 focus:ring-neutral-900">
                             <label for="checkbox-id" class="ml-2 text-sm font-medium text-gray-900">Opt.</label>
-                        </div>
+                        </div> #}
                     </div>
                 </div>
                 <div class="pt-10 flex">
-                    <button type="submit" @click="modalOpen=false"
+                    <button type="submit"
                         class="w-full inline-flex items-center justify-center px-4 py-2 text-sm font-medium tracking-wide text-white transition-colors duration-200 rounded-md bg-neutral-950 hover:bg-neutral-900 focus:ring-2 focus:ring-offset-2 focus:ring-neutral-900 focus:shadow-outline focus:outline-none">
                         Create
                     </button>
