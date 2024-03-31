@@ -1,4 +1,4 @@
 azure-functions
-# azure-cosmos
-# marvin
-# htpy
+azure-cosmos
+marvin
+htpy
