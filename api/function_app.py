@@ -3,11 +3,11 @@ import os
 import azure.functions as func
 from azure.cosmos import exceptions
 
-# from models import Users, Projects, Invocations, Endpoints, payload_model
+from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
-# from utils import authenticate
-from views import dashboard
-# from ai import ai_function
+from utils import authenticate
+# from views import dashboard
+from ai import ai_function
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 cosmos = CosmosConnection.from_connection_string(
