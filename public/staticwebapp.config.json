@@ -1,4 +1,7 @@
 {
+    "platform": {
+        "apiRuntime": "python:3.10"
+    },
     "trailingSlash": "auto",
     "auth": {
         "identityProviders": {
