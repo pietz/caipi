@@ -1,9 +1,8 @@
 import secrets
 import json
 from typing import Type, TypeVar, Any, ClassVar
-from azure.cosmos import CosmosClient, ContainerProxy, exceptions
+from azure.cosmos import CosmosClient, ContainerProxy
 from pydantic import BaseModel, Field
-from pydantic.utils import deep_update
 
 T = TypeVar("T", bound="Document")
 
