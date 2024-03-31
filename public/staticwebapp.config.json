@@ -27,12 +27,6 @@
             "statusCode": 404
         },
         {
-            "route": "/app",
-            "allowedRoles": [
-                "authenticated"
-            ]
-        },
-        {
             "route": "/api/users/*",
             "allowedRoles": [
                 "authenticated"
