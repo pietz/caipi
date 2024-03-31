@@ -6,7 +6,7 @@ from azure.cosmos import exceptions
 # from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
 # from utils import authenticate
-# from views import dashboard
+from views import dashboard
 # from ai import ai_function
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
