@@ -1,7 +1,7 @@
 import os
 
 import azure.functions as func
-from azure.cosmos import exceptions
+# from azure.cosmos import exceptions
 
 #from models import Users, Projects, Invocations, Endpoints, payload_model
 #from cosmos import CosmosConnection
