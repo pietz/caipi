@@ -1,4 +1,4 @@
 azure-functions
 azure-cosmos
 marvin
-htpy==24.3.14
+htpy==24.3.13
