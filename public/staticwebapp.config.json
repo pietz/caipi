@@ -54,7 +54,7 @@
     },
     "responseOverrides": {
         "401": {
-            "redirect": "/login?post_login_redirect_uri=/app",
+            "redirect": "/login",
             "statusCode": 302
         }
     }
