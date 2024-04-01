@@ -29,11 +29,15 @@ async def dashboardx(req: func.HttpRequest) -> func.HttpResponse:
         user = Users.get(user.id)
     except exceptions.CosmosResourceNotFoundError:
         user.save()
-    projects = Projects.find(f"user = '{user.id}'")
-    invocations = Invocations.find(f"user = '{user.id}'")
-    user.refresh(invocations)
-    [p.refresh(invocations) for p in projects]
-    return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
+    try:
+        projects = Projects.find(f"user = '{user.id}'")
+        invocations = Invocations.find(f"user = '{user.id}'")
+        user.refresh(invocations)
+        [p.refresh(invocations) for p in projects]
+        return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=500)
+
 
 
 # @app.route("projects", methods=["POST"])
