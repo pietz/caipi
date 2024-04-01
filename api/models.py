@@ -100,8 +100,8 @@ class Endpoints(Document):
 class Invocations(Document):
     project: str
     user: str
-    request: dict
-    response: dict
     chars: int
     latency: float
     success: bool
+    request: dict | None = None
+    response: dict | None = None
