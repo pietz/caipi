@@ -23,26 +23,18 @@ async def health(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="app", methods=["GET"])
 async def dashboardx(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info("pietz: dashboardx")
     try:
         user = authenticate(req)
-        logging.info(f"pietz: authenticated")
         if not user:
             return func.HttpResponse("Unauthorized", status_code=401)
         try:
             user = Users.get(user.id)
-            logging.info(f"pietz: user found")
         except exceptions.CosmosResourceNotFoundError:
             user.save()
-            logging.info(f"pietz: user created")
         projects = Projects.find(f"user = '{user.id}'")
-        logging.info(f"pietz: projects found")
         invocations = Invocations.find(f"user = '{user.id}'")
-        logging.info(f"pietz: invocations found")
         user.refresh(invocations)
-        logging.info(f"pietz: user refreshed")
         [p.refresh(invocations) for p in projects]
-        logging.info(f"pietz: projects refreshed")
         return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
     except Exception as e:
         logging.error(f"pietz: {e}")
