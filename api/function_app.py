@@ -22,7 +22,7 @@ async def health(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="app", methods=["GET"])
-async def dashboardx(req: func.HttpRequest) -> func.HttpResponse:
+async def dash(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user = authenticate(req)
         if not user:
@@ -37,38 +37,38 @@ async def dashboardx(req: func.HttpRequest) -> func.HttpResponse:
         [p.refresh(invocations) for p in projects]
         return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
     except Exception as e:
-        logging.error(f"pietz: {e}")
-        return func.HttpResponse(str(e), status_code=501)
+        logging.error(str(e))
+        return func.HttpResponse(str(e), status_code=512)
 
 
 
-# @app.route("projects", methods=["POST"])
-# async def create_project(req: func.HttpRequest):
-#     user = authenticate(req)
-#     if not user:
-#         return func.HttpResponse("Unauthorized", status_code=401)
-#     if not req.form:
-#         return func.HttpResponse("Bad Request", status_code=400)
-#     project = Projects.from_form(req.form, user)
-#     project.save()
-#     endpoint = Endpoints.from_project(project, user)
-#     endpoint.save()
-#     projects = Projects.find(f"user = '{user.id}'")
-#     return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
+@app.route("projects", methods=["POST"])
+async def create_project(req: func.HttpRequest):
+    user = authenticate(req)
+    if not user:
+        return func.HttpResponse("Unauthorized", status_code=401)
+    if not req.form:
+        return func.HttpResponse("Bad Request", status_code=400)
+    project = Projects.from_form(req.form, user)
+    project.save()
+    endpoint = Endpoints.from_project(project, user)
+    endpoint.save()
+    projects = Projects.find(f"user = '{user.id}'")
+    return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
 
 
-# @app.route("x/{endpoint}", methods=["POST"])
-# async def invoke(req: func.HttpRequest):
-#     endpoint = Endpoints.get(req.route_params["endpoint"])
-#     project = Projects.get(endpoint.project, endpoint.user)
+@app.route("x/{endpoint}", methods=["POST"])
+async def invoke(req: func.HttpRequest):
+    endpoint = Endpoints.get(req.route_params["endpoint"])
+    project = Projects.get(endpoint.project, endpoint.user)
 
-#     Request = payload_model(project.request)
-#     print(Request)
-#     try:
-#         data = req.get_json()
-#         inputs = Request(**data)
-#     except Exception as e:
-#         return func.HttpResponse("Request payload is invalid", status_code=422)
-#     Response = payload_model(project.response)
-#     res = await ai_function(project.instruction, inputs, Response)
-#     return func.HttpResponse(res.model_dump_json(), status_code=200)
+    Request = payload_model(project.request)
+    print(Request)
+    try:
+        data = req.get_json()
+        inputs = Request(**data)
+    except Exception as e:
+        return func.HttpResponse("Request payload is invalid", status_code=422)
+    Response = payload_model(project.response)
+    res = await ai_function(project.instruction, inputs, Response)
+    return func.HttpResponse(res.model_dump_json(), status_code=200)
