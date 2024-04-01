@@ -22,7 +22,7 @@
         },
         {
             "route": "/login/github",
-            "redirect": "/.auth/login/github"
+            "redirect": "/.auth/login/github?post_login_redirect_uri=/app"
         },
         {
             "route": "/.auth/login/aad",
