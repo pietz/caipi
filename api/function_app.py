@@ -22,9 +22,12 @@ async def health(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="app", methods=["GET"])
 async def dashboardx(req: func.HttpRequest) -> func.HttpResponse:
-    user = authenticate(req)
-    if not user:
-        return func.HttpResponse("Unauthorized", status_code=401)
+    try:
+        user = authenticate(req)
+        if not user:
+            return func.HttpResponse("Unauthorized", status_code=401)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=500)
     try:
         user = Users.get(user.id)
     except exceptions.CosmosResourceNotFoundError:
