@@ -44,3 +44,17 @@
         /* Original: 131.25% */
     }
 }
+
+@media (min-width: 768px) {
+    .grid>.span-2 {
+        grid-column: span 2;
+    }
+
+    .grid>.span-3 {
+        grid-column: span 3;
+    }
+
+    .grid>.span-4 {
+        grid-column: span 4;
+    }
+}

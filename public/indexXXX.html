@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        [x-cloak] {
+            display: none
+        }
+    </style>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.13.5" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>
+
+        caipi.ai
+
+    </title>
+</head>
+
+<body>
+
+
+
+    <section class="w-full bg-white" x-data="{ showMenu: false }">
+        <nav
+            class="box-border flex items-center justify-between w-full h-20 px-6 mx-auto my-0 leading-6 text-gray-800 max-w-7xl">
+            <a href="#_"
+                class="flex items-center space-x-2 font-extrabold text-gray-800 lg:w-auto title-font lg:items-center lg:justify-center md:mb-0">
+                <span>caipi.ai</span>
+            </a>
+            <div class="relative flex list-none lg:block" :class="{'flex fixed': showMenu, 'hidden': !showMenu }">
+                <ul
+                    class="fixed top-0 left-0 flex-wrap items-center w-full h-full p-0 mt-20 space-y-5 text-sm leading-6 text-gray-500 text-gray-800 lg:static lg:w-auto lg:flex lg:space-y-0 lg:mt-0">
+                    <li class="box-border w-full my-3 text-center lg:w-auto lg:ml-2">
+                        <a href="#features"
+                            class="px-4 py-2 no-underline bg-transparent rounded-full cursor-pointer opacity-90 hover:opacity-100 hover:text-gray-700 hover:bg-gray-100">
+                            Features
+                        </a>
+                    </li>
+                    <li class="box-border w-full my-3 text-center lg:w-auto lg:ml-2">
+                        <a href="#_"
+                            class="px-4 py-2 no-underline bg-transparent rounded-full cursor-pointer opacity-90 hover:opacity-100 hover:text-gray-700 hover:bg-gray-100">
+                            Support
+                        </a>
+                    </li>
+                    <li class="box-border w-full my-3 text-center lg:w-auto lg:ml-2">
+                        <a href="#_"
+                            class="px-4 py-2 no-underline bg-transparent rounded-full cursor-pointer opacity-90 hover:opacity-100 hover:text-gray-700 hover:bg-gray-100">
+                            Pricing
+                        </a>
+                    </li>
+                    <li class="box-border w-full my-3 text-center lg:w-auto lg:ml-5">
+                        <a href="/app"
+                            class="px-4 py-2 text-white no-underline bg-gray-900 rounded-full cursor-pointer opacity-90 hover:opacity-100 hover:text-gray-700 hover:bg-gray-100">
+                            Login
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            <div @click="showMenu = !showMenu"
+                class="absolute right-0 flex flex-col items-center items-end justify-center w-10 h-10 mr-5 -mt-1 rounded-full cursor-pointer lg:hidden hover:bg-gray-100">
+                <svg class="w-6 h-6 text-gray-700" x-show="!showMenu" fill="none" stroke-linecap="round"
+                    stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" stroke="currentColor" x-cloak>
+                    <path d="M4 6h16M4 12h16M4 18h16"></path>
+                </svg>
+                <svg class="w-6 h-6 text-gray-700" x-show="showMenu" fill="none" stroke="currentColor"
+                    viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" x-cloak>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </path>
+                </svg>
+            </div>
+        </nav>
+        <div class="flex-grow w-full px-10 pt-8 pb-12 mx-auto leading-6 text-gray-800 lg:pt-16 lg:pb-20 max-w-7xl">
+            <div class="relative w-full px-0 leading-6 text-left md:text-center lg:flex-grow-0 lg:flex-shrink-0">
+                <h1 class="box-border mt-0 mb-4 text-3xl font-black text-gray-800 md:text-4xl lg:text-5xl xl:text-6xl">
+                    Your Shortcut to
+                    <span
+                        class="bg-gradient-to-r from-purple-500 via-blue-500 to-green-500 text-transparent bg-clip-text">AI</span>
+                    Integration
+                </h1>
+                <p class="box-border mt-0 text-base font-normal text-gray-800 opacity-90 lg:text-xl xl:text-2xl">
+                    Step into a world where AI integration is straightforward and structured.
+                    <br>
+                    Caipi.ai is redefining app development, one AIPI at a time.
+                </p>
+                <div
+                    class="box-border flex flex-col justify-center mt-4 text-sm font-medium text-left text-gray-800 md:mt-0 md:text-center md:flex-row md:space-x-4">
+                    <a class="inline-block relative text-lg leading-normal text-center text-white no-underline align-middle bg-gray-900 rounded-full cursor-pointer select-none md:my-5 lg:py-3 lg:px-8 hover:bg-gray-800 hover:text-white"
+                        href="/app">
+                        <span
+                            class="absolute top-0 right-0 -mt-3 -mr-6 px-2 py-0.5 text-xs text-white bg-green-500 rounded-full">Free
+                            Credits</span>
+                        Get Started
+                    </a>
+
+                </div>
+            </div>
+            <div
+                class="relative flex-grow-0 flex-shrink-0 w-full max-w-5xl p-0 mx-auto mt-5 overflow-hidden bg-gray-200 rounded-lg md:shadow-lg lg:shadow-2xl sm:mt-8 lg:mt-12 lg:flex-grow-0 lg:flex-shrink-0 aspect-video">
+            </div>
+        </div>
+    </section>
+
+
+    <section id="features" class="py-20 bg-white">
+        <div class="container max-w-6xl mx-auto">
+            <h2 class="text-4xl font-bold tracking-tight text-center">Devs have left the chat</h2>
+            <p class="mt-2 text-lg text-center text-gray-600">
+                Chat model APIs are awkward for anything but chatting.
+            </p>
+            <p class="mt-2 text-lg text-center text-gray-600">
+                With caipi, you can focus on the funcationality instead of the
+                prompt engineering.
+            </p>
+            <div class="grid grid-cols-4 gap-8 mt-10 sm:grid-cols-8 lg:grid-cols-12 sm:px-8 xl:px-0">
+
+                <div class="relative flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 overflow-hidden bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/upload-cloud.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">Quick Deployment</h4>
+                    <p class="text-base text-center text-gray-500">
+                        Launch your AIPI in less than 60 seconds. Define your AI's instructions, request, and response
+                        formats, and integrate effortlessly via HTTP request.
+                    </p>
+                </div>
+
+                <div class="flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/blocks.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">Seemless Integration</h4>
+                    <p class="text-base text-center text-gray-500">
+                        Easily integrate AI functionalities into your applications with full type safety, ensuring
+                        clarity
+                        and predictability in every response.
+                    </p>
+                </div>
+
+                <div class="flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/activity.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">Realtime Monitoring</h4>
+                    <p class="text-base text-center text-gray-500">
+                        Access detailed usage metrics through your dashboard. Track invocations, credits, latency, and
+                        success rates to optimize performance.
+                    </p>
+                </div>
+
+                <div class="flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/flask-conical.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">A/B Testing</h4>
+                    <p class="text-base text-center text-gray-500">Experiment with different AIPI configurations. Test,
+                        compare, and choose the best performers for real-world effectiveness.</p>
+                </div>
+
+                <div class="flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/handshake.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">Developer Friendly</h4>
+                    <p class="text-base text-center text-gray-500">Designed by developers, for developers. Focus on
+                        building
+                        great applications without getting bogged down by the complexities of AI integration."</p>
+                </div>
+
+                <div class="flex flex-col items-center justify-between col-span-4 px-8 py-12 space-y-4 bg-gray-100 sm:rounded-xl"
+                    data-rounded="rounded-xl" data-rounded-max="rounded-full">
+                    <div class="p-3 text-white bg-white rounded-full" data-primary="blue-500"
+                        data-rounded="rounded-full">
+                        <img class="w-8" src="https://unpkg.com/lucide-static@latest/icons/gift.svg" />
+                    </div>
+                    <h4 class="text-xl font-medium text-gray-700">Pro Perks</h4>
+                    <p class="text-base text-center text-gray-500">Upgrade to Pro for additional monthly credits,
+                        payload
+                        storage for deeper insights, and advanced AI-driven response quality analysis.</p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <footer class="flex flex-col gap-2 sm:flex-row py-6 w-full shrink-0 items-center px-4 md:px-6 border-t">
+        <p class="text-xs text-gray-500 dark:text-gray-400">© 2024 caipi.ai. All rights reserved.</p>
+        <nav class="sm:ml-auto flex gap-4 sm:gap-6">
+            <a class="text-xs hover:underline underline-offset-4" href="#" rel="ugc">
+                Terms of Service
+            </a>
+            <a class="text-xs hover:underline underline-offset-4" href="#" rel="ugc">
+                Privacy
+            </a>
+        </nav>
+    </footer>
+
+    <div class="hidden" hx-get="/api/health" hx-trigger="load">
+        Ping the backend in case of cold starts.
+    </div>
+
+</body>
+
+</html>
