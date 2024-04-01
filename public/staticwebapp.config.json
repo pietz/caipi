@@ -15,6 +15,12 @@
     },
     "routes": [
         {
+            "route": "/app",
+            "allowedRoles": [
+                "authenticated"
+            ]
+        },
+        {
             "route": "/login/github",
             "redirect": "/.auth/login/github"
         },
@@ -48,7 +54,7 @@
     },
     "responseOverrides": {
         "401": {
-            "redirect": "/.auth/login/github?post_login_redirect_uri=.referrer",
+            "redirect": "/login?post_login_redirect_uri=/app",
             "statusCode": 302
         }
     }

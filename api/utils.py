@@ -17,5 +17,7 @@ def authenticate(req: func.HttpRequest):
         # Decodes the base64 encoded user data provided by SWA from the header
         client_principal = json.loads(base64.b64decode(client_header).decode("utf-8"))
         if client_principal.get("userDetails"):
+            if client_principal.get("userDetails") != "pietz":
+                return None
             return Users.from_client_principal(client_principal)
     return None
