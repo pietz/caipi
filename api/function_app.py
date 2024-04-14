@@ -7,7 +7,7 @@ from azure.cosmos import exceptions
 from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
 from utils import authenticate
-from views import dashboard
+from views import dashboard, modal, param
 from ai import ai_function
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
@@ -41,6 +41,14 @@ async def dash(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(str(e), status_code=512)
 
 
+@app.route(route="modal/{type}/{abr}", methods=["GET"])
+async def get_modal(req: func.HttpRequest) -> func.HttpResponse:
+    type = req.route_params.get("type", "")
+    abr = req.route_params.get("abr", "req")
+    if type == "add":
+        return func.HttpResponse(str(param(abr, disabled=False)), status_code=200)
+    elif type == "remove":
+        return func.HttpResponse("", status_code=207)
 
 @app.route("projects", methods=["POST"])
 async def create_project(req: func.HttpRequest):
@@ -57,13 +65,23 @@ async def create_project(req: func.HttpRequest):
     return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
 
 
+@app.route("projects/{id}", methods=["DELETE"])
+async def delete_project(req: func.HttpRequest):
+    user = authenticate(req)
+    if not user:
+        return func.HttpResponse("Unauthorized", status_code=401)
+    if not req.form:
+        return func.HttpResponse("Bad Request", status_code=400)
+    project = Projects.get(req.route_params["id"], user.id)
+    project.delete()
+
+
 @app.route("x/{endpoint}", methods=["POST"])
 async def invoke(req: func.HttpRequest):
     endpoint = Endpoints.get(req.route_params["endpoint"])
     project = Projects.get(endpoint.project, endpoint.user)
 
     Request = payload_model(project.request)
-    print(Request)
     try:
         data = req.get_json()
         inputs = Request(**data)

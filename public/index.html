@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link rel="stylesheet" href="/css/style.css">
     <script src="/script/htmx.1.9.11.min.js"></script>
 </head>
+
 <body>
     <nav class="container-fluid" style="box-shadow: var(--pico-box-shadow)">
         <ul>
@@ -24,7 +26,9 @@
     <main class="container">
         <section id="hero">
             <h1>Create, Monitor, and Test AIPIs with Ease</h1>
-            <p>Caipi.ai provides a breath of fresh air for developers who want to build single-purpose AI functionalities and integrate them into existing applications without delving into the world of conversational models and prompt engineering.</p>
+            <p>Caipi.ai provides a breath of fresh air for developers who want to build single-purpose AI
+                functionalities and integrate them into existing applications without delving into the world of
+                conversational models and prompt engineering.</p>
             <a href="/app" class="button" role="button">Get Started</a>
         </section>
 
@@ -33,23 +37,28 @@
             <div class="grid">
                 <article>
                     <h3>Easy AIPI Creation</h3>
-                    <p>Create and deploy a new AIPI by specifying the instructions for the AI to follow, as well as the request and response format.</p>
+                    <p>Create and deploy a new AIPI by specifying the instructions for the AI to follow, as well as the
+                        request and response format.</p>
                 </article>
                 <article>
                     <h3>Seamless Integration</h3>
-                    <p>Integrate your AIPI through an HTTP request in your existing application and benefit from type safety.</p>
+                    <p>Integrate your AIPI through an HTTP request in your existing application and benefit from type
+                        safety.</p>
                 </article>
                 <article>
                     <h3>Usage Monitoring</h3>
-                    <p>Monitor usage over time and view metrics such as the number of invocations, credits, latency, and success rates.</p>
+                    <p>Monitor usage over time and view metrics such as the number of invocations, credits, latency, and
+                        success rates.</p>
                 </article>
                 <article>
                     <h3>Configuration Testing</h3>
-                    <p>Test different configurations against each other to determine which works best in real-world scenarios.</p>
+                    <p>Test different configurations against each other to determine which works best in real-world
+                        scenarios.</p>
                 </article>
                 <article>
                     <h3>Pro Account Benefits</h3>
-                    <p>Sign up for a Pro account to access more monthly credits and store request and response payloads for further insights.</p>
+                    <p>Sign up for a Pro account to access more monthly credits and store request and response payloads
+                        for further insights.</p>
                 </article>
                 <article>
                     <h3>AI-Powered Testing</h3>
@@ -69,5 +78,10 @@
             <a href="#">Terms of Service</a> | <a href="#">Privacy Policy</a>
         </small>
     </footer>
+
+    <div hx-get="/api/health" hx-trigger="load" style="display:none">
+        Ping the backend in case of cold starts.
+    </div>
 </body>
+
 </html>

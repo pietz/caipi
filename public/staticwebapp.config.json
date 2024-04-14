@@ -25,6 +25,10 @@
             "redirect": "/.auth/login/github?post_login_redirect_uri=/app"
         },
         {
+            "route": "/logout",
+            "redirect": "/.auth/logout"
+        },
+        {
             "route": "/.auth/login/aad",
             "statusCode": 404
         },
