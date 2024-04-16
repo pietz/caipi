@@ -1,14 +1,19 @@
-from htpy import body, header, main, footer, section, nav
-from htpy import article, dialog, button, ul, li, div, img
-from htpy import form, input, label, textarea, select, option
-from htpy import h1, h2, h3, h4, h5, h6, p, br, strong
-from htpy import table, thead, tbody, tr, th, td
+from werkzeug.datastructures import ImmutableMultiDict
 
+# Your ImmutableMultiDict
+data = ImmutableMultiDict([
+    ('name', 'Spellchecker'),
+    ('instructions', 'Fix the spelling of the `input` text and return the corrected text. Set the `was_corrected` field accordingly, if fixes were necessary.'),
+    ('req_name', 'input'),
+    ('req_dtype', 'Text'),
+    ('res_name', 'output'),
+    ('res_name', 'was_corrected'),
+    ('res_dtype', 'Text'),
+    ('res_dtype', 'Text')
+])
 
-def navigation():
-    _nav = nav(".navbar")
-    _nav = _nav[ul[li["hello"]]]
-    return _nav
+print(list(data.items(multi=True)))
 
-
-print(navigation())
+# To iterate and get all values for each key:
+for key in data:
+    print(f"{key}: {data.getlist(key)}")

@@ -1,11 +1,16 @@
+from typing import ClassVar
 from pydantic import Field, BaseModel, create_model
-
 from cosmos import Document, generate_key
+from azure.functions._thirdparty.werkzeug.datastructures import ImmutableMultiDict
 
 l2p = {
     "Text": str,
     "Number": float,
     "Boolean": bool,
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
 }
 
 
@@ -52,26 +57,39 @@ class Users(Document):
 
 
 class Projects(Document):
-    name: str
     user: str
-    instruction: str
-    request: dict
-    response: dict
+    name: str
+    instructions: str
+    request: dict[str, list]
+    response: dict[str, list]
     endpoint: str = Field(default_factory=generate_key)
+    model: str = "gpt-35-1106"
     invocations: int = 0
     chars: int = 0
     latency: float = 0.0
     success: float = 1.0
     active: bool = True
 
+    pk_field: ClassVar[str] = "user"
+
     @classmethod
-    def from_form(cls, form: dict, user: Users):
+    def from_form(cls, form: ImmutableMultiDict, user: Users):
+        assert "name" in form
+        assert "instructions" in form
+        form_di = {k: form.getlist(k) for k in form}
+
         return cls(
-            name=form["name"],
             user=user.id,
-            instruction=form["instruction"],
-            request={form["reqname"]: [form["reqtype"], form["reqdefault"]]},
-            response={form["resname"]: [form["restype"], form["resdefault"]]},
+            name=form["name"],
+            instructions=form["instructions"],
+            request={
+                form_di["req_name"][i]: [form_di["req_dtype"][i], None]
+                for i in range(len(form_di["req_name"]))
+            },
+            response={
+                form_di["res_name"][i]: [form_di["res_dtype"][i], None]
+                for i in range(len(form_di["res_name"]))
+            },
         )
 
     def refresh(self, invocations: list["Invocations"]):
@@ -98,7 +116,7 @@ class Endpoints(Document):
 
 
 class Invocations(Document):
-    project: str
+    project: str  # TODO: Use longer ID for invocations
     user: str
     chars: int
     latency: float

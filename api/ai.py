@@ -14,11 +14,11 @@ marvin.settings.openai.chat.completions.model = os.environ[
 ]
 
 
-async def ai_function(instruction: str, inputs: BaseModel, output_type: Any):
+async def ai_function(instructions: str, inputs: BaseModel, output_type: Any):
     return await _generate_typed_llm_response_with_tool(
         prompt_template=FUNCTION_PROMPT,
         prompt_kwargs=dict(
-            fn_definition=instruction,
+            fn_definition=instructions,
             bound_parameters=inputs.model_dump(),
             return_value=str(output_type),
         ),

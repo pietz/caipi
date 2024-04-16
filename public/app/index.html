@@ -4,15 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="../script/htmx.1.9.11.min.js"></script>
-    <link rel="stylesheet" href="../css/pico.2.0.6.lime.min.css" />
-    <link rel="stylesheet" href="../css/style.css">
-    <title>
-        caipi.ai - Dashboard
-    </title>
+    <title>caipi.ai - Dashboard</title>
+    <link rel="stylesheet" href="/css/pico.2.0.6.lime.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/script/htmx.1.9.11.min.js"></script>
 </head>
 
 <body>
+    <header class="container-fluid" style="box-shadow: var(--pico-box-shadow);padding: 0 7px 0 7px">
+        <nav>
+            <ul>
+                <li><img src="/img/caipi.svg" style="width: 36px"></li>
+                <li><strong>caipi.ai</strong></li>
+            </ul>
+            <ul>
+                <li><a class="contrast" href="/logout">Log Out</a></li>
+            </ul>
+    </header>
     <main hx-get="/api/app" hx-trigger="load" hx-swap="outerHTML">
         <div aria-busy="true"></div>
     </main>

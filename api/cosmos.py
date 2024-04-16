@@ -49,12 +49,6 @@ class Document(BaseModel):
             cls.container = db.get_container_client(cls.__name__)
         return cls.container
 
-    # def update(self, data: dict[str, object] | "Document") -> "Document":
-    #     update_dict = self.model_dump() if isinstance(data, Document) else data
-    #     new_dict = deep_update(self.model_dump(), update_dict)
-    #     updated_doc = self.__class__(**new_dict)
-    #     return updated_doc.save()
-
     def save(self) -> "Document":
         container = self.get_container()
         item = container.upsert_item(json.loads(self.model_dump_json()))
@@ -69,10 +63,10 @@ class Document(BaseModel):
         return cls(**item)
 
     @classmethod
-    def find(cls: Type[T], query: str, n=1000) -> list[T]:
+    def find(cls: Type[T], query: str, n=1000, pk: str | None = None) -> list[T]:
         container = cls.get_container()
         full_query = f"SELECT * FROM c WHERE c.{query}"
-        results = container.query_items(full_query, max_item_count=n)
+        results = container.query_items(full_query, max_item_count=n, partition_key=pk)
         return [cls(**item) for item in results]
 
     def delete(self):
