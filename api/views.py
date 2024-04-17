@@ -2,13 +2,13 @@ from htpy import body, header, main, footer, section, nav, details
 from htpy import article, dialog, button, ul, li, div, img, summary
 from htpy import form, input, label, textarea, select, option, fieldset
 from htpy import h1, h2, h3, h4, h5, h6, p, br, strong, a, progress
-from htpy import table, thead, tbody, tr, th, td, hgroup, pre
+from htpy import table, thead, tbody, tr, th, td, hgroup, small
 
 from models import Invocations, Users, Projects
 
 
-def modal(open: bool = False):
-    return dialog("#modal", open=open)[
+def modal(proj: Projects | None = None):
+    return dialog("#modal", open=False)[
         article[
             header[
                 button(
@@ -21,19 +21,49 @@ def modal(open: bool = False):
                     p["Define a new endpoint to be used by the API"],
                 ],
             ],
-            form(hx_post="/api/projects", hx_target="body")[
+            form(hx_post="/api/projects", hx_target="main", hx_swap="outerHTML")[
                 div[
                     label[strong["Endpoint Name"]],
-                    input(name="name"),
+                    input(name="name", value=proj.name if proj else ""),
                     label[strong["Instructions"]],
-                    textarea(name="instructions"),
+                    textarea(
+                        name="instructions",
+                        value=proj.instructions if proj else "",
+                    ),
                 ],
                 section(".grid")[
                     payload_params(1, "Request"), payload_params(1, "Response")
                 ],
                 details[
                     summary(".outline.contrast", role="button")["Advanced Settings"],
-                    p["Some more options can go here."],
+                    div(".grid")[
+                        div[
+                            label["Model"],
+                            select(aria_label="Model")[
+                                option["GPT 3.5 1106"],
+                                option["GPT 4 0125"],
+                            ],
+                            label[
+                                input(type="checkbox", role="switch", disabled=True),
+                                "Collect Payload Data in Invocations (Plus)",
+                            ],
+                            label[
+                                input(type="checkbox", role="switch"),
+                                "Include HTTP Status Code in Response",
+                            ],
+                        ],
+                        div[
+                            label["Temperature"],
+                            input(
+                                type="range", value="0", min="0", max="1", step="0.1"
+                            ),
+                            label[
+                                input(type="checkbox", role="switch", disabled=True),
+                                "Validate Response Quality with AI ",
+                                strong[small["Pro"]],
+                            ],
+                        ],
+                    ],
                 ],
                 input(
                     ".contrast",
@@ -54,14 +84,14 @@ def param(prefix: str = "req", value: str = "", disabled: bool = True):
             option["Number"],
             option["Boolean"],
         ],
-        button(
-            ".contrast",
-            disabled=disabled,
-            type="button",
-            hx_get=f"/api/modal/remove/{prefix}",
-            hx_target="closest fieldset",
-            hx_swap="outerHTML",
-        )["-"],
+        # button(
+        #     ".contrast",
+        #     disabled=disabled,
+        #     type="button",
+        #     hx_get=f"/api/modal/remove/{prefix}",
+        #     hx_target="closest fieldset",
+        #     hx_swap="outerHTML",
+        # )["-"],
     ]
 
 

@@ -1,7 +1,7 @@
 from typing import ClassVar
 from pydantic import Field, BaseModel, create_model
 from cosmos import Document, generate_key
-from azure.functions._thirdparty.werkzeug.datastructures import ImmutableMultiDict
+from azure.functions._thirdparty.werkzeug.datastructures import MultiDict
 
 l2p = {
     "Text": str,
@@ -64,6 +64,9 @@ class Projects(Document):
     response: dict[str, list]
     endpoint: str = Field(default_factory=generate_key)
     model: str = "gpt-35-1106"
+    temperature: float = 0.0
+    collect_payload: bool = False
+    ai_validation: bool = False
     invocations: int = 0
     chars: int = 0
     latency: float = 0.0
@@ -73,7 +76,7 @@ class Projects(Document):
     pk_field: ClassVar[str] = "user"
 
     @classmethod
-    def from_form(cls, form: ImmutableMultiDict, user: Users):
+    def from_form(cls, form: MultiDict, user: Users):
         assert "name" in form
         assert "instructions" in form
         form_di = {k: form.getlist(k) for k in form}
@@ -85,10 +88,12 @@ class Projects(Document):
             request={
                 form_di["req_name"][i]: [form_di["req_dtype"][i], None]
                 for i in range(len(form_di["req_name"]))
+                if form_di["req_name"][i] != ""
             },
             response={
                 form_di["res_name"][i]: [form_di["res_dtype"][i], None]
                 for i in range(len(form_di["res_name"]))
+                if form_di["res_name"][i] != ""
             },
         )
 

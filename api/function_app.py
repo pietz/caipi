@@ -9,10 +9,10 @@ from pydantic import BaseModel
 from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
 from utils import authenticate
-from views import dashboard, modal, param, project_page
+from views import dashboard, param, project_page
 from ai import ai_function
 
-logging.getLogger("azure.cosmos").setLevel(logging.ERROR)
+logging.getLogger("azure").setLevel(logging.WARNING)
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
