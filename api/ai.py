@@ -13,8 +13,16 @@ marvin.settings.openai.chat.completions.model = os.environ[
     "MARVIN_CHAT_COMPLETIONS_MODEL"
 ]
 
+model2credits = {
+    # number of chars per credit per model
+    "gpt-35-turbo": 500,
+    "gpt-4": 50,
+}
 
-async def ai_function(instructions: str, inputs: BaseModel, output_type: Any):
+
+async def ai_function(
+    instructions: str, inputs: BaseModel, output_type: Any, model: str
+):
     return await _generate_typed_llm_response_with_tool(
         prompt_template=FUNCTION_PROMPT,
         prompt_kwargs=dict(
@@ -22,5 +30,6 @@ async def ai_function(instructions: str, inputs: BaseModel, output_type: Any):
             bound_parameters=inputs.model_dump(),
             return_value=str(output_type),
         ),
+        model_kwargs={"model": model},
         type_=output_type,
     )

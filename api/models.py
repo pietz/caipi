@@ -1,5 +1,6 @@
 from typing import ClassVar
-from pydantic import Field, BaseModel, create_model
+from datetime import datetime
+from pydantic import Field, BaseModel, create_model, ConfigDict
 from cosmos import Document, generate_key
 from azure.functions._thirdparty.werkzeug.datastructures import MultiDict
 
@@ -15,6 +16,7 @@ l2p = {
 
 
 def payload_model(data) -> type[BaseModel]:
+    # Maps parameter names to a tuple of (dtype, default value)
     attributes = {k: (l2p[v[0]], v[1]) for k, v in data.items()}
     return create_model("Payload", **attributes)
 
@@ -26,7 +28,8 @@ class Users(Document):
     email: str | None = None
     username: str | None = None
     invocations: int = 0
-    chars: int = 0
+    credits_avail: int = 1000
+    credits_used: int = 0
     latency: float = 0.0
     success: float = 1.0
 
@@ -48,10 +51,12 @@ class Users(Document):
         if len(invocations) == self.invocations:
             return  # No new entries since last time
 
-        self.chars = sum([x.chars for x in invocations])
+        self.credits_used = sum([x.credits for x in invocations])
         self.invocations = len(invocations)
-        self.latency = sum([x.latency for x in invocations]) / self.invocations
-        self.success = len([x for x in invocations if x.success]) / self.invocations
+
+        if self.invocations > 0:
+            self.latency = sum([x.latency for x in invocations]) / self.invocations
+            self.success = len([x for x in invocations if x.success]) / self.invocations
 
         self.save()
 
@@ -63,12 +68,12 @@ class Projects(Document):
     request: dict[str, list]
     response: dict[str, list]
     endpoint: str = Field(default_factory=generate_key)
-    model: str = "gpt-35-1106"
+    model: str = "gpt-35-turbo"
     temperature: float = 0.0
     collect_payload: bool = False
     ai_validation: bool = False
     invocations: int = 0
-    chars: int = 0
+    credits: int = 0
     latency: float = 0.0
     success: float = 1.0
     active: bool = True
@@ -103,9 +108,11 @@ class Projects(Document):
             return  # No new entries since last time
 
         self.invocations = len(invs)
-        self.chars = sum([x.chars for x in invs])
-        self.latency = sum([x.latency for x in invs]) / self.invocations
-        self.success = len([x for x in invs if x.success]) / self.invocations
+        self.credits = sum([x.credits for x in invs])
+
+        if self.invocations > 0:
+            self.latency = sum([x.latency for x in invs]) / self.invocations
+            self.success = len([x for x in invs if x.success]) / self.invocations
 
         self.save()
 
@@ -123,8 +130,10 @@ class Endpoints(Document):
 class Invocations(Document):
     project: str  # TODO: Use longer ID for invocations
     user: str
-    chars: int
+    credits: int
     latency: float
     success: bool
+    model: str | None = None
     request: dict | None = None
     response: dict | None = None
+    timestamp: datetime | None = Field(default=None, alias="_ts")

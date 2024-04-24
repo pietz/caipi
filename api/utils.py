@@ -6,11 +6,6 @@ import azure.functions as func
 from models import Users
 
 
-def render_template(env, template_name, **kwargs):
-    template = env.get_template(template_name)
-    return template.render(**kwargs)
-
-
 def authenticate(req: func.HttpRequest):
     client_header = req.headers.get("X-MS-CLIENT-PRINCIPAL")
     if client_header:

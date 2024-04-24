@@ -21,18 +21,21 @@ def modal(proj: Projects | None = None):
                     p["Define a new endpoint to be used by the API"],
                 ],
             ],
-            form(hx_post="/api/projects", hx_target="main", hx_swap="outerHTML")[
+            form(
+                hx_post="/api/projects" if not proj else None,
+                hx_patch=f"/api/projects/{proj.id}" if proj else None,
+                hx_target="main",
+                hx_swap="outerHTML",
+            )[
                 div[
                     label[strong["Endpoint Name"]],
                     input(name="name", value=proj.name if proj else ""),
                     label[strong["Instructions"]],
-                    textarea(
-                        name="instructions",
-                        value=proj.instructions if proj else "",
-                    ),
+                    textarea(name="instructions")[proj.instructions if proj else ""],
                 ],
                 section(".grid")[
-                    payload_params(1, "Request"), payload_params(1, "Response")
+                    payload_params("Request", data=proj.request if proj else None),
+                    payload_params("Response", data=proj.response if proj else None),
                 ],
                 details[
                     summary(".outline.contrast", role="button")["Advanced Settings"],
@@ -40,8 +43,8 @@ def modal(proj: Projects | None = None):
                         div[
                             label["Model"],
                             select(aria_label="Model")[
-                                option["GPT 3.5 1106"],
-                                option["GPT 4 0125"],
+                                option["gpt-35-turbo"],
+                                option["gpt-4"],
                             ],
                             label[
                                 input(type="checkbox", role="switch", disabled=True),
@@ -68,7 +71,7 @@ def modal(proj: Projects | None = None):
                 input(
                     ".contrast",
                     type="submit",
-                    value="Create Endpoint",
+                    value="Create Endpoint" if proj is None else "Save Changes",
                     onclick="modal.close()",
                 ),
             ],
@@ -76,33 +79,28 @@ def modal(proj: Projects | None = None):
     ]
 
 
-def param(prefix: str = "req", value: str = "", disabled: bool = True):
+def param(prefix: str = "req", value: str = "", dtype: str = "str"):
+    j2p = {"Text": "str", "Number": "float", "Boolean": "bool"}
+    if dtype in j2p:
+        dtype = j2p[dtype]
+    opts = ["str", "int", "float", "bool"]
     return fieldset(role="group")[
         input(name=f"{prefix}_name", value=value, required=True),
-        select(name=f"{prefix}_dtype")[
-            option(selected=True)["Text"],
-            option["Number"],
-            option["Boolean"],
-        ],
-        # button(
-        #     ".contrast",
-        #     disabled=disabled,
-        #     type="button",
-        #     hx_get=f"/api/modal/remove/{prefix}",
-        #     hx_target="closest fieldset",
-        #     hx_swap="outerHTML",
-        # )["-"],
+        select(name=f"{prefix}_dtype")[(option(selected=x == dtype)[x] for x in opts)],
     ]
 
 
-def payload_params(n: int = 1, type: str = "Request"):
+def payload_params(type: str = "Request", data: dict | None = None):
     div_id = "#" + type.lower()
     abr = type[:3].lower()
+    if data is None:
+        form_el = param(abr, value="input" if abr == "req" else "output")
+    else:
+        form_el = (param(abr, value=k, dtype=v[0]) for k, v in data.items())
     return div[
         label[strong[type]],
-        div(div_id)[param(abr, value="input" if abr == "req" else "output")],
+        div(div_id)[form_el],
         fieldset(role="group")[
-            # button(".outline.secondary")["-"],
             button(
                 ".outline.secondary",
                 hx_get=f"/api/modal/add/{abr}",
@@ -122,7 +120,7 @@ def dashboard(user: Users, projects: list[Projects]):
         ],
         tiles(
             invocations=user.invocations,
-            chars=user.chars,
+            credits=user.credits_avail - user.credits_used,
             latency=user.latency,
             success=user.success,
         ),
@@ -140,27 +138,13 @@ def project_page(project: Projects, invocations: list[Invocations]):
         ],
         tiles(
             invocations=project.invocations,
-            chars=project.chars,
+            credits=project.credits,
             latency=project.latency,
             success=project.success,
         ),
         invocation_table(invocations),
-        modal(),
+        modal(project),
     ]
-
-
-# def navigation():
-#     return (
-#         header(".container-fluid", style="box-shadow: var(--pico-box-shadow)")[
-#             nav[
-#                 ul[
-#                     li[img(src="/img/caipi.svg", style="width: 36px")],
-#                     li[strong["caipi.ai"]],
-#                 ],
-#                 ul[li[a(".contrast", href="/logout")["Log out"]]],
-#             ],
-#         ],
-#     )
 
 
 def table_row(project: Projects):
@@ -177,7 +161,7 @@ def table_row(project: Projects):
         ],
         td["/" + project.endpoint],
         td[str(project.invocations)],
-        td[str(project.chars)],
+        td[str(project.credits)],
         td[str(round(project.latency, 1)) + "s"],
         td[str(int(project.success * 100)) + "%"],
     ]
@@ -205,8 +189,12 @@ def project_table(projects: list[Projects]):
 def invocation_row(invocation: Invocations):
     return tr[
         td[invocation.id],
-        td["xxx"],
-        td[str(invocation.chars)],
+        td[
+            str(invocation.timestamp.replace(tzinfo=None))
+            if invocation.timestamp
+            else "???"
+        ],
+        td[str(invocation.credits)],
         td[str(round(invocation.latency, 1)) + "s"],
         td[str(invocation.success)],
     ]
@@ -215,7 +203,7 @@ def invocation_row(invocation: Invocations):
 def invocation_table(invocations: list[Invocations]):
     cols = [
         "ID",
-        "TS",
+        "TS (UTC)",
         "Credits",
         "Latency",
         "Success",
@@ -230,10 +218,10 @@ def invocation_table(invocations: list[Invocations]):
     ]
 
 
-def tiles(invocations: int, chars: int, latency: float, success: float):
+def tiles(invocations: int, credits: int, latency: float, success: float):
     return section(".grid")[
         article[h6["Invocations"], h3[str(invocations)]],
-        article[h6["Credits"], h3[str(chars)]],
+        article[h6["Credits"], h3[str(credits)]],
         article[h6["Latency"], h3[str(round(latency, 1)) + "s"]],
         article[h6["Success"], h3[str(int(success * 100)) + "%"]],
     ]

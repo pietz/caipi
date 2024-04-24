@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import logging
 
 import azure.functions as func
@@ -10,7 +11,7 @@ from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
 from utils import authenticate
 from views import dashboard, param, project_page
-from ai import ai_function
+from ai import ai_function, model2credits
 
 logging.getLogger("azure").setLevel(logging.WARNING)
 
@@ -69,7 +70,7 @@ async def get_modal(req: func.HttpRequest) -> func.HttpResponse:
     type = req.route_params.get("type", "")
     abr = req.route_params.get("abr", "req")
     if type == "add":
-        return func.HttpResponse(str(param(abr, disabled=False)), status_code=200)
+        return func.HttpResponse(str(param(abr)), status_code=200)
     elif type == "remove":
         return func.HttpResponse("", status_code=207)
 
@@ -87,6 +88,22 @@ async def create_project(req: func.HttpRequest):
     endpoint.save()
     projects = Projects.find(f"user = '{user.id}'")
     return func.HttpResponse(str(dashboard(user, projects)), status_code=200)
+
+
+@app.route("projects/{project_id}", methods=["PATCH"])
+async def update_project(req: func.HttpRequest):
+    user = authenticate(req)
+    if not user:
+        return func.HttpResponse("Unauthorized", status_code=401)
+    if not req.form:
+        return func.HttpResponse("No form data received", status_code=400)
+    project_old = Projects.get(req.route_params["project_id"], user.id)
+    project_new = Projects.from_form(req.form, user)
+    project_new.id = project_old.id
+    project_new.endpoint = project_old.endpoint
+    invocations = Invocations.find(f"project = '{project_new.id}'", pk=user.id)
+    project_new.refresh(invocations)
+    return func.HttpResponse(str(project_page(project_new, invocations)), status_code=200)
 
 
 @app.route("projects/{id}", methods=["DELETE"])
@@ -112,17 +129,18 @@ async def invoke(req: func.HttpRequest):
         return func.HttpResponse("Request payload is invalid", status_code=422)
     Response = payload_model(project.response)
     start = time.time()
-    response: BaseModel = await ai_function(project.instructions, request, Response)
+    response: BaseModel = await ai_function(project.instructions, request, Response, project.model)
     latency = round(time.time() - start, 3)
     chars = (
         len(response.model_dump_json())
         + len(request.model_dump_json())
         + len(project.instructions)
     )
+    credits = math.ceil(chars / model2credits[project.model])
     inv = Invocations(
         project=project.id,
         user=project.user,
-        chars=chars,
+        credits=credits,
         latency=latency,
         success=True,
         request=request.model_dump(),
