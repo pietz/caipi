@@ -60,7 +60,7 @@ def invocation_chart(invocations: list[Invocations]) -> str:
     style = pygal.style.Style(
         background="transparent",
         plot_background="transparent",
-        colors=("#f2fdf3", "#122e38", "#f9fef9", "#e8f4ea", "#76ba24"),
+        colors=("#A9D80D", "#439C3A", "#122E38", "#DEEBE1"),
     )
 
     # Create Pygal Area chart

@@ -116,3 +116,4 @@ dist
 .pnp.*
 .python-version
 .DS_Store
+*.pyc
