@@ -5,3 +5,4 @@ marvin
 jinjax
 python-dotenv
 authlib
+pygal

@@ -14,7 +14,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from jinjax.catalog import Catalog
-from fastapi.templating import Jinja2Templates
 
 from models import Users, Projects, Invocations, Endpoints, payload_model
 from cosmos import CosmosConnection
@@ -32,8 +31,6 @@ logger = logging.getLogger(__name__)
 catalog = Catalog()
 catalog.add_folder("components")
 catalog.add_folder("pages")
-# catalog.add_folder("templates")
-templates = Jinja2Templates(directory=".")
 
 app = FastAPI()
 app.state.session_store = {}
@@ -236,29 +233,3 @@ async def invoke(id: str, req: Request):
     user.credits_used += credits
     user.save()
     return JSONResponse(response.model_dump(), status_code=200)
-
-
-@app.get("/test", response_class=HTMLResponse)
-async def test_page(request: Request):
-    return templates.TemplateResponse(
-        "test.html", {"request": request, "content": "This is the original content."}
-    )
-
-
-@app.get("/update", response_class=HTMLResponse)
-async def update_page(request: Request):
-    return templates.TemplateResponse(
-        "test.html", {"request": request, "content": "This is the new text."}
-    )
-
-
-# @app.get("/test", response_class=HTMLResponse)
-# async def landingss_page():
-#     content = "<p>This is the original content.</p>"
-#     return catalog.render("test", content=content)
-
-
-# @app.get("/update", response_class=HTMLResponse)
-# async def landingdd_page():
-#     content = "<p>This is the new text.</p>"
-#     return catalog.render("test", content=content)
