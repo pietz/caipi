@@ -6,20 +6,16 @@ import logging
 
 import pygal
 from dotenv import load_dotenv
-from azure.cosmos import exceptions
-from pydantic import BaseModel, create_model
 from fastapi import Depends, FastAPI, Request, Response, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
 from jinjax.catalog import Catalog
 
-from models import Users, Projects, Invocations, Endpoints, payload_model
+from models import Users, Projects, Invocations, Endpoints
 from cosmos import CosmosConnection
 from ai import ai_function, model2credits
 
-# from llm import llm_openai
 from auth import auth_router, authenticate, get_user, get_project
 
 load_dotenv()
@@ -66,7 +62,7 @@ def invocation_chart(invocations: list[Invocations]) -> str:
     # Create Pygal Area chart
     area_chart = pygal.StackedLine(
         fill=True,
-        height=250,
+        height=200,
         width=960,
         interpolate="cubic",
         show_legend=False,
@@ -146,7 +142,7 @@ async def create_project(
     endpoint = Endpoints.from_project(project, user)
     endpoint.save()
     projects = Projects.find(f"user = '{user.id}'")
-    return catalog.render("DashboardMain", user=user, projects=projects)
+    return RedirectResponse("/app", 303)
 
 
 @app.get("/app/projects/{id}", response_class=HTMLResponse)
@@ -171,6 +167,7 @@ async def update_project(id: str, project_new: Projects = Depends(get_project)):
 async def delete_project(id: str, user_id: str = Depends(authenticate)):
     project = Projects.get(id, user_id)
     project.delete()
+    return RedirectResponse("/app", 303)
 
 
 @app.post("/app/invoke/{id}", response_class=HTMLResponse)

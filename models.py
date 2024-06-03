@@ -80,6 +80,7 @@ class Projects(Document):
     temperature: float = 0.0
     collect_payload: bool = False
     ai_validation: bool = False
+    include_status_code: bool = False
     invocations: int = 0
     credits: int = 0
     latency: float = 0.0

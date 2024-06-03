@@ -6,7 +6,10 @@
         </a>
     </td>
     <td>
-        https://caipi.ai/api/{{ project.endpoint }}
+        {# https://caipi.ai/api/{{ project.endpoint }} #}
+        <a href="#" onclick="copy(event, 'https://caipi.ai/api/{{ project.endpoint }}')">
+            <Icon name="copy" size="20" />
+        </a>
     </td>
     <td>{{ project.invocations }}</td>
     <td>{{ project.credits }}</td>

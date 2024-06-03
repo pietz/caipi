@@ -9,7 +9,7 @@
                 <p>Define a new endpoint to be used by the API</p>
             </hgroup>
         </header>
-        <form {{ action }} hx-target="main" hx-swap="outerHTML">
+        <form {{ action }} hx-target="body" hx-push-url="true">
             <div>
                 <label><strong>Endpoint Name</strong></label>
                 <input name="name" value="{% if project %}{{ project.name }}{% endif %}">

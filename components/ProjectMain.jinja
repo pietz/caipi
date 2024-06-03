@@ -1,13 +1,17 @@
 {#def project, invocations #}
 
 <main class="container">
-    <br>
     <section style="display:flex;justify-content:space-between">
-        <h1>{{ project.name }}</h1>
-        <div>
-            <button class="contrast" onclick="modal.showModal()" style="display:inline-flex;align-items:center">
+        <h1 style="margin:0">{{ project.name }}</h1>
+        <div style="display:inline-flex;align-items:center">
+            <button class="contrast" onclick="modal.showModal()"
+                style="display:inline-flex;align-items:center;margin-right:5px">
                 <Icon name="settings" size="15" />
-                <span style="margin-left: 5px">Edit Function</span>
+                <span style="margin-left: 6px">Edit Function</span>
+            </button>
+            <button hx-delete="/app/projects/{{ project.id }}" hx-target="body" hx-push-url="true"
+                hx-confirm="Are you sure you want to delete the project?">
+                <Icon name="trash-2" size="15" />
             </button>
         </div>
     </section>
