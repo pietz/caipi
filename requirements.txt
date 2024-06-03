@@ -1,0 +1,7 @@
+azure-cosmos
+fastapi
+pydantic
+marvin
+jinjax
+python-dotenv
+authlib

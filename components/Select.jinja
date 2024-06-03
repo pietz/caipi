@@ -1,0 +1,8 @@
+{#def name, options=["One", "Two", "Three"], required=False #}
+
+<select name="{{ name }}" aria-label="Select" {% if required %}required{% endif %}>
+    <option selected>{{ options[0] }}</option>
+    {% for option in options[1:] %}
+    <option>{{ option }}</option>
+    {% endfor %}
+</select>

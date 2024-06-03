@@ -1,0 +1,15 @@
+{#def title, icon="" #}
+
+<div style="display: flex; align-items: flex-start; gap: 1rem;padding:6px">
+    <div>
+        <Icon name={icon} size="20" />
+    </div>
+    <div>
+        <hgroup>
+            <h3 style="margin-bottom:12px">{{ title }}</h3>
+            <p>
+                {{ content }}
+            </p>
+        </hgroup>
+    </div>
+</div>

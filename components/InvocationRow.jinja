@@ -1,0 +1,14 @@
+{#def invocation #}
+<tr>
+    <td>{{ invocation.id }}</td>
+    <td>
+        {% if invocation.timestamp %}
+        {{ invocation.timestamp.replace(tzinfo=None) }}
+        {% else %}
+        ???
+        {% endif %}
+    </td>
+    <td>{{ invocation.credits }}</td>
+    <td>{{ invocation.latency | round(1) }}s</td>
+    <td>{{ invocation.success }}</td>
+</tr>

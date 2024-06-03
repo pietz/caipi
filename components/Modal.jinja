@@ -1,0 +1,34 @@
+{#def project=False #}
+{% set action = "hx-patch=/app/projects/" + project.id if project else "hx-post=/app/projects" %}
+<dialog id="modal">
+    <article style="max-width: 600px">
+        <header>
+            <button aria-label="Close" rel="prev" onclick="modal.close()"></button>
+            <hgroup>
+                <h4 style="padding:6px 0">Create a new endpoint</h4>
+                <p>Define a new endpoint to be used by the API</p>
+            </hgroup>
+        </header>
+        <form {{ action }} hx-target="main" hx-swap="outerHTML">
+            <div>
+                <label><strong>Endpoint Name</strong></label>
+                <input name="name" value="{% if project %}{{ project.name }}{% endif %}">
+                <label><strong>Instructions</strong></label>
+                <textarea name="instructions">{% if project %}{{ project.instructions }}{% endif %}</textarea>
+            </div>
+            <section class="grid">
+                {% if project %}
+                <PayloadParams type="Request" data={project.request} />
+                <PayloadParams type="Response" data={project.response} />
+                {% else %}
+                <PayloadParams type="Request" />
+                <PayloadParams type="Response" />
+                {% endif %}
+            </section>
+            <AdvancedSettings />
+            <input class="contrast" type="submit"
+                value="{% if project %}Update Endpoint{% else %}Create Endpoint{% endif %}" onclick="modal.close()"
+                style="margin-bottom: 0px">
+        </form>
+    </article>
+</dialog>

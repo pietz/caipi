@@ -1,0 +1,57 @@
+{#def invocations #}
+<section id="table">
+    <article>
+        <div style="display:flex;justify-content:space-between;font-weight:bold">
+            <span style="width:23%">Invocation ID</span>
+            <span style="width:29%">Timestamp</span>
+            <span style="width:16%">Credits</span>
+            <span style="width:16%">Latency</span>
+            <span style="width:16%">Success</span>
+        </div>
+        {% for invocation in invocations %}
+        <hr />
+        <details style="margin:0">
+            <summary style="display:flex;justify-content:space-between">
+                <span style="width:23%">{{ invocation.id }}</span>
+                <span style="width:29%">{{ invocation.timestamp.replace(tzinfo=None) }}</span>
+                <span style="width:16%">{{ invocation.credits }}</span>
+                <span style="width:16%">{{ invocation.latency }}s</span>
+                <span style="width:16%">{{ invocation.success }}</span>
+            </summary>
+            {% if invocation.request %}
+            <div class="grid">
+                <div>
+                    <h5>Request</h5>
+                    <ul>
+                        {% for key, value in invocation.request.items() %}
+                        <li><strong>{{ key }}:</strong> {{ value | truncate(500, True, '...') }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div>
+                    <h5>Response</h5>
+                    <ul>
+                        {% for key, value in invocation.response.items() %}
+                        <li><strong>{{ key }}:</strong> {{ value | truncate(500, True, '...') }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% else%}
+            <p>Enable Payload logging to view the details.</p>
+            {% endif %}
+        </details>
+        {# <td>{{ invocation.id }}</td>
+        <td>
+            {% if invocation.timestamp %}
+            {{ invocation.timestamp.replace(tzinfo=None) }}
+            {% else %}
+            ???
+            {% endif %}
+        </td>
+        <td>{{ invocation.credits }}</td>
+        <td>{{ invocation.latency | round(1) }}s</td>
+        <td>{{ invocation.success }}</td> #}
+        {% endfor %}
+    </article>
+</section>

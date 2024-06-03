@@ -1,0 +1,33 @@
+{#def #}
+<details>
+    <summary class="outline contrast" role="button">Advanced Settings</summary>
+    <div class="grid">
+        <div>
+            <label>Model</label>
+            <select aria-label="Model">
+                <option>gpt-35-turbo</option>
+                <option>gpt-4</option>
+            </select>
+            <label>Temperature</label>
+            <input type="range" value="0" min="0" max="1" step="0.1">
+        </div>
+        <div>
+            <div style="height: 36px">
+                <label>
+                    <input type="checkbox" role="switch" disabled>
+                    Collect Payload Data in Invocations
+                    <strong><small>Pro</small></strong>
+                </label>
+            </div>
+            <label>
+                <input type="checkbox" role="switch">
+                Include HTTP Status Code in Response
+            </label>
+            <label>
+                <input type="checkbox" role="switch" disabled>
+                Validate Response Quality with AI
+                <strong><small>Pro</small></strong>
+            </label>
+        </div>
+    </div>
+</details>

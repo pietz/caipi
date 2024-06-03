@@ -1,0 +1,23 @@
+{#def type, data=False #}
+{% set div_id = type.lower() %}
+{% set selector = "#" + div_id%}
+{% set abr = type[:3].lower() %}
+
+<div>
+    <div style="display:flex;justify-content:space-between">
+        <label><strong>{{ type }}</strong></label>
+        <a class="contrast" href="/app/modal/add/{{ abr }}" hx-get="/app/modal/add/{{ abr }}" hx-target="{{ selector }}"
+            hx-swap="beforeend">
+            <Icon name="circle-plus" size="16" />
+        </a>
+    </div>
+    <div id="{{ div_id }}">
+        {% if data %}
+        {% for k, v in data.items() %}
+        <Param prefix={abr} value={k} dtype={v[0]} />
+        {% endfor %}
+        {% else %}
+        <Param prefix={abr} value={"input" if abr=="req" else "output" } />
+        {% endif %}
+    </div>
+</div>

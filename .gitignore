@@ -115,3 +115,4 @@ dist
 .yarn/install-state.gz
 .pnp.*
 .python-version
+.DS_Store

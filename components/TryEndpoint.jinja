@@ -1,0 +1,20 @@
+{#def project #}
+
+<article>
+    <header>
+        <h4 style="padding:0;margin:0">Request</h4>
+    </header>
+    <form hx-post="/api/{{ project.endpoint }}" hx-target="#response">
+        {% for k, v in project.request.items() %}
+        <label for="{{ k }}"><strong>{{ k }}</strong></label>
+        {% if v[0] == "int" or v[0] == "float" %}
+        <input type="number" name="{{ k }}" aria-label="{{ k }}" />
+        {% else %}
+        <input type="text" name="{{ k }}" aria-label="{{ k }}" />
+        {% endif %}
+        {% endfor %}
+        <input type="submit" value="Send" style="margin:0" />
+    </form>
+    <div id="response">
+    </div>
+</article>

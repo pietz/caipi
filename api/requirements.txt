@@ -1,4 +1,0 @@
-azure-functions
-azure-cosmos
-marvin
-htpy==24.3.17

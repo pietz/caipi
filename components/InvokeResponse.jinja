@@ -1,0 +1,8 @@
+{#def payload #}
+
+<div id="response" style="display:block; text-align:left; width:100%;">
+    {% for k, v in payload.items() %}
+    <label for="{{ k }}"><strong>{{ k }}</strong></label>
+    <input type="text" name="{{ k }}" aria-label="{{ k }}" value="{{ v }}" style="width:100%;" />
+    {% endfor %}
+</div>

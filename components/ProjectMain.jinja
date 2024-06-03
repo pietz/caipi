@@ -1,0 +1,69 @@
+{#def project, invocations #}
+
+<main class="container">
+    <br>
+    <section style="display:flex;justify-content:space-between">
+        <h1>{{ project.name }}</h1>
+        <div>
+            <button class="contrast" onclick="modal.showModal()" style="display:inline-flex;align-items:center">
+                <Icon name="settings" size="15" />
+                <span style="margin-left: 5px">Edit Function</span>
+            </button>
+        </div>
+    </section>
+    <section class="grid">
+        <Tile title="Credits" value={project.credits} icon="ticket" />
+        <Tile title="Invocations" value={project.invocations} icon="sigma" />
+        {% set latency = ((project.latency * 1000) | int | string) + "ms" %}
+        <Tile title="Latency" value={latency} icon="timer" />
+        {% set success = ((project.success * 100) | int | string) + "%" %}
+        <Tile title="Success" value={success} icon="check" />
+    </section>
+    <section class="grid">
+        <div class="span-2" style="display:flex">
+            <article style="flex:1">
+                <form hx-post="/app/invoke/{{ project.endpoint }}" hx-target="#response" hx-swap="outerHTML">
+                    {% for k, v in project.request.items() %}
+                    <label for="{{ k }}"><strong>{{ k }}</strong></label>
+                    {% if v[0] == "int" or v[0] == "float" %}
+                    <input type="number" name="{{ k }}" aria-label="{{ k }}" />
+                    {% else %}
+                    <input type="text" name="{{ k }}" aria-label="{{ k }}" />
+                    {% endif %}
+                    {% endfor %}
+                    <input class="contrast outline" type="submit" value="Send" style="margin:0" />
+                </form>
+            </article>
+        </div>
+        <div style="display:flex;justify-content:center;align-items:center">
+            {# <div style="flex:1"> #}
+                <Icon name="circle-arrow-right" size="32" />
+                {#
+            </div> #}
+        </div>
+        {# <div style="display:flex">
+            <article style="flex:1">
+                <header>
+                    <h4 style="padding:0;margin:0">Instructions</h4>
+                </header>
+                <p>{{ project.instructions }}</p>
+            </article>
+        </div> #}
+        <div class="span-2" style="display:flex;">
+            <article style="flex:1; display:flex; align-items:center; justify-content:center;">
+                <div id="response"
+                    style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
+                    <div style="margin-bottom:24px;">
+                        <Icon name="hourglass" size="24" />
+                    </div>
+                    <p style="text-align:center;">Send a request and view the response here</p>
+                </div>
+            </article>
+        </div>
+
+    </section>
+    {#
+    <Invocations invocations={invocations} /> #}
+    <Invocations2 invocations={invocations} />
+    <Modal project={project} />
+</main>
