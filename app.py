@@ -1,21 +1,19 @@
 import os
-import time
-import math
 import json
 import logging
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Request, Response, HTTPException
+from fastapi import Depends, FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from jinjax.catalog import Catalog
 
+from api import api_router, invoke
+from auth import auth_router, authenticate, get_user, get_project
 from models import Users, Projects, Invocations, Endpoints
 from cosmos import CosmosConnection
-from ai import ai_function, model2credits
 from viz import invocation_chart
-from auth import auth_router, authenticate, get_user, get_project
 
 load_dotenv()
 
@@ -30,6 +28,7 @@ catalog.add_folder("pages")
 app = FastAPI()
 app.state.session_store = {}
 app.include_router(auth_router)
+app.include_router(api_router)
 app.add_middleware(SessionMiddleware, secret_key="your-secret-key")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -130,57 +129,3 @@ async def invoke_endpoint(id: str, req: Request, user_id: str = Depends(authenti
     return catalog.render(
         "InvokeResponse", payload=json.loads(res_data.body.decode("utf-8"))
     )
-
-
-@app.post("/api/{id}", response_class=JSONResponse)
-async def invoke(id: str, req: Request):
-    try:
-        endpoint = Endpoints.get(id)
-    except:
-        return Response("Endpoint doesn't exist", 404)
-    # if endpoint.key:
-    #     key = req.path_params.get("key") or req.headers.get("x-api-key") or req.auth
-    #     if endpoint.key != req.path_params.
-    user = Users.get(endpoint.user)
-    if user.credits_used >= user.credits_avail:
-        return Response("Out of Credits", 402)
-    project = Projects.get(endpoint.project, endpoint.user)
-    print(req.headers.get("Content-type"))
-    if req.headers.get("Content-Type") == "application/json":
-        data = await req.json()
-    elif req.headers.get("Content-Type") in [
-        "multipart/form-data",
-        "application/x-www-form-urlencoded",
-    ]:
-        data = dict(await req.form())
-    else:
-        return Response("Invalid Content-Type", 422)
-    try:
-        request = project.request_model(**data)
-    except Exception as e:
-        return Response("Payload is invalid", 422)
-    start = time.time()
-    response = await ai_function(
-        project.instructions, request, project.response_model, project.model
-    )
-    latency = round(time.time() - start, 3)
-    chars = (
-        len(response.model_dump_json())
-        + len(request.model_dump_json())
-        + len(project.instructions)
-    )
-    credits = math.ceil(chars / model2credits[project.model])
-    inv = Invocations(
-        project=project.id,
-        user=project.user,
-        credits=credits,
-        latency=latency,
-        success=True,
-        model=project.model,
-        request=request.model_dump() if project.collect_payload else None,
-        response=response.model_dump() if project.collect_payload else None,
-    )
-    inv.save()
-    user.credits_used += credits
-    user.save()
-    return JSONResponse(response.model_dump(), 200)
