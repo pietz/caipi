@@ -1,0 +1,31 @@
+{#def project #}
+
+<section class="grid">
+    <div class="span-2" style="display:flex">
+        <article style="flex:1">
+            <form id="invokeForm">
+                {% for k, v in project.request.items() %}
+                <label for="{{ k }}"><strong>{{ k }}</strong></label>
+                {% if v[0] == "int" or v[0] == "float" %}
+                <input type="number" name="{{ k }}" aria-label="{{ k }}" />
+                {% else %}
+                <input type="text" name="{{ k }}" aria-label="{{ k }}" />
+                {% endif %}
+                {% endfor %}
+            </form>
+        </article>
+    </div>
+    <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:21px">
+        {# <span id="spinner" aria-busy="true" class="htmx-indicator"></span> #}
+        <button class="contrast" hx-post="/app/invoke/{{ project.endpoint }}" hx-target="#response" hx-swap="outerHTML"
+            hx-indicator="this" hx-include="#invokeForm">
+            <Icon name="circle-arrow-right" size="24" />
+            <Icon name="loader-pinwheel" size="24" />
+        </button>
+    </div>
+    <div class="span-2" style="display:flex;">
+        <article style="flex:1; display:flex; align-items:center; justify-content:center;">
+            <InvokeResponse payload={project.response} disabled={True} />
+        </article>
+    </div>
+</section>

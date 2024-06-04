@@ -4,7 +4,6 @@ import math
 import json
 import logging
 
-import pygal
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +14,7 @@ from jinjax.catalog import Catalog
 from models import Users, Projects, Invocations, Endpoints
 from cosmos import CosmosConnection
 from ai import ai_function, model2credits
-
+from viz import invocation_chart
 from auth import auth_router, authenticate, get_user, get_project
 
 load_dotenv()
@@ -39,49 +38,6 @@ cosmos = CosmosConnection.from_connection_string(
 )
 
 
-def invocation_chart(invocations: list[Invocations]) -> str:
-    # Process data for Pygal
-    invocation_counts = {}
-    for invocation in invocations:
-        project = invocation.project
-        date = invocation.timestamp.strftime("%Y-%m-%d")
-
-        if project not in invocation_counts:
-            invocation_counts[project] = {}
-        if date not in invocation_counts[project]:
-            invocation_counts[project][date] = 0
-
-        invocation_counts[project][date] += 1
-
-    style = pygal.style.Style(
-        background="transparent",
-        plot_background="transparent",
-        colors=("#000000", "#A9D80D", "#439C3A", "#122E38", "#DEEBE1"),
-    )
-
-    # Create Pygal Area chart
-    area_chart = pygal.StackedLine(
-        fill=True,
-        height=200,
-        width=960,
-        interpolate="cubic",
-        show_legend=False,
-        x_label_rotation=0,
-        show_minor_y_labels=False,
-        style=style,
-    )
-    area_chart.x_labels = sorted(
-        {date for project_data in invocation_counts.values() for date in project_data}
-    )
-
-    for project, counts in invocation_counts.items():
-        values = [counts.get(date, 0) for date in area_chart.x_labels]
-        area_chart.add(project, values)
-
-    # Render the chart to an SVG string
-    return area_chart.render(is_unicode=True)
-
-
 @app.exception_handler(HTTPException)
 async def unauthorized_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code == 401:
@@ -92,13 +48,13 @@ async def unauthorized_exception_handler(request: Request, exc: HTTPException):
     )
 
 
-@app.middleware("http")
-async def log_execution_time(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = int((time.time() - start_time) * 1000)
-    logger.info(f"{request.url.path} executed in {process_time}ms")
-    return response
+# @app.middleware("http")
+# async def log_execution_time(request: Request, call_next):
+#     start_time = time.time()
+#     response = await call_next(request)
+#     process_time = int((time.time() - start_time) * 1000)
+#     logger.info(f"{request.url.path} executed in {process_time}ms")
+#     return response
 
 
 @app.get("/health")
@@ -108,7 +64,7 @@ async def health():
 
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
-    return catalog.render("Landing")
+    return catalog.render("Home")
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -126,14 +82,6 @@ async def dashboard(user: Users = Depends(get_user)):
     return catalog.render("Dashboard", user=user, projects=projects, chart=chart)
 
 
-@app.get("/app/modal/{type}/{abr}", response_class=HTMLResponse)
-async def get_modal2(type: str, abr: str):
-    if type == "add":
-        return catalog.render("Param", prefix=abr)
-    elif type == "remove":
-        return ""
-
-
 @app.post("/app/projects", response_class=HTMLResponse)
 async def create_project(
     user: Users = Depends(get_user), project: Projects = Depends(get_project)
@@ -141,7 +89,6 @@ async def create_project(
     project.save()
     endpoint = Endpoints.from_project(project, user)
     endpoint.save()
-    projects = Projects.find(f"user = '{user.id}'")
     return RedirectResponse("/app", 303)
 
 
@@ -158,9 +105,8 @@ async def update_project(id: str, project_new: Projects = Depends(get_project)):
     project_old = Projects.get(id, project_new.user)
     project_new.id = project_old.id
     project_new.endpoint = project_old.endpoint
-    invocations = Invocations.find(f"project = '{project_new.id}'", pk=project_new.user)
-    project_new.refresh(invocations)
-    return catalog.render("ProjectMain", project=project_new, invocations=invocations)
+    project_new.save()
+    return RedirectResponse(f"/app/projects/{id}", 303)
 
 
 @app.delete("/app/projects/{id}", response_class=HTMLResponse)
@@ -168,6 +114,14 @@ async def delete_project(id: str, user_id: str = Depends(authenticate)):
     project = Projects.get(id, user_id)
     project.delete()
     return RedirectResponse("/app", 303)
+
+
+@app.get("/app/modal/{type}/{abr}", response_class=HTMLResponse)
+async def get_modal2(type: str, abr: str):
+    if type == "add":
+        return catalog.render("Param", prefix=abr)
+    elif type == "remove":
+        return ""
 
 
 @app.post("/app/invoke/{id}", response_class=HTMLResponse)
@@ -229,4 +183,4 @@ async def invoke(id: str, req: Request):
     inv.save()
     user.credits_used += credits
     user.save()
-    return JSONResponse(response.model_dump(), status_code=200)
+    return JSONResponse(response.model_dump(), 200)

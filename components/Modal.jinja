@@ -1,4 +1,5 @@
 {#def project=False #}
+
 {% set action = "hx-patch=/app/projects/" + project.id if project else "hx-post=/app/projects" %}
 <dialog id="modal">
     <article style="max-width: 600px">
@@ -16,16 +17,16 @@
                 <label><strong>Instructions</strong></label>
                 <textarea name="instructions">{% if project %}{{ project.instructions }}{% endif %}</textarea>
             </div>
-            <section class="grid">
+            <section class="grid" style="margin-bottom:11px">
                 {% if project %}
-                <PayloadParams type="Request" data={project.request} />
-                <PayloadParams type="Response" data={project.response} />
+                <ParamGroup type="Request" data={project.request} />
+                <ParamGroup type="Response" data={project.response} />
                 {% else %}
-                <PayloadParams type="Request" />
-                <PayloadParams type="Response" />
+                <ParamGroup type="Request" />
+                <ParamGroup type="Response" />
                 {% endif %}
             </section>
-            <AdvancedSettings />
+            <Settings />
             <input class="contrast" type="submit"
                 value="{% if project %}Update Endpoint{% else %}Create Endpoint{% endif %}" onclick="modal.close()"
                 style="margin-bottom: 0px">

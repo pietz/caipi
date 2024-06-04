@@ -1,5 +1,36 @@
-{#def user, projects, chart #}
+{#def user, projects, chart=None #}
+
 <Base title="caipi.ai - Dashboard">
 <Navigation />
-<DashboardMain user={user} projects={projects} chart={chart} />
+<main class="container">
+    <section style="display:flex;justify-content:space-between">
+        <h1 style="display:inline-flex;align-items:center;margin:0">
+            Dashboard
+        </h1>
+        <div>
+            <button class="contrast" onclick="modal.showModal()" style="display:inline-flex;align-items:center">
+                <Icon name="plus" size="15" />
+                <span style="margin-left: 5px">Create Function</span>
+            </button>
+        </div>
+    </section>
+    <section class="grid">
+        <Tile title="Credits" value={user.credits_avail - user.credits_used} capacity={user.credits_avail}
+            icon="ticket" />
+        <Tile title="Invocations" value={user.invocations} icon="sigma" />
+        {% set latency = ((user.latency * 1000) | int | string) + "ms" %}
+        <Tile title="Latency" value={latency} icon="timer" />
+        {% set success = ((user.success * 100) | int | string) + "%" %}
+        <Tile title="Success" value={success} icon="check" />
+    </section>
+    {% if chart %}
+    <section class="grid">
+        <article style="padding:0">
+            {{ chart }}
+        </article>
+    </section>
+    {% endif %}
+    <Table projects={projects} />
+    <Modal />
+</main>
 </Base>

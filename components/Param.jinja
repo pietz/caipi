@@ -1,4 +1,5 @@
 {#def prefix, value="", dtype="str" #}
+
 {% set j2p = {"Text": "str", "Number": "float", "Boolean": "bool"} %}
 {% set dtype = j2p[dtype] if dtype in j2p else dtype %}
 {% set opts = ["str", "int", "float", "bool", "list"] %}

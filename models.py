@@ -80,7 +80,6 @@ class Projects(Document):
     temperature: float = 0.0
     collect_payload: bool = False
     ai_validation: bool = False
-    include_status_code: bool = False
     invocations: int = 0
     credits: int = 0
     latency: float = 0.0
@@ -97,27 +96,6 @@ class Projects(Document):
     def response_model(self) -> type[BaseModel]:
         return payload_model("PayloadResponse", self.response)
 
-    @classmethod
-    def from_form(cls, form, user: Users):
-        assert "name" in form
-        assert "instructions" in form
-        form_di = {k: form.getlist(k) for k in form}
-
-        return cls(
-            user=user.id,
-            name=form["name"],
-            instructions=form["instructions"],
-            request={
-                form_di["req_name"][i]: [form_di["req_dtype"][i], None]
-                for i in range(len(form_di["req_name"]))
-                if form_di["req_name"][i] != ""
-            },
-            response={
-                form_di["res_name"][i]: [form_di["res_dtype"][i], None]
-                for i in range(len(form_di["res_name"]))
-                if form_di["res_name"][i] != ""
-            },
-        )
 
     def refresh(self, invocations: list["Invocations"]):
         invs = [inv for inv in invocations if inv.project == self.id]

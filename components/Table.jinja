@@ -1,6 +1,6 @@
 {#def projects #}
 <section id="table">
-    <article style="padding:7px 0 0 0">
+    <article style="padding:7px 0 0 0" class="overflow-auto">
         <table class="striped">
             <thead>
                 <tr>
@@ -12,7 +12,23 @@
             </thead>
             <tbody>
                 {% for project in projects %}
-                <TableRow project={project} />
+                <tr>
+                    <td>
+                        <a class="contrast" href="/app/projects/{{ project.id }}" hx-boost="true">
+                            {{ project.name }}
+                        </a>
+                    </td>
+                    <td>
+                        {# https://caipi.ai/api/{{ project.endpoint }} #}
+                        <a href="#" onclick="copy(event, 'https://caipi.ai/api/{{ project.endpoint }}')">
+                            <Icon name="copy" size="20" />
+                        </a>
+                    </td>
+                    <td>{{ project.invocations }}</td>
+                    <td>{{ project.credits }}</td>
+                    <td>{{'%0.2f' % project.latency|float}}s</td>
+                    <td>{{ (project.success * 100)|int }}%</td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>

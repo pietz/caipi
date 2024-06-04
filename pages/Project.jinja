@@ -1,5 +1,32 @@
 {#def project, invocations #}
+
 <Base title="caipi.ai - Dashboard">
 <Navigation />
-<ProjectMain project={project} invocations={invocations} />
+<main class="container">
+    <section style="display:flex;justify-content:space-between">
+        <h1 style="margin:0">{{ project.name }}</h1>
+        <div style="display:inline-flex;align-items:center">
+            <button class="contrast" onclick="modal.showModal()"
+                style="display:inline-flex;align-items:center;margin-right:5px">
+                <Icon name="settings" size="15" />
+                <span style="margin-left: 6px">Edit Function</span>
+            </button>
+            <button class="secondary" hx-delete="/app/projects/{{ project.id }}" hx-target="body" hx-push-url="true"
+                hx-confirm="Are you sure you want to delete the project?">
+                <Icon name="trash-2" size="15" />
+            </button>
+        </div>
+    </section>
+    <section class="grid">
+        <Tile title="Credits" value={project.credits} icon="ticket" />
+        <Tile title="Invocations" value={project.invocations} icon="sigma" />
+        {% set latency = ((project.latency * 1000) | int | string) + "ms" %}
+        <Tile title="Latency" value={latency} icon="timer" />
+        {% set success = ((project.success * 100) | int | string) + "%" %}
+        <Tile title="Success" value={success} icon="check" />
+    </section>
+    <Invoke project={project} />
+    <Invocations invocations={invocations} />
+    <Modal project={project} />
+</main>
 </Base>

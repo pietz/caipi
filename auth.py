@@ -3,6 +3,7 @@ import uuid
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi.datastructures import FormData
 from starlette.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 
@@ -42,25 +43,24 @@ def get_user(user_id: str = Depends(authenticate)):
     return user
 
 
+def payload_from_form(form: FormData, prefix: str):
+    names = form.getlist(f"{prefix}_name")
+    dtypes = form.getlist(f"{prefix}_dtype")
+    return {name: [dtype, None] for name, dtype in zip(names, dtypes)}
+
+
 async def get_project(request: Request, user_id: str = Depends(authenticate)):
-    form = await request.form()
-    form_di = {k: form.getlist(k) for k in form.keys()}
-    session_id = request.cookies.get("session_id")
+    form: FormData = await request.form()
     return Projects(
         user=user_id,
         name=form.get("name"),
         instructions=form.get("instructions"),
-        request={
-            form_di["req_name"][i]: [form_di["req_dtype"][i], None]
-            for i in range(len(form_di["req_name"]))
-            if form_di["req_name"][i] != ""
-        },
-        response={
-            form_di["res_name"][i]: [form_di["res_dtype"][i], None]
-            for i in range(len(form_di["res_name"]))
-            if form_di["res_name"][i] != ""
-        },
-        active=True,  # Assuming new projects are always active by default
+        request=payload_from_form(form, "req"),
+        response=payload_from_form(form, "res"),
+        collect_payload=form.get("collect_payload", False),
+        ai_validation=form.get("ai_validation", False),
+        model=form.get("model", "gpt-35-turbo"),
+        temperature=form.get("temperature", 0.0),
     )
 
 
