@@ -9,7 +9,7 @@
                 <Icon name="settings" size="15" />
                 <span style="margin-left: 6px">Edit Function</span>
             </button>
-            <button hx-delete="/app/projects/{{ project.id }}" hx-target="body" hx-push-url="true"
+            <button class="secondary" hx-delete="/app/projects/{{ project.id }}" hx-target="body" hx-push-url="true"
                 hx-confirm="Are you sure you want to delete the project?">
                 <Icon name="trash-2" size="15" />
             </button>
@@ -26,7 +26,7 @@
     <section class="grid">
         <div class="span-2" style="display:flex">
             <article style="flex:1">
-                <form hx-post="/app/invoke/{{ project.endpoint }}" hx-target="#response" hx-swap="outerHTML">
+                <form id="invokeForm">
                     {% for k, v in project.request.items() %}
                     <label for="{{ k }}"><strong>{{ k }}</strong></label>
                     {% if v[0] == "int" or v[0] == "float" %}
@@ -35,36 +35,22 @@
                     <input type="text" name="{{ k }}" aria-label="{{ k }}" />
                     {% endif %}
                     {% endfor %}
-                    <input class="contrast outline" type="submit" value="Send" style="margin:0" />
                 </form>
             </article>
         </div>
-        <div style="display:flex;justify-content:center;align-items:center">
-            {# <div style="flex:1"> #}
-                <Icon name="circle-arrow-right" size="32" />
-                {#
-            </div> #}
+        <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;margin-bottom:21px">
+            {# <span id="spinner" aria-busy="true" class="htmx-indicator"></span> #}
+            <button class="contrast" hx-post="/app/invoke/{{ project.endpoint }}" hx-target="#response"
+                hx-swap="outerHTML" hx-indicator="this" hx-include="#invokeForm">
+                <Icon name="circle-arrow-right" size="24" />
+                <Icon name="loader-pinwheel" size="24" />
+            </button>
         </div>
-        {# <div style="display:flex">
-            <article style="flex:1">
-                <header>
-                    <h4 style="padding:0;margin:0">Instructions</h4>
-                </header>
-                <p>{{ project.instructions }}</p>
-            </article>
-        </div> #}
         <div class="span-2" style="display:flex;">
             <article style="flex:1; display:flex; align-items:center; justify-content:center;">
-                <div id="response"
-                    style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%;">
-                    <div style="margin-bottom:24px;">
-                        <Icon name="hourglass" size="24" />
-                    </div>
-                    <p style="text-align:center;">Send a request and view the response here</p>
-                </div>
+                <InvokeResponse payload={project.response} disabled={True} />
             </article>
         </div>
-
     </section>
     {#
     <Invocations invocations={invocations} /> #}

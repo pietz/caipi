@@ -116,17 +116,30 @@ article>header {
     }
 }
 
-/* div>*:last-child,
-article>*:last-child,
-section>*:last-child,
-main>*:last-child,
-header>*:last-child,
-footer>*:last-child,
-aside>*:last-child,
-nav>*:last-child,
-ul>li:last-child,
-ol>li:last-child,
-dl>dd:last-child,
-dl>dt:last-child {
-    margin-bottom: 0 !important;
-} */
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.lucide-loader-pinwheel {
+    animation: spin 2s linear infinite;
+    display: none
+}
+
+.htmx-request>.lucide-loader-pinwheel {
+    display: inline-block;
+}
+
+.lucide-circle-arrow-right {
+    display: inline-block;
+}
+
+.htmx-request>.lucide-circle-arrow-right {
+    display: none;
+}

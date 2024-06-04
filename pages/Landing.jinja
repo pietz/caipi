@@ -1,8 +1,26 @@
 <Base title="caipi.ai - Create, Monitor & Test AIPIs">
-<Navigation />
+<header class="container-fluid"
+    style="padding:0; border-bottom: 1px solid var(--pico-card-border-color);position:sticky;top:0;background-color: var(--pico-background-color)">
+    <nav class="container" style="">
+        <ul>
+            <li>
+                <a href="/app"><img src="/static/img/caipi.svg" width="36" /></a>
+            </li>
+            <li>
+                <h4 style="margin-bottom: 0">caipi.ai</h4>
+            </li>
+        </ul>
+        <ul>
+            <li><a class="contrast" href="#features">Features</a></li>
+            <li><a class="contrast" href="#demo">Demo</a></li>
+            <li><a class="contrast" href="#pricing">Pricing</a></li>
+            <li><a href="/login"><button class="contrast">Login</button></a></li>
+        </ul>
+    </nav>
+</header>
 
 <main class="container">
-    <section style="padding: 180px 0; text-align: center">
+    <section id="hero" style="padding: 180px 0; text-align: center">
         <hgroup>
             <h1 style="font-size:56px;font-weight:bold;margin-bottom:24px">Your Shortcut to AI Integration</h1>
             <p style="font-size:22px;margin-bottom: 32px">Introducing AIPIs: Single purpose programmatic functions
@@ -13,9 +31,10 @@
         <a href="/app"><button class="contrast" style="padding: 12px 32px; font-size: 18px">Get Started</button></a>
     </section>
 
-    <section class="features">
-        <hgroup style="text-align: center">
-            <h1 style="padding:64px">Built for Developers</h1>
+    <section id="features">
+        <hgroup style="text-align: center;padding:64px">
+            <h1 style="font-size:36px">Features</h1>
+            <h3>Built for Developers</h3>
         </hgroup>
         <div class="grid">
             <Feature title="Quick Deployment" icon="zap">
@@ -49,7 +68,7 @@
         <video src="demo.mp4" controls></video>
     </section>
 
-    <section class="quote">
+    <section id="pricing">
         <blockquote>"Devs have left the chat"</blockquote>
         <p>Developers often find working with conversational AI models challenging due to their open-ended nature.
             caipi.ai simplifies this process, allowing developers to build, test, and monitor AI-powered APIs
