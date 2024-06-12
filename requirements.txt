@@ -6,3 +6,4 @@ jinjax
 python-dotenv
 authlib
 pygal
+itsdangerous
