@@ -5,7 +5,7 @@
 {% set opts = ["str", "int", "float", "bool", "list"] %}
 
 <fieldset role="group" style="margin-bottom: 10px">
-    <input name="{{ prefix }}_name" value="{{ value }}" required>
+    <input required name="{{ prefix }}_name" value="{{ value }}" required>
     <select name="{{ prefix }}_dtype">
         {% for opt in opts %}
         <option {% if opt==dtype %}selected{% endif %}>{{ opt }}</option>

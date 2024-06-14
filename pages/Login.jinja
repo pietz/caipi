@@ -1,19 +1,27 @@
 <Base title="caipi.ai - Login">
-<main class="container">
-    <div class="grid" style="min-height: 85svh; display: flex; justify-content: space-around; align-items: center;">
-        <div>
-            <img src="/static/img/caipi.svg" alt="caipi.ai" style="width: 120px;">
+<div
+    style="background-image: url('/static/img/bg.svg');background-size:cover;background-repeat:no-repeat;background-position:center;height:100vh">
+    <main class="container">
+        <div class="grid" style="min-height: 85svh; display: flex; justify-content: space-around; align-items: center;">
+            <div>
+                <img src="/static/img/caipi.svg" alt="caipi.ai" style="width: 120px;">
+            </div>
+            <div>
+                <a href="/github/login"><button class="contrast">
+                        <Icon name="github" />
+                        Sign In with GitHub
+                    </button></a>
+            </div>
         </div>
-        <div>
-            <a href="/github/login"><button class="contrast">
-                    <Icon name="github" />
-                    Sign In with GitHub
-                </button></a>
-        </div>
-    </div>
-</main>
+    </main>
 
-<footer class="container" style="display: flex; justify-content: space-around;">
-    <p>By signing in you agree to our Terms of Service and Privacy Policy</p>
-</footer>
+    <footer class="container" style="display: flex; justify-content: space-around;">
+        <p style="text-shadow: 0 0 15px var(--pico-background-color), 0 0 15px var(--pico-background-color)">By signing
+            in you agree to our Terms of
+            Service
+            and
+            Privacy
+            Policy</p>
+    </footer>
+</div>
 </Base>

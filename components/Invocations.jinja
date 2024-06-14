@@ -1,8 +1,9 @@
 {#def invocations #}
+
 <section id="table">
     <article>
         <div style="display:flex;justify-content:space-between;font-weight:bold">
-            <span style="width:23%">Invocation ID</span>
+            {# <span style="width:23%">Invocation ID</span> #}
             <span style="width:29%">Timestamp</span>
             <span style="width:16%">Credits</span>
             <span style="width:16%">Latency</span>
@@ -12,7 +13,7 @@
         <hr />
         <details style="margin:0">
             <summary style="display:flex;justify-content:space-between">
-                <span style="width:23%">{{ invocation.id }}</span>
+                {# <span style="width:23%">{{ invocation.id }}</span> #}
                 <span style="width:29%">{{ invocation.timestamp.replace(tzinfo=None) }}</span>
                 <span style="width:16%">{{ invocation.credits }}</span>
                 <span style="width:16%">{{ invocation.latency }}s</span>

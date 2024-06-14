@@ -143,3 +143,11 @@ article>header {
 .htmx-request>.lucide-circle-arrow-right {
     display: none;
 }
+
+.caipi-gradient {
+    background: linear-gradient(135deg, #122E38 0%, #439C3A 25%, #A9D80D 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+}

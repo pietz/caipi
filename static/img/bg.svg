@@ -2,13 +2,13 @@
   style="margin:auto;background:#f1f2f3;display:block;z-index:1;position:relative" width="1182" height="859"
   preserveAspectRatio="xMidYMid" viewBox="0 0 1182 859">
   <g transform="translate(591,429.5) scale(1,1) translate(-591,-429.5)">
-    <linearGradient id="ldbk-ve8l886afuj" x1="-0.1" y1="0" x2="1.1" y2="1">
-      <animate attributeName="y2" repeatCount="indefinite" dur="6s" keyTimes="0;0.5;1" values="-0.5;0.5;-0.5"
+    <linearGradient id="bggrad" x1="-0.1" y1="0" x2="1.1" y2="1">
+      <animate attributeName="y2" repeatCount="indefinite" dur="5s" keyTimes="0;0.5;1" values="-0.25;0.5;-0.25"
         keySplines="0.5 0 0.5 1;0.5 0 0.5 1" calcMode="spline"></animate>
-      <stop stop-color="#122f37" offset="0%"></stop>
-      <stop stop-color="#dfede2" offset="50%"></stop>
-      <stop stop-color="#a5d90a" offset="100%"></stop>
+      <stop stop-color="#122E38" offset="0%"></stop>
+      <stop stop-color="#439C3A" offset="50%"></stop>
+      <stop stop-color="#A9D80D" offset="100%"></stop>
     </linearGradient>
-    <rect x="0" y="0" width="1182" height="859" fill="url(#ldbk-ve8l886afuj)"></rect>
+    <rect x="0" y="0" width="1182" height="859" fill="url(#bggrad)"></rect>
   </g>
 </svg>

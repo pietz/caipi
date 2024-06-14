@@ -13,9 +13,9 @@
         <form {{ action }} hx-target="body" hx-push-url="true">
             <div>
                 <label><strong>Endpoint Name</strong></label>
-                <input name="name" value="{% if project %}{{ project.name }}{% endif %}">
+                <input required name="name" value="{% if project %}{{ project.name }}{% endif %}">
                 <label><strong>Instructions</strong></label>
-                <textarea name="instructions">{% if project %}{{ project.instructions }}{% endif %}</textarea>
+                <textarea required name="instructions">{% if project %}{{ project.instructions }}{% endif %}</textarea>
             </div>
             <section class="grid" style="margin-bottom:11px">
                 {% if project %}
