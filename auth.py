@@ -2,7 +2,7 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends, Form
 from fastapi.datastructures import FormData
 from starlette.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
@@ -53,14 +53,14 @@ async def get_project(request: Request, user_id: str = Depends(authenticate)):
     form: FormData = await request.form()
     return Projects(
         user=user_id,
-        name=form.get("name"),
-        instructions=form.get("instructions"),
+        name=form["name"],
+        instructions=form["instructions"],
         request=payload_from_form(form, "req"),
         response=payload_from_form(form, "res"),
-        collect_payload=form.get("collect_payload", False),
-        ai_validation=form.get("ai_validation", False),
-        model=form.get("model", "gpt-35-turbo"),
-        temperature=form.get("temperature", 0.0),
+        collect_payload=form["collect_payload", False],
+        ai_validation=form["ai_validation", False],
+        model=form["model", "gpt-35-turbo"],
+        temperature=form["temperature", 0.0],
     )
 
 

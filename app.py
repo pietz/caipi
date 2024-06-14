@@ -71,6 +71,15 @@ async def login():
     return catalog.render("Login")
 
 
+@app.get("/terms", response_class=HTMLResponse)
+async def terms():
+    return catalog.render("Terms")
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy():
+    return catalog.render("Privacy")
+
+
 @app.get("/app", response_class=HTMLResponse)
 async def dashboard(user: Users = Depends(get_user)):
     projects = Projects.find(f"user = '{user.id}'")
@@ -94,7 +103,7 @@ async def create_project(
 @app.get("/app/projects/{id}", response_class=HTMLResponse)
 async def read_project(id: str, user: Users = Depends(get_user)):
     project = Projects.get(id, user.id)
-    invocations = Invocations.find(f"project = '{project.id}'", pk=user.id)
+    invocations = Invocations.find(f"project = '{project.id}'", n=10, pk=user.id)
     project.refresh(invocations)
     return catalog.render("Project", project=project, invocations=invocations)
 

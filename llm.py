@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, Tuple
 from pydantic import BaseModel
 from httpx import AsyncClient
 
@@ -32,27 +32,15 @@ class OpenAIRequest(BaseModel):
     messages: list[Message]
     temperature: Optional[float] = 1
     tools: Optional[list[Tool]] = None
-    tool_choice: Optional[Union[str, dict[str, Any]]] = "auto"
-    # frequency_penalty: Optional[float] = 0
-    # logit_bias: Optional[Dict[str, int]] = None
-    # logprobs: Optional[bool] = False
-    # top_logprobs: Optional[int] = None
-    # max_tokens: Optional[int] = None
-    # n: Optional[int] = 1
-    # presence_penalty: Optional[float] = 0
-    # response_format: Optional[Dict[str, Any]] = None
-    # seed: Optional[int] = None
-    # stop: Optional[Union[str, List[str]]] = None
-    # stream: Optional[bool] = False
-    # stream_options: Optional[Dict[str, Any]] = None
-    # top_p: Optional[float] = 1
-    # user: Optional[str] = None
+    tool_choice: str = "auto"
 
 
 def openai_response_tool(PayloadResponse: type[BaseModel]):
+    schema = PayloadResponse.model_json_schema()
+    schema.pop("title")
     params = ToolFunctionParameters(
         type="object",
-        properties=PayloadResponse.model_json_schema(),
+        properties={"response": schema},
         required=[k for k, v in PayloadResponse.model_fields.items()],
     )
     return Tool(function=ToolFunction(parameters=params))
@@ -60,7 +48,7 @@ def openai_response_tool(PayloadResponse: type[BaseModel]):
 
 async def llm_openai(
     model: str, instructions: str, request: BaseModel, Response: type[BaseModel]
-) -> BaseModel:
+) -> Tuple[BaseModel | None, int]:
     req = json.dumps(json.loads(request.model_dump_json()))
     prompt = f"<instructions>{instructions}</instructions>\n\n<data>{req}</data>"
     messages = [Message(role="user", content=prompt)]
@@ -70,10 +58,10 @@ async def llm_openai(
         temperature=0,
         tools=[openai_response_tool(Response)],
     )
+    print(openai_request.model_dump())
     ep = os.environ["AZURE_OPENAI_ENDPOINT"]
     api_v = os.environ["AZURE_OPENAI_API_VERSION"]
     url = f"{ep}openai/deployments/{model}/chat/completions?api-version={api_v}"
-    print(openai_request.model_dump())
     async with AsyncClient() as client:
         res = await client.post(
             url,
@@ -83,7 +71,10 @@ async def llm_openai(
             },
             json=openai_request.model_dump(),
         )
-    print(res.content)
+    if res.status_code >= 300:
+        return (None, res.status_code)
     msg = res.json()["choices"][0]["message"]
+    print(msg)
     data = json.loads(msg["tool_calls"][0]["function"]["arguments"])
-    return Response(**data)
+    print(data)
+    return (Response(**data), res.status_code)

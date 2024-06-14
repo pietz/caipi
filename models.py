@@ -78,7 +78,7 @@ class Projects(Document):
     endpoint: str = Field(default_factory=generate_key)
     model: str = "gpt-35-turbo"
     temperature: float = 0.0
-    collect_payload: bool = False
+    collect_payload: bool = True
     ai_validation: bool = False
     invocations: int = 0
     credits: int = 0
@@ -123,7 +123,7 @@ class Endpoints(Document):
 
 
 class Invocations(Document):
-    project: str  # TODO: Use longer ID for invocations
+    project: str
     user: str
     credits: int
     latency: float
