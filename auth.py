@@ -7,7 +7,7 @@ from fastapi.datastructures import FormData
 from starlette.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 
-from models import Users, Projects
+from sql import User, Project, Session, select, engine
 
 load_dotenv()
 
@@ -37,7 +37,9 @@ def authenticate(request: Request):
 
 
 def get_user(user_id: str = Depends(authenticate)):
-    user = Users.get(user_id, user_id)
+    # user = Users.get(user_id, user_id)
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.id == user_id)).one()
     if user.username != "pietz":
         raise HTTPException(status_code=401)
     return user
@@ -51,7 +53,7 @@ def payload_from_form(form: FormData, prefix: str):
 
 async def get_project(request: Request, user_id: str = Depends(authenticate)):
     form: FormData = await request.form()
-    return Projects(
+    return Project(
         user=user_id,
         name=form["name"],
         instructions=form["instructions"],

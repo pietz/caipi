@@ -14,7 +14,7 @@ from sqlmodel import create_engine, SQLModel
 from api import api_router, invoke
 from auth import auth_router, authenticate, get_user, get_project
 from models import Users, Projects, Invocations, Endpoints
-from sql import User, Project, Endpoint, Invocation
+from sql import User, Project, Endpoint, Invocation, engine
 from cosmos import CosmosConnection
 from viz import invocation_chart
 
@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 catalog = Catalog()
 catalog.add_folder("components")
 catalog.add_folder("pages")
-
-engine = create_engine(os.environ["TURSO_CONNECTION"], echo=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
