@@ -7,3 +7,5 @@ python-dotenv
 authlib
 pygal
 itsdangerous
+sqlmodel
+sqlalchemy-libsql

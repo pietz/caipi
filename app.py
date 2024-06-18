@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, HTTPException
@@ -8,10 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from jinjax.catalog import Catalog
+from sqlmodel import create_engine, SQLModel
 
 from api import api_router, invoke
 from auth import auth_router, authenticate, get_user, get_project
 from models import Users, Projects, Invocations, Endpoints
+from sql import User, Project, Endpoint, Invocation
 from cosmos import CosmosConnection
 from viz import invocation_chart
 
@@ -25,7 +28,14 @@ catalog = Catalog()
 catalog.add_folder("components")
 catalog.add_folder("pages")
 
-app = FastAPI()
+engine = create_engine(os.environ["TURSO_CONNECTION"], echo=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    SQLModel.metadata.create_all(engine)
+    yield
+
+app = FastAPI(lifespan=lifespan)
 app.state.session_store = {}
 app.include_router(auth_router)
 app.include_router(api_router)
@@ -35,7 +45,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 cosmos = CosmosConnection.from_connection_string(
     os.environ["COSMOS_CONNECTION_STRING"], "caipi-db"
 )
-
 
 @app.exception_handler(HTTPException)
 async def unauthorized_exception_handler(request: Request, exc: HTTPException):
@@ -54,7 +63,6 @@ async def unauthorized_exception_handler(request: Request, exc: HTTPException):
 #     process_time = int((time.time() - start_time) * 1000)
 #     logger.info(f"{request.url.path} executed in {process_time}ms")
 #     return response
-
 
 @app.get("/health")
 async def health():
