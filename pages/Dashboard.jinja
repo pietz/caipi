@@ -15,12 +15,11 @@
         </div>
     </section>
     <section class="grid">
-        <Tile title="Credits" value={user.credits_avail - user.credits_used} capacity={user.credits_avail}
-            icon="ticket" />
-        <Tile title="Invocations" value={user.invocations} icon="sigma" />
-        {% set latency = ((user.latency * 1000) | int | string) + "ms" %}
+        <Tile title="Credits" value={user.n_credits_avail} icon="ticket" />
+        <Tile title="Invocations" value={user.n_invocations} icon="sigma" />
+        {% set latency = ((user.latency_sec * 1000) | int | string) + "ms" %}
         <Tile title="Latency" value={latency} icon="timer" />
-        {% set success = ((user.success * 100) | int | string) + "%" %}
+        {% set success = ((user.success_rate * 100) | int | string) + "%" %}
         <Tile title="Success" value={success} icon="check" />
     </section>
     {% if chart %}

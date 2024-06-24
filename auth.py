@@ -36,15 +36,6 @@ def authenticate(request: Request):
     return user_id
 
 
-def get_user(user_id: str = Depends(authenticate)):
-    # user = Users.get(user_id, user_id)
-    with Session(engine) as session:
-        user = session.exec(select(User).where(User.id == user_id)).one()
-    if user.username != "pietz":
-        raise HTTPException(status_code=401)
-    return user
-
-
 def payload_from_form(form: FormData, prefix: str):
     names = form.getlist(f"{prefix}_name")
     dtypes = form.getlist(f"{prefix}_dtype")
@@ -54,15 +45,15 @@ def payload_from_form(form: FormData, prefix: str):
 async def get_project(request: Request, user_id: str = Depends(authenticate)):
     form: FormData = await request.form()
     return Project(
-        user=user_id,
+        user_id=user_id,
         name=form["name"],
         instructions=form["instructions"],
         request=payload_from_form(form, "req"),
         response=payload_from_form(form, "res"),
-        collect_payload=form["collect_payload", False],
-        ai_validation=form["ai_validation", False],
-        model=form["model", "gpt-35-turbo"],
-        temperature=form["temperature", 0.0],
+        collect_payload=form.get("collect_payload", False),
+        ai_validation=form.get("ai_validation", False),
+        model=form.get("model", "gpt-35-turbo"),
+        temperature=form.get("temperature", 0.0),
     )
 
 
@@ -86,6 +77,18 @@ async def github_login(request: Request):
 async def github_callback(request: Request):
     token = await oauth.github.authorize_access_token(request)
     user_info = await oauth.github.userinfo(token=token)
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.id == str(user_info["id"]))).first()
+        if not user:
+            user = User(
+                id=str(user_info["id"]),
+                login=user_info["login"],
+                provider="github",
+                name=user_info["name"],
+                email=user_info["email"],
+            )
+            session.add(user)
+            session.commit()
     session_id = str(uuid.uuid4())
     request.app.state.session_store[session_id] = str(user_info["id"])
     response = RedirectResponse(url="/app")

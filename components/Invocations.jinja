@@ -3,21 +3,21 @@
 <section id="table">
     <article>
         <div style="display:flex;justify-content:space-between;font-weight:bold">
-            {# <span style="width:23%">Invocation ID</span> #}
             <span style="width:29%">Timestamp</span>
             <span style="width:16%">Credits</span>
             <span style="width:16%">Latency</span>
-            <span style="width:16%">Success</span>
+            <span style="width:16%">Status Code</span>
         </div>
         {% for invocation in invocations %}
         <hr />
         <details style="margin:0">
             <summary style="display:flex;justify-content:space-between">
-                {# <span style="width:23%">{{ invocation.id }}</span> #}
-                <span style="width:29%">{{ invocation.timestamp.replace(tzinfo=None) }}</span>
-                <span style="width:16%">{{ invocation.credits }}</span>
-                <span style="width:16%">{{ invocation.latency }}s</span>
-                <span style="width:16%">{{ invocation.success }}</span>
+                <span style="width:29%">
+                    {{ invocation.created.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S') }}
+                </span>
+                <span style="width:16%">{{ invocation.n_credits_used }}</span>
+                <span style="width:16%">{{ invocation.latency_sec }}s</span>
+                <span style="width:16%">{{ invocation.status_code }}</span>
             </summary>
             {% if invocation.request %}
             <div class="grid">

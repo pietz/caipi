@@ -1,0 +1,12 @@
+{#def request #}
+
+<form id="invokeForm">
+    {% for k, v in request.items() %}
+    <label for="{{ k }}"><strong>{{ k }}</strong></label>
+    {% if v[0] == "int" or v[0] == "float" %}
+    <input type="number" name="{{ k }}" aria-label="{{ k }}" />
+    {% else %}
+    <input type="text" name="{{ k }}" aria-label="{{ k }}" />
+    {% endif %}
+    {% endfor %}
+</form>

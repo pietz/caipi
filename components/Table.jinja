@@ -19,15 +19,14 @@
                         </a>
                     </td>
                     <td>
-                        {# https://caipi.ai/api/{{ project.endpoint }} #}
-                        <a href="#" onclick="copy(event, 'https://caipi.ai/api/{{ project.endpoint }}')">
+                        <a href="#" onclick="copy(event, 'https://caipi.ai/api/{{ project.id }}')">
                             <Icon name="copy" size="20" />
                         </a>
                     </td>
-                    <td>{{ project.invocations }}</td>
-                    <td>{{ project.credits }}</td>
-                    <td>{{'%0.2f' % project.latency|float}}s</td>
-                    <td>{{ (project.success * 100)|int }}%</td>
+                    <td>{{ project.n_invocations }}</td>
+                    <td>{{ project.n_credits_used }}</td>
+                    <td>{{'%0.2f' % project.latency_sec|float}}s</td>
+                    <td>{{ (project.success_rate * 100)|int }}%</td>
                 </tr>
                 {% endfor %}
             </tbody>

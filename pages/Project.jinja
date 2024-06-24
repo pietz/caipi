@@ -18,11 +18,11 @@
         </div>
     </section>
     <section class="grid">
-        <Tile title="Credits" value={project.credits} icon="ticket" />
-        <Tile title="Invocations" value={project.invocations} icon="sigma" />
-        {% set latency = ((project.latency * 1000) | int | string) + "ms" %}
+        <Tile title="Credits" value={project.n_credits_used} icon="ticket" />
+        <Tile title="Invocations" value={project.n_invocations} icon="sigma" />
+        {% set latency = ((project.latency_sec * 1000) | int | string) + "ms" %}
         <Tile title="Latency" value={latency} icon="timer" />
-        {% set success = ((project.success * 100) | int | string) + "%" %}
+        {% set success = ((project.success_rate * 100) | int | string) + "%" %}
         <Tile title="Success" value={success} icon="check" />
     </section>
     <Invoke project={project} />

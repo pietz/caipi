@@ -1,20 +1,22 @@
 import pygal
 
-from models import Invocations
+from sql import Invocation
 
-def invocation_chart(invocations: list[Invocations]) -> str:
-    # Process data for Pygal
+def invocation_chart(invocations: list[Invocation]) -> str | None:
+    if len(invocations) == 0:
+        return None
+    
     invocation_counts = {}
     for invocation in invocations:
-        project = invocation.project
-        date = invocation.timestamp.strftime("%Y-%m-%d")
+        project_id = invocation.project_id
+        date = invocation.created.strftime("%Y-%m-%d")
 
-        if project not in invocation_counts:
-            invocation_counts[project] = {}
-        if date not in invocation_counts[project]:
-            invocation_counts[project][date] = 0
+        if project_id not in invocation_counts:
+            invocation_counts[project_id] = {}
+        if date not in invocation_counts[project_id]:
+            invocation_counts[project_id][date] = 0
 
-        invocation_counts[project][date] += 1
+        invocation_counts[project_id][date] += 1
 
     style = pygal.style.Style(
         background="transparent",

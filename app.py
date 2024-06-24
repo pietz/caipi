@@ -1,4 +1,5 @@
-import os
+import math
+import time
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -9,13 +10,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 from jinjax.catalog import Catalog
-from sqlmodel import create_engine, SQLModel
+from sqlmodel import SQLModel, Session
 
-from api import api_router, invoke
-from auth import auth_router, authenticate, get_user, get_project
-from models import Users, Projects, Invocations, Endpoints
-from sql import User, Project, Endpoint, Invocation, engine
-from cosmos import CosmosConnection
+from auth import auth_router, authenticate, get_project
+from sql import User, Project, Invocation, engine, get_db
+from ai import ai_function, model2credits
+from utils import req_to_data
 from viz import invocation_chart
 
 load_dotenv()
@@ -36,13 +36,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.state.session_store = {}
 app.include_router(auth_router)
-app.include_router(api_router)
+# TODO Replace with Redis or similar
 app.add_middleware(SessionMiddleware, secret_key="your-secret-key")
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-cosmos = CosmosConnection.from_connection_string(
-    os.environ["COSMOS_CONNECTION_STRING"], "caipi-db"
-)
 
 @app.exception_handler(HTTPException)
 async def unauthorized_exception_handler(request: Request, exc: HTTPException):
@@ -52,15 +48,6 @@ async def unauthorized_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content={"detail": exc.detail},
     )
-
-
-# @app.middleware("http")
-# async def log_execution_time(request: Request, call_next):
-#     start_time = time.time()
-#     response = await call_next(request)
-#     process_time = int((time.time() - start_time) * 1000)
-#     logger.info(f"{request.url.path} executed in {process_time}ms")
-#     return response
 
 @app.get("/health")
 async def health():
@@ -85,48 +72,64 @@ async def terms():
 async def privacy():
     return catalog.render("Privacy")
 
-
 @app.get("/app", response_class=HTMLResponse)
-async def dashboard(user: Users = Depends(get_user)):
-    projects = Projects.find(f"user = '{user.id}'")
-    invocations = Invocations.find(f"user = '{user.id}'")
-    user.refresh(invocations)
-    [p.refresh(invocations) for p in projects]
-    chart = invocation_chart(invocations)
-    return catalog.render("Dashboard", user=user, projects=projects, chart=chart)
+async def dashboard(user_id = Depends(authenticate), db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404)
+    # TODO Refresh User and Project obejcts in the DB
+    chart = invocation_chart(user.invocations)
+    return catalog.render("Dashboard", user=user, projects=user.projects, chart=chart)
 
 
 @app.post("/app/projects", response_class=HTMLResponse)
-async def create_project(
-    user: Users = Depends(get_user), project: Projects = Depends(get_project)
-):
-    project.save()
-    endpoint = Endpoints.from_project(project, user)
-    endpoint.save()
+async def create_project(project: Project = Depends(get_project), db: Session = Depends(get_db)):
+    db.add(project)
+    db.commit()
     return RedirectResponse("/app", 303)
 
 
+
 @app.get("/app/projects/{id}", response_class=HTMLResponse)
-async def read_project(id: str, user: Users = Depends(get_user)):
-    project = Projects.get(id, user.id)
-    invocations = Invocations.find(f"project = '{project.id}'", n=10, pk=user.id)
-    project.refresh(invocations)
+async def read_project(
+    id: str,
+    user_id: str = Depends(authenticate),
+    db: Session = Depends(get_db)
+):
+    project = db.get(Project, id)
+    if project is None:
+        raise HTTPException(status_code=404)
+    invocations = list(reversed(project.invocations))
     return catalog.render("Project", project=project, invocations=invocations)
 
-
 @app.patch("/app/projects/{id}", response_class=HTMLResponse)
-async def update_project(id: str, project_new: Projects = Depends(get_project)):
-    project_old = Projects.get(id, project_new.user)
-    project_new.id = project_old.id
-    project_new.endpoint = project_old.endpoint
-    project_new.save()
+async def update_project(
+    id: str,
+    project_update: Project = Depends(get_project),
+    db: Session = Depends(get_db)
+):
+    project = db.get(Project, id)
+    if not project:
+        raise HTTPException(status_code=404)
+    for key, value in project_update.model_dump(exclude_unset=True).items():
+        setattr(project, key, value)
+    db.add(project)
+    db.commit()
     return RedirectResponse(f"/app/projects/{id}", 303)
 
-
 @app.delete("/app/projects/{id}", response_class=HTMLResponse)
-async def delete_project(id: str, user_id: str = Depends(authenticate)):
-    project = Projects.get(id, user_id)
-    project.delete()
+async def delete_project(
+    id: str,
+    user_id: str = Depends(authenticate),
+    db: Session = Depends(get_db)
+):
+    project = db.get(Project, id)
+    if project is None:
+        raise HTTPException(status_code=404)
+    for invocation in project.invocations:
+        db.delete(invocation)
+    db.delete(project)
+    db.commit()
     return RedirectResponse("/app", 303)
 
 
@@ -141,6 +144,61 @@ async def get_modal2(type: str, abr: str):
 @app.post("/app/invoke/{id}", response_class=HTMLResponse)
 async def invoke_endpoint(id: str, req: Request, user_id: str = Depends(authenticate)):
     res_data = await invoke(id, req)
+    # using with statement instead because ai_function runs long
+    with Session(engine) as session:
+        project = session.get(Project, id)
+        if project is None:
+            raise HTTPException(status_code=404)
+        invocations = project.invocations
+    invocations = list(reversed(invocations))
     return catalog.render(
-        "InvokeResponse", payload=json.loads(res_data.body.decode("utf-8"))
+        "InvokeReturn", payload=json.loads(res_data.body.decode("utf-8")), invocations=invocations
     )
+
+
+@app.post("/api/{id}", response_class=JSONResponse)
+async def invoke(id: str, req: Request):
+    # using with statement instead because ai_function runs long
+    with Session(engine) as session:
+        project = session.get(Project, id)
+        if project is None:
+            raise HTTPException(status_code=404)
+        user = project.user
+        if not user:
+            raise HTTPException(status_code=404)
+        
+    if user.n_credits_avail <= 0:
+        raise HTTPException(status_code=402, detail="Out of Credits")
+
+    data = await req_to_data(req)
+    try:
+        request = project.request_model(**data)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail="Payload is invalid.")
+    
+    start = time.time()
+    response = await ai_function(
+        project.instructions, request, project.response_model, project.model
+    )
+    latency = round(time.time() - start, 3)
+    chars = (
+        len(response.model_dump_json())
+        + len(request.model_dump_json())
+        + len(project.instructions)
+    )
+    credits = math.ceil(chars / model2credits[project.model])
+    user.n_credits_avail = max(user.n_credits_avail - credits, 0)
+    inv = Invocation(
+        project_id=project.id,
+        user_id=project.user_id,
+        n_credits_used=credits,
+        latency_sec=latency,
+        status_code=200,
+        model=project.model,
+        request=request.model_dump() if project.collect_payload else None,
+        response=response.model_dump() if project.collect_payload else None,
+    )
+    with Session(engine) as session:
+        session.add(inv)
+        session.commit()
+    return JSONResponse(response.model_dump(), 200)
