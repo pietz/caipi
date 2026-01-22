@@ -1,7 +1,11 @@
+use crate::storage;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Serialize, Deserialize)]
+const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CliStatus {
     pub installed: bool,
     pub version: Option<String>,
@@ -59,17 +63,9 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
 
 #[tauri::command]
 pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
-    // Check authentication by attempting a simple operation
-    // Use --print to avoid any interactive prompts
-    let auth_check = Command::new("claude")
-        .args(["--print", "--output-format", "json", "echo test"])
-        .output();
-
-    let authenticated = auth_check
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    Ok(CliAuthStatus { authenticated })
+    // Skip the slow auth check - we'll handle auth errors at chat time
+    // The CLI will provide clear error messages if not authenticated
+    Ok(CliAuthStatus { authenticated: true })
 }
 
 #[tauri::command]
@@ -93,4 +89,56 @@ pub async fn check_cli_status() -> Result<CliStatus, String> {
         authenticated: auth_status.authenticated,
         path: install_status.path,
     })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartupInfo {
+    pub onboarding_completed: bool,
+    pub cli_status: Option<CliStatus>,
+    pub cli_status_fresh: bool,
+}
+
+#[tauri::command]
+pub async fn get_startup_info() -> Result<StartupInfo, String> {
+    let onboarding_completed = storage::get_onboarding_completed().map_err(|e| e.to_string())?;
+
+    let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;
+
+    let (cli_status, cli_status_fresh) = match cache {
+        Some(cached) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let age = now.saturating_sub(cached.cached_at);
+            let fresh = age < CLI_CACHE_TTL_SECONDS;
+            (Some(cached.status), fresh)
+        }
+        None => (None, false),
+    };
+
+    Ok(StartupInfo {
+        onboarding_completed,
+        cli_status,
+        cli_status_fresh,
+    })
+}
+
+#[tauri::command]
+pub async fn complete_onboarding() -> Result<(), String> {
+    // Get fresh CLI status and cache it
+    let status = check_cli_status().await?;
+    storage::set_cli_status_cache(status).map_err(|e| e.to_string())?;
+
+    // Mark onboarding as completed
+    storage::set_onboarding_completed(true).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reset_onboarding() -> Result<(), String> {
+    storage::set_onboarding_completed(false).map_err(|e| e.to_string())?;
+    storage::clear_cli_status_cache().map_err(|e| e.to_string())?;
+    Ok(())
 }

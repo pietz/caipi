@@ -6,10 +6,7 @@
 
 ## High Priority
 
-### 1. Welcome Screen Shows Every Startup
-The onboarding/welcome screen with CLI detection (installed + authenticated checks) appears on every app launch. The authentication check is particularly slow.
-
-**Expected behavior:** Show welcome screen only on first launch. Skip it on subsequent launches since CLI status rarely changes.
+(No high priority items remaining)
 
 ---
 

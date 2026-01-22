@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 
-export type AppScreen = 'onboarding' | 'folder' | 'chat';
+export type AppScreen = 'loading' | 'onboarding' | 'folder' | 'chat';
 
 export interface CliStatus {
   installed: boolean;
@@ -18,17 +18,19 @@ export interface AppState {
   error: string | null;
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
+  authType: string | null;
 }
 
 const initialState: AppState = {
-  screen: 'onboarding',
+  screen: 'loading',
   cliStatus: null,
   selectedFolder: null,
   sessionId: null,
-  loading: false,
+  loading: true,
   error: null,
   leftSidebarOpen: false,
   rightSidebarOpen: false,
+  authType: null,
 };
 
 function createAppStore() {
@@ -46,6 +48,7 @@ function createAppStore() {
     toggleRightSidebar: () => update(s => ({ ...s, rightSidebarOpen: !s.rightSidebarOpen })),
     setLeftSidebarOpen: (open: boolean) => update(s => ({ ...s, leftSidebarOpen: open })),
     setRightSidebarOpen: (open: boolean) => update(s => ({ ...s, rightSidebarOpen: open })),
+    setAuthType: (authType: string | null) => update(s => ({ ...s, authType })),
     reset: () => set(initialState),
   };
 }
@@ -58,3 +61,4 @@ export const isLoading = derived(appStore, $app => $app.loading);
 export const appError = derived(appStore, $app => $app.error);
 export const leftSidebarOpen = derived(appStore, $app => $app.leftSidebarOpen);
 export const rightSidebarOpen = derived(appStore, $app => $app.rightSidebarOpen);
+export const authType = derived(appStore, $app => $app.authType);

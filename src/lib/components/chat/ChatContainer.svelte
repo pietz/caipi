@@ -31,6 +31,7 @@
     tool?: string;
     description?: string;
     message?: string;
+    authType?: string;
   }
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
@@ -41,6 +42,7 @@
   let folderName = $state<string>('');
   let leftSidebarOpen = $state(false);
   let rightSidebarOpen = $state(false);
+  let authType = $state<string | null>(null);
 
   // Subscribe to app store
   appStore.subscribe((state) => {
@@ -48,6 +50,7 @@
     folderPath = state.selectedFolder;
     leftSidebarOpen = state.leftSidebarOpen;
     rightSidebarOpen = state.rightSidebarOpen;
+    authType = state.authType;
     if (folderPath) {
       folderName = folderPath.split('/').pop() || folderPath;
     }
@@ -154,8 +157,21 @@
         chatStore.finalizeStream();
         break;
 
+      case 'SessionInit':
+        if (event.authType) {
+          appStore.setAuthType(event.authType);
+        }
+        break;
+
       case 'Error':
         console.error('Claude error:', event.message);
+        // Add error as a visible message in the chat
+        chatStore.addMessage({
+          id: crypto.randomUUID(),
+          role: 'error',
+          content: event.message || 'An unknown error occurred',
+          timestamp: Date.now() / 1000,
+        });
         chatStore.setStreaming(false);
         break;
     }
@@ -279,6 +295,13 @@
     </div>
 
     <div class="flex items-center gap-2">
+      <!-- Auth type indicator -->
+      {#if authType}
+        <span class="text-xs text-dim px-2 py-0.5 rounded" style="background-color: var(--card);">
+          {authType}
+        </span>
+      {/if}
+
       <!-- Right sidebar toggle -->
       <button
         type="button"
@@ -337,9 +360,10 @@
               <ChatMessage {message} showDivider={index > 0} />
             {/each}
 
-            <!-- Stream Items (during streaming) - maintains correct order of text and tools -->
+            <!-- Stream Items (during streaming) - sorted by insertionIndex for stable ordering -->
             {#if isStreaming && streamItems.length > 0}
-              {#each streamItems as item, index (item.id)}
+              {@const sortedItems = [...streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex)}
+              {#each sortedItems as item, index (item.insertionIndex)}
                 {#if item.type === 'text' && item.content}
                   <ChatMessage
                     message={{
@@ -348,7 +372,7 @@
                       content: item.content,
                       timestamp: item.timestamp,
                     }}
-                    streaming={index === streamItems.length - 1 && item.type === 'text'}
+                    streaming={index === sortedItems.length - 1 && item.type === 'text'}
                     showDivider={messages.length > 0 || index > 0}
                   />
                 {:else if item.type === 'tool' && item.activity}

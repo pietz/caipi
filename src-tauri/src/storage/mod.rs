@@ -1,7 +1,9 @@
 use crate::commands::folder::RecentFolder;
+use crate::commands::setup::CliStatus;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -14,9 +16,19 @@ pub enum StorageError {
     NoAppDir,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CliStatusCache {
+    pub status: CliStatus,
+    pub cached_at: u64, // Unix timestamp in seconds
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AppData {
     pub recent_folders: Vec<RecentFolder>,
+    #[serde(default)]
+    pub onboarding_completed: bool,
+    #[serde(default)]
+    pub cli_status_cache: Option<CliStatusCache>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
@@ -71,6 +83,44 @@ pub fn save_recent_folder(folder: RecentFolder) -> Result<(), StorageError> {
     // Keep only last 5
     data.recent_folders.truncate(5);
 
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn get_onboarding_completed() -> Result<bool, StorageError> {
+    let data = load_data()?;
+    Ok(data.onboarding_completed)
+}
+
+pub fn set_onboarding_completed(completed: bool) -> Result<(), StorageError> {
+    let mut data = load_data()?;
+    data.onboarding_completed = completed;
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn get_cli_status_cache() -> Result<Option<CliStatusCache>, StorageError> {
+    let data = load_data()?;
+    Ok(data.cli_status_cache)
+}
+
+pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
+    let mut data = load_data()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    data.cli_status_cache = Some(CliStatusCache {
+        status,
+        cached_at: now,
+    });
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn clear_cli_status_cache() -> Result<(), StorageError> {
+    let mut data = load_data()?;
+    data.cli_status_cache = None;
     save_data(&data)?;
     Ok(())
 }

@@ -26,6 +26,7 @@ pub enum AgentEvent {
     Text(String),
     ToolStart { id: String, tool_type: String, target: String },
     ToolEnd { id: String, status: String },
+    SessionInit { auth_type: String },
     Complete,
     Error(String),
 }
@@ -212,7 +213,6 @@ impl AgentSession {
                 .build()]
         );
 
-        // Configure the agent with hooks
         let options = ClaudeAgentOptions::builder()
             .cwd(&self.folder_path)
             .hooks(hooks)
@@ -244,7 +244,7 @@ impl AgentSession {
                     Ok(msg) => {
                         match msg {
                             Message::Assistant(assistant_msg) => {
-                                for block in &assistant_msg.message.content {
+                                for block in assistant_msg.message.content.iter() {
                                     match block {
                                         ContentBlock::Text(text_block) => {
                                             assistant_content.push_str(&text_block.text);
@@ -277,8 +277,24 @@ impl AgentSession {
                                 on_event(AgentEvent::Complete);
                                 break;
                             }
-                            Message::System(_sys) => {
-                                // System messages are handled via hooks
+                            Message::System(sys) => {
+                                // Extract auth type from init message
+                                if sys.subtype == "init" {
+                                    let api_key_source = sys.data
+                                        .get("apiKeySource")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+
+                                    let auth_type = match api_key_source {
+                                        "none" => "Claude AI Subscription",
+                                        "environment" | "settings" => "Anthropic API Key",
+                                        _ => "Unknown",
+                                    };
+
+                                    on_event(AgentEvent::SessionInit {
+                                        auth_type: auth_type.to_string(),
+                                    });
+                                }
                             }
                             _ => {}
                         }

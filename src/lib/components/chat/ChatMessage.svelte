@@ -25,6 +25,7 @@
   marked.use({ renderer });
 
   const isUser = $derived(message.role === 'user');
+  const isError = $derived(message.role === 'error');
   const htmlContent = $derived(
     message.content ? marked.parse(message.content) as string : ''
   );
@@ -33,25 +34,24 @@
 <div>
   <!-- Divider between messages -->
   {#if showDivider}
-    <div
-      class="h-px my-4"
-      style="background-color: rgba(255, 255, 255, 0.04);"
-    ></div>
+    <div class="h-px my-2" style:background-color="rgba(255, 255, 255, 0.04)"></div>
   {/if}
 
-  <div class="flex flex-col gap-1.5">
+  <div class="flex flex-col gap-1">
     <!-- Role label -->
     <div
-      class="text-xs font-medium text-muted uppercase tracking-[0.5px]"
+      class="text-xs font-medium uppercase tracking-wide"
+      style:color={isError ? '#ef4444' : 'var(--text-muted)'}
     >
-      {isUser ? 'You' : 'Claude'}
+      {isUser ? 'You' : isError ? 'Error' : 'Claude'}
     </div>
 
     <!-- Message content -->
     {#if message.content}
       <div
-        class="text-sm leading-[1.6] whitespace-pre-wrap"
-        style="color: {isUser ? 'var(--text-secondary)' : 'var(--text-primary)'};"
+        class="text-sm leading-relaxed whitespace-pre-wrap"
+        class:error-message={isError}
+        style:color={isError ? '#ef4444' : isUser ? 'var(--text-secondary)' : 'var(--text-primary)'}
       >
         {#if streaming}
           {@html htmlContent}
@@ -70,3 +70,12 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .error-message {
+    background-color: rgba(239, 68, 68, 0.1);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+</style>

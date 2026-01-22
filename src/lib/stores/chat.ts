@@ -2,7 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'error';
   content: string;
   timestamp: number;
   activities?: ToolActivity[];  // Tool calls associated with this message
@@ -37,12 +37,14 @@ export interface StreamItem {
   content?: string;
   activity?: ToolActivity;
   timestamp: number;
+  insertionIndex: number;  // Stable position assigned at creation, never changes
 }
 
 export interface ChatState {
   messages: Message[];
   activities: ToolActivity[];
   streamItems: StreamItem[];
+  streamItemCounter: number;  // Counter for stable insertion ordering
   pendingPermission: PermissionRequest | null;
   isStreaming: boolean;
   streamingContent: string;
@@ -56,6 +58,7 @@ const initialState: ChatState = {
   messages: [],
   activities: [],
   streamItems: [],
+  streamItemCounter: 0,
   pendingPermission: null,
   isStreaming: false,
   streamingContent: '',
@@ -90,11 +93,13 @@ function createChatStore() {
         type: 'tool',
         activity,
         timestamp: activity.timestamp,
+        insertionIndex: s.streamItemCounter,
       };
       return {
         ...s,
         activities: [...s.activities, activity],
         streamItems: [...s.streamItems, streamItem],
+        streamItemCounter: s.streamItemCounter + 1,
       };
     }),
 
@@ -120,6 +125,7 @@ function createChatStore() {
       isStreaming,
       streamingContent: isStreaming ? s.streamingContent : '',
       streamItems: isStreaming ? s.streamItems : [],
+      streamItemCounter: isStreaming ? s.streamItemCounter : 0,
     })),
 
     appendStreamingContent: (content: string) => update(s => {
@@ -127,7 +133,7 @@ function createChatStore() {
       const lastItem = s.streamItems[s.streamItems.length - 1];
 
       if (lastItem && lastItem.type === 'text') {
-        // Append to existing text item
+        // Append to existing text item (preserve insertionIndex)
         return {
           ...s,
           streamingContent: s.streamingContent + content,
@@ -138,17 +144,19 @@ function createChatStore() {
           ),
         };
       } else {
-        // Create new text item
+        // Create new text item with stable insertion index
         const newItem: StreamItem = {
           id: `stream-text-${Date.now()}`,
           type: 'text',
           content,
           timestamp: Date.now() / 1000,
+          insertionIndex: s.streamItemCounter,
         };
         return {
           ...s,
           streamingContent: s.streamingContent + content,
           streamItems: [...s.streamItems, newItem],
+          streamItemCounter: s.streamItemCounter + 1,
         };
       }
     }),
@@ -174,6 +182,7 @@ function createChatStore() {
     clearStreamItems: () => update(s => ({
       ...s,
       streamItems: [],
+      streamItemCounter: 0,
     })),
 
     // Task management
@@ -258,6 +267,7 @@ function createChatStore() {
         ...s,
         messages: newMessages,
         streamItems: [],
+        streamItemCounter: 0,
         activities: [],
         streamingContent: '',
         isStreaming: false,

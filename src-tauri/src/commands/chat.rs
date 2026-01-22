@@ -34,6 +34,7 @@ pub enum ChatEvent {
     ToolStart { activity: ToolActivity },
     ToolEnd { id: String, status: String },
     PermissionRequest { id: String, tool: String, description: String },
+    SessionInit { auth_type: String },
     Complete,
     Error { message: String },
 }
@@ -85,6 +86,7 @@ pub async fn send_message(
                 }
             }
             AgentEvent::ToolEnd { id, status } => ChatEvent::ToolEnd { id, status },
+            AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
             AgentEvent::Complete => ChatEvent::Complete,
             AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
         };

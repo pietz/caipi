@@ -71,7 +71,7 @@
   <!-- Input wrapper -->
   <div
     class={cn(
-      'flex items-center gap-2 rounded-lg py-2.5 px-3 transition-colors duration-150 bg-input border',
+      'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-input border',
       focused ? 'border-[var(--ring)]' : 'border-input'
     )}
   >
@@ -85,7 +85,7 @@
       {placeholder}
       disabled={disabled}
       rows={1}
-      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-[1.4] p-0 m-0 align-middle max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50"
+      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50"
     ></textarea>
 
     {#if disabled}
@@ -93,7 +93,7 @@
         variant="destructive"
         size="sm"
         onclick={onAbort}
-        class="shrink-0 px-2 py-1.5"
+        class="shrink-0 p-2"
         title="Stop generation"
       >
         <StopIcon size={14} />
@@ -104,7 +104,7 @@
         size="sm"
         onclick={handleSubmit}
         disabled={!hasContent}
-        class="shrink-0 px-2 py-1.5"
+        class="shrink-0 p-2"
       >
         <SendIcon size={14} />
       </Button>
@@ -113,7 +113,7 @@
 
   <!-- Footer row with hints and stats -->
   <div class="flex justify-between items-center mt-2 text-xs text-darkest">
-    <span>⇧↵ new line · ⌘↵ send</span>
+    <span>Shift+Enter new line</span>
     <div class="flex gap-4">
       <span>{formatTokens(tokenCount)} / 200k tokens</span>
       <span>{formatDuration(sessionDuration)}</span>
