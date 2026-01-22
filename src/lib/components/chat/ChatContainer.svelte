@@ -122,11 +122,25 @@
 
       case 'ToolStart':
         if (event.activity) {
-          chatStore.addActivity({
+          const newActivity = {
             ...event.activity,
             toolType: event.activity.toolType,
-            status: 'running',
-          });
+            status: 'running' as const,
+          };
+          chatStore.addActivity(newActivity);
+
+          // If there's a pending permission request with matching tool type but no activityId,
+          // link it to this activity (handles case where permission request arrives before ToolStart)
+          if (
+            pendingPermission &&
+            pendingPermission.activityId === null &&
+            pendingPermission.tool === newActivity.toolType
+          ) {
+            chatStore.setPermissionRequest({
+              ...pendingPermission,
+              activityId: newActivity.id,
+            });
+          }
         }
         break;
 
@@ -141,10 +155,16 @@
 
       case 'PermissionRequest':
         if (event.id && event.tool && event.description) {
-          // Just set the permission request - ActivityCard will detect it
-          // by matching tool type with the running activity
+          // Find the running activity that matches this permission request
+          // Since tools execute sequentially, the most recent running activity
+          // with the matching tool type is the one requesting permission
+          const matchingActivity = activities.find(
+            (a) => a.status === 'running' && a.toolType === event.tool
+          );
+
           chatStore.setPermissionRequest({
             id: event.id,
+            activityId: matchingActivity?.id || null,
             tool: event.tool,
             description: event.description,
             timestamp: Date.now() / 1000,
@@ -155,6 +175,8 @@
       case 'Complete':
         // Convert streamItems to a message with embedded activities
         chatStore.finalizeStream();
+        // Process any queued messages
+        processQueuedMessages();
         break;
 
       case 'SessionInit':
@@ -207,6 +229,39 @@
     }
   }
 
+  function queueMessage(message: string) {
+    // Add to queue
+    chatStore.enqueueMessage(message);
+
+    // Show in UI immediately as user message
+    chatStore.addMessage({
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: message,
+      timestamp: Date.now() / 1000,
+    });
+
+    scrollToBottom();
+  }
+
+  async function processQueuedMessages() {
+    const nextMessage = chatStore.dequeueMessage();
+    if (!nextMessage || !sessionId) return;
+
+    // Keep streaming state active
+    chatStore.setStreaming(true);
+
+    try {
+      await invoke('send_message', {
+        sessionId,
+        message: nextMessage,
+      });
+    } catch (e) {
+      console.error('Failed to send queued message:', e);
+      chatStore.setStreaming(false);
+    }
+  }
+
   async function handlePermissionResponse(allowed: boolean) {
     if (!sessionId || !pendingPermission) return;
 
@@ -243,6 +298,7 @@
     try {
       await invoke('abort_session', { sessionId });
       chatStore.setStreaming(false);
+      chatStore.clearMessageQueue();  // Clear any queued messages on abort
     } catch (e) {
       console.error('Failed to abort session:', e);
     }
@@ -376,11 +432,13 @@
                     showDivider={messages.length > 0 || index > 0}
                   />
                 {:else if item.type === 'tool' && item.activity}
-                  <ActivityCard
-                    activity={item.activity}
-                    {pendingPermission}
-                    onPermissionResponse={handlePermissionResponse}
-                  />
+                  <div class="mt-1">
+                    <ActivityCard
+                      activity={item.activity}
+                      {pendingPermission}
+                      onPermissionResponse={handlePermissionResponse}
+                    />
+                  </div>
                 {/if}
               {/each}
             {/if}
@@ -389,7 +447,7 @@
       </div>
 
       <!-- Input -->
-      <MessageInput onSend={sendMessage} onAbort={abortSession} disabled={isStreaming} />
+      <MessageInput onSend={sendMessage} onQueue={queueMessage} onAbort={abortSession} isStreaming={isStreaming} />
     </div>
 
     <!-- Right Sidebar - Context Panel -->

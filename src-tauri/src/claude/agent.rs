@@ -258,18 +258,10 @@ impl AgentSession {
                                                 target,
                                             });
                                         }
-                                        ContentBlock::ToolResult(result) => {
-                                            let status = if result.is_error.unwrap_or(false) {
-                                                "error"
-                                            } else {
-                                                "completed"
-                                            };
-                                            on_event(AgentEvent::ToolEnd {
-                                                id: result.tool_use_id.clone(),
-                                                status: status.to_string(),
-                                            });
+                                        _ => {
+                                            // ToolResult should come via Message::User, not here
+                                            eprintln!("[agent] Unexpected content block in Assistant message: {:?}", block);
                                         }
-                                        _ => {}
                                     }
                                 }
                             }
@@ -294,6 +286,24 @@ impl AgentSession {
                                     on_event(AgentEvent::SessionInit {
                                         auth_type: auth_type.to_string(),
                                     });
+                                }
+                            }
+                            Message::User(user_msg) => {
+                                // Check for tool results in user messages
+                                if let Some(content_blocks) = &user_msg.content {
+                                    for block in content_blocks.iter() {
+                                        if let ContentBlock::ToolResult(result) = block {
+                                            let status = if result.is_error.unwrap_or(false) {
+                                                "error"
+                                            } else {
+                                                "completed"
+                                            };
+                                            on_event(AgentEvent::ToolEnd {
+                                                id: result.tool_use_id.clone(),
+                                                status: status.to_string(),
+                                            });
+                                        }
+                                    }
                                 }
                             }
                             _ => {}
@@ -328,6 +338,16 @@ impl AgentSession {
     }
 }
 
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        format!("{}...", truncated)
+    } else {
+        s.to_string()
+    }
+}
+
 fn extract_tool_target(tool: &ToolUseBlock) -> String {
     // Extract the target (file path, pattern, etc.) from tool input
     match tool.name.as_str() {
@@ -353,15 +373,53 @@ fn extract_tool_target(tool: &ToolUseBlock) -> String {
         "Bash" => {
             tool.input.get("command")
                 .and_then(|v| v.as_str())
-                .map(|s| {
-                    if s.len() > 50 {
-                        format!("{}...", &s[..47])
-                    } else {
-                        s.to_string()
-                    }
-                })
+                .map(|s| truncate_str(s, 50))
                 .unwrap_or("command".to_string())
         }
-        _ => "...".to_string(),
+        "WebSearch" => {
+            tool.input.get("query")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or("searching...".to_string())
+        }
+        "WebFetch" => {
+            tool.input.get("url")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or("fetching...".to_string())
+        }
+        "Skill" => {
+            tool.input.get("skill")
+                .and_then(|v| v.as_str())
+                .unwrap_or("skill")
+                .to_string()
+        }
+        "Task" => {
+            tool.input.get("description")
+                .or_else(|| tool.input.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or("task".to_string())
+        }
+        "AskUserQuestion" => "asking question...".to_string(),
+        "NotebookEdit" => {
+            tool.input.get("notebook_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("notebook")
+                .to_string()
+        }
+        _ => {
+            // Try common field names for unknown tools
+            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
+            for field in fields {
+                if let Some(val) = tool.input.get(field).and_then(|v| v.as_str()) {
+                    // Prefix with tool name for context
+                    let detail = truncate_str(val, 40);
+                    return format!("{}: {}", tool.name, detail);
+                }
+            }
+            // Fallback: show tool name only
+            tool.name.clone()
+        }
     }
 }

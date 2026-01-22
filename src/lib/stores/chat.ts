@@ -18,6 +18,7 @@ export interface ToolActivity {
 
 export interface PermissionRequest {
   id: string;
+  activityId: string | null;  // ID of the activity awaiting permission
   tool: string;
   description: string;
   timestamp: number;
@@ -48,6 +49,7 @@ export interface ChatState {
   pendingPermission: PermissionRequest | null;
   isStreaming: boolean;
   streamingContent: string;
+  messageQueue: string[];  // Queue of messages to send after current turn completes
   tasks: TaskItem[];
   activeSkills: string[];
   tokenCount: number;
@@ -62,6 +64,7 @@ const initialState: ChatState = {
   pendingPermission: null,
   isStreaming: false,
   streamingContent: '',
+  messageQueue: [],
   tasks: [],
   activeSkills: [],
   tokenCount: 0,
@@ -220,6 +223,26 @@ function createChatStore() {
       sessionDuration: duration,
     })),
 
+    // Message queue management
+    enqueueMessage: (message: string) => update(s => ({
+      ...s,
+      messageQueue: [...s.messageQueue, message],
+    })),
+
+    dequeueMessage: (): string | undefined => {
+      const state = get({ subscribe });
+      const [first, ...rest] = state.messageQueue;
+      if (first !== undefined) {
+        update(s => ({ ...s, messageQueue: rest }));
+      }
+      return first;
+    },
+
+    clearMessageQueue: () => update(s => ({
+      ...s,
+      messageQueue: [],
+    })),
+
     // Finalize the current stream - convert streamItems to messages preserving order
     finalizeStream: () => update(s => {
       const newMessages = [...s.messages];
@@ -288,3 +311,4 @@ export const isStreaming = derived(chatStore, $chat => $chat.isStreaming);
 export const pendingPermission = derived(chatStore, $chat => $chat.pendingPermission);
 export const tasks = derived(chatStore, $chat => $chat.tasks);
 export const activeSkills = derived(chatStore, $chat => $chat.activeSkills);
+export const messageQueue = derived(chatStore, $chat => $chat.messageQueue);

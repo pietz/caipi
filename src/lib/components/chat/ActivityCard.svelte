@@ -11,6 +11,12 @@
     ChevronDown,
     ChevronRight,
     X,
+    Globe,
+    Download,
+    Sparkles,
+    MessageCircle,
+    ListTodo,
+    BookOpen,
   } from 'lucide-svelte';
   import type { ToolActivity, PermissionRequest } from '$lib/stores';
 
@@ -24,27 +30,30 @@
   let expanded = $state(false);
 
   const isAwaitingPermission = $derived(
-    pendingPermission !== null &&
-    activity.status === 'running' &&
-    activity.toolType === pendingPermission.tool
+    pendingPermission !== null && pendingPermission.activityId === activity.id
   );
 
   const isBash = $derived(activity.toolType === 'Bash');
 
-  const toolIcons: Record<string, { icon: typeof FileText; color: string }> = {
-    Read: { icon: FileText, color: 'text-blue-500' },
-    Write: { icon: Pencil, color: 'text-orange-500' },
-    Edit: { icon: Pencil, color: 'text-orange-500' },
-    Glob: { icon: Search, color: 'text-purple-500' },
-    Grep: { icon: Search, color: 'text-purple-500' },
-    Bash: { icon: Terminal, color: 'text-green-500' },
+  const toolIcons: Record<string, typeof FileText> = {
+    Read: FileText,
+    Write: Pencil,
+    Edit: Pencil,
+    Glob: Search,
+    Grep: Search,
+    Bash: Terminal,
+    WebSearch: Globe,
+    WebFetch: Download,
+    Skill: Sparkles,
+    Task: ListTodo,
+    AskUserQuestion: MessageCircle,
+    NotebookEdit: BookOpen,
   };
 
-  const toolConfig = $derived(toolIcons[activity.toolType] ?? { icon: Terminal, color: 'text-muted-foreground' });
-  const ToolIcon = $derived(toolConfig.icon);
+  const ToolIcon = $derived(toolIcons[activity.toolType] ?? Terminal);
 </script>
 
-<div class="mt-1">
+<div>
   <div
     class="flex items-center gap-2 rounded-md text-sm transition-colors"
     style:background-color={isAwaitingPermission ? 'rgba(234, 179, 8, 0.1)' : 'var(--muted)'}
@@ -58,7 +67,7 @@
       onclick={() => (expanded = !expanded)}
     >
       <!-- Tool Icon -->
-      <ToolIcon class={cn('w-4 h-4 flex-shrink-0', toolConfig.color)} />
+      <ToolIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
 
       <!-- Target -->
       <span class="flex-1 min-w-0 truncate text-muted-foreground">

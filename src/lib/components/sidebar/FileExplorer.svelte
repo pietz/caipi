@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { watchImmediate, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import FileTreeItem from './FileTreeItem.svelte';
   import { filesStore, type FileEntry } from '$lib/stores';
 
@@ -11,6 +12,7 @@
 
   let tree = $state<FileEntry[]>([]);
   let loading = $state(false);
+  let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
   filesStore.subscribe((state) => {
     tree = state.tree;
@@ -29,10 +31,40 @@
     }
   }
 
+  // Initial load when rootPath changes
   $effect(() => {
     if (rootPath) {
       loadDirectory(rootPath);
     }
+  });
+
+  // Watch for file system changes
+  $effect(() => {
+    if (!rootPath) return;
+
+    let stopWatcher: UnwatchFn | null = null;
+
+    watchImmediate(
+      rootPath,
+      () => {
+        // Debounce rapid changes
+        if (refreshTimeout) clearTimeout(refreshTimeout);
+        refreshTimeout = setTimeout(() => loadDirectory(rootPath), 300);
+      },
+      { recursive: true }
+    )
+      .then((unwatch) => {
+        stopWatcher = unwatch;
+      })
+      .catch((err) => {
+        console.error('Failed to start file watcher:', err);
+      });
+
+    // Cleanup on rootPath change or unmount
+    return () => {
+      stopWatcher?.();
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+    };
   });
 </script>
 

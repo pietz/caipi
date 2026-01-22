@@ -6,12 +6,13 @@
 
   interface Props {
     onSend: (message: string) => void;
+    onQueue: (message: string) => void;
     onAbort?: () => void;
-    disabled?: boolean;
+    isStreaming?: boolean;
     placeholder?: string;
   }
 
-  let { onSend, onAbort, disabled = false, placeholder = 'Ask Claude something...' }: Props = $props();
+  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude something...' }: Props = $props();
   let value = $state('');
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
   let focused = $state(false);
@@ -26,9 +27,14 @@
 
   function handleSubmit(e?: Event) {
     e?.preventDefault();
-    if (!value.trim() || disabled) return;
+    if (!value.trim()) return;
 
-    onSend(value.trim());
+    const msg = value.trim();
+    if (isStreaming) {
+      onQueue(msg);  // Queue during streaming
+    } else {
+      onSend(msg);   // Send directly
+    }
     value = '';
 
     // Reset textarea height
@@ -83,12 +89,12 @@
       onfocus={() => focused = true}
       onblur={() => focused = false}
       {placeholder}
-      disabled={disabled}
       rows={1}
-      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50"
+      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
     ></textarea>
 
-    {#if disabled}
+    {#if isStreaming && !hasContent}
+      <!-- Streaming with no content: show stop button -->
       <Button
         variant="destructive"
         size="sm"
@@ -99,12 +105,14 @@
         <StopIcon size={14} />
       </Button>
     {:else}
+      <!-- Not streaming, or streaming with content: show send button -->
       <Button
         variant={hasContent ? 'default' : 'secondary'}
         size="sm"
         onclick={handleSubmit}
         disabled={!hasContent}
         class="shrink-0 p-2"
+        title={isStreaming ? 'Queue message' : 'Send message'}
       >
         <SendIcon size={14} />
       </Button>
