@@ -128,3 +128,15 @@ pub async fn get_session_messages(
 
     Ok(session.messages.clone())
 }
+
+#[tauri::command]
+pub async fn abort_session(
+    session_id: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let sessions: tauri::State<'_, SessionStore> = app.state();
+    let mut store = sessions.lock().await;
+    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    session.abort().await.map_err(|e| e.to_string())
+}

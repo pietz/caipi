@@ -2,13 +2,25 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
-  import { FolderOpen, Settings, Menu, ArrowLeft } from 'lucide-svelte';
-  import { Button } from '$lib/components/ui';
+  import {
+    FolderIcon,
+    BackIcon,
+    SidebarLeftIcon,
+    SidebarRightIcon,
+    CaipiIcon,
+  } from '$lib/components/icons';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
   import PermissionModal from '$lib/components/permission/PermissionModal.svelte';
-  import { appStore, chatStore, type Message, type ToolActivity, type PermissionRequest } from '$lib/stores';
+  import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
+  import {
+    appStore,
+    chatStore,
+    type Message,
+    type ToolActivity,
+    type PermissionRequest,
+  } from '$lib/stores';
 
   interface ChatEvent {
     type: string;
@@ -27,11 +39,15 @@
   let sessionId = $state<string | null>(null);
   let folderPath = $state<string | null>(null);
   let folderName = $state<string>('');
+  let leftSidebarOpen = $state(false);
+  let rightSidebarOpen = $state(false);
 
   // Subscribe to app store
   appStore.subscribe((state) => {
     sessionId = state.sessionId;
     folderPath = state.selectedFolder;
+    leftSidebarOpen = state.leftSidebarOpen;
+    rightSidebarOpen = state.rightSidebarOpen;
     if (folderPath) {
       folderName = folderPath.split('/').pop() || folderPath;
     }
@@ -183,84 +199,161 @@
     appStore.setScreen('folder');
   }
 
-  // Combine messages and activities for display
-  const displayItems = $derived([...messages] as (Message | ToolActivity)[]);
+  async function abortSession() {
+    if (!sessionId) return;
+
+    try {
+      await invoke('abort_session', { sessionId });
+      chatStore.setStreaming(false);
+    } catch (e) {
+      console.error('Failed to abort session:', e);
+    }
+  }
 </script>
 
-<div class="flex flex-col h-full">
-  <!-- Header -->
-  <header class="flex items-center gap-3 px-4 py-3 border-b border-border bg-background">
-    <Button variant="ghost" size="icon" onclick={goBack}>
-      <ArrowLeft class="w-5 h-5" />
-    </Button>
+<div class="flex flex-col h-full relative">
+  <!-- Header - Full width at top -->
+  <div
+    class="py-2 px-3 flex items-center justify-between shrink-0"
+    style="border-bottom: 1px solid var(--border); background-color: var(--header-bg);"
+    data-tauri-drag-region
+  >
+    <div class="flex items-center gap-2 pl-[70px]">
+      <!-- Back button -->
+      <button
+        type="button"
+        onclick={goBack}
+        class="p-1 rounded transition-all duration-100 text-muted hover:bg-hover hover:text-secondary"
+        title="Back to projects"
+      >
+        <BackIcon size={16} />
+      </button>
 
-    <div class="flex items-center gap-2 flex-1 min-w-0">
-      <FolderOpen class="w-4 h-4 text-muted-foreground flex-shrink-0" />
-      <span class="font-medium truncate">{folderName}</span>
+      <!-- Left sidebar toggle -->
+      <button
+        type="button"
+        onclick={() => appStore.toggleLeftSidebar()}
+        class="p-1 rounded transition-all duration-100"
+        style="
+          background-color: {leftSidebarOpen ? 'var(--hover)' : 'transparent'};
+          color: {leftSidebarOpen ? 'var(--text-secondary)' : 'var(--text-dim)'};
+        "
+        title="Toggle file explorer"
+      >
+        <SidebarLeftIcon size={16} />
+      </button>
+
+      <!-- Separator -->
+      <div
+        class="w-px h-4 mx-1"
+        style="background-color: var(--border-hover);"
+      ></div>
+
+      <!-- Project info -->
+      <span class="text-folder flex items-center">
+        <FolderIcon size={14} />
+      </span>
+      <span class="text-sm font-medium text-primary">{folderName}</span>
     </div>
 
-    <Button variant="ghost" size="icon">
-      <Settings class="w-5 h-5" />
-    </Button>
-  </header>
-
-  <!-- Messages -->
-  <div
-    bind:this={messagesContainer}
-    class="flex-1 overflow-y-auto"
-  >
-    {#if messages.length === 0 && !isStreaming}
-      <!-- Empty State -->
-      <div class="flex flex-col items-center justify-center h-full p-8 text-center">
-        <div class="text-4xl mb-4">👋</div>
-        <h2 class="text-xl font-semibold mb-2">Start a conversation</h2>
-        <p class="text-muted-foreground max-w-md">
-          Ask Claude to help you with coding tasks, explore your codebase, or explain how things work.
-        </p>
-        <div class="mt-6 space-y-2">
-          <p class="text-sm text-muted-foreground">Try asking:</p>
-          <div class="flex flex-wrap gap-2 justify-center">
-            {#each ['What does this project do?', 'Find all TODO comments', 'Explain the main function'] as prompt}
-              <button
-                class="px-3 py-1.5 text-sm bg-muted hover:bg-muted/80 rounded-full transition-colors"
-                onclick={() => sendMessage(prompt)}
-              >
-                {prompt}
-              </button>
-            {/each}
-          </div>
-        </div>
-      </div>
-    {:else}
-      <!-- Message List -->
-      {#each messages as message (message.id)}
-        <ChatMessage {message} />
-      {/each}
-
-      <!-- Activities (during streaming) -->
-      {#if isStreaming}
-        {#each activities as activity (activity.id)}
-          <ActivityCard {activity} />
-        {/each}
-
-        <!-- Streaming Message -->
-        {#if streamingContent}
-          <ChatMessage
-            message={{
-              id: 'streaming',
-              role: 'assistant',
-              content: streamingContent,
-              timestamp: Date.now() / 1000,
-            }}
-            streaming={true}
-          />
-        {/if}
-      {/if}
-    {/if}
+    <div class="flex items-center gap-2">
+      <!-- Right sidebar toggle -->
+      <button
+        type="button"
+        onclick={() => appStore.toggleRightSidebar()}
+        class="p-1 rounded transition-all duration-100"
+        style="
+          background-color: {rightSidebarOpen ? 'var(--hover)' : 'transparent'};
+          color: {rightSidebarOpen ? 'var(--text-secondary)' : 'var(--text-dim)'};
+        "
+        title="Toggle context panel"
+      >
+        <SidebarRightIcon size={16} />
+      </button>
+    </div>
   </div>
 
-  <!-- Input -->
-  <MessageInput onSend={sendMessage} disabled={isStreaming} />
+  <!-- Content area with sidebars -->
+  <div class="flex flex-1 min-h-0">
+    <!-- Left Sidebar - File Explorer -->
+    <div
+      class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+      style="
+        width: {leftSidebarOpen ? '200px' : '0px'};
+        border-right: {leftSidebarOpen ? '1px solid var(--border)' : 'none'};
+      "
+    >
+      {#if folderPath}
+        <FileExplorer rootPath={folderPath} />
+      {/if}
+    </div>
+
+    <!-- Main Chat Area -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- Messages -->
+      <div
+        bind:this={messagesContainer}
+        class="flex-1 overflow-y-auto p-4"
+      >
+        {#if messages.length === 0 && !isStreaming}
+          <!-- Empty State -->
+          <div class="flex flex-col items-center justify-center h-full text-dim">
+            <div class="mb-3 opacity-15">
+              <CaipiIcon size={64} />
+            </div>
+            <p class="text-sm mb-1 text-muted">
+              Start a conversation
+            </p>
+            <p class="text-xs">
+              Ask Claude to help with your code
+            </p>
+          </div>
+        {:else}
+          <!-- Message List -->
+          <div class="flex flex-col">
+            {#each messages as message, index (message.id)}
+              <ChatMessage {message} showDivider={index > 0} />
+            {/each}
+
+            <!-- Activities (during streaming) -->
+            {#if isStreaming}
+              {#each activities as activity (activity.id)}
+                <ActivityCard {activity} />
+              {/each}
+
+              <!-- Streaming Message -->
+              {#if streamingContent}
+                <ChatMessage
+                  message={{
+                    id: 'streaming',
+                    role: 'assistant',
+                    content: streamingContent,
+                    timestamp: Date.now() / 1000,
+                  }}
+                  streaming={true}
+                  showDivider={messages.length > 0 || activities.length > 0}
+                />
+              {/if}
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Input -->
+      <MessageInput onSend={sendMessage} onAbort={abortSession} disabled={isStreaming} />
+    </div>
+
+    <!-- Right Sidebar - Context Panel -->
+    <div
+      class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+      style="
+        width: {rightSidebarOpen ? '220px' : '0px'};
+        border-left: {rightSidebarOpen ? '1px solid var(--border)' : 'none'};
+      "
+    >
+      <ContextPanel />
+    </div>
+  </div>
 
   <!-- Permission Modal -->
   {#if pendingPermission}

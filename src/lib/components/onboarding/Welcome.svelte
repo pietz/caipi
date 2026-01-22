@@ -1,7 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { CheckCircle, XCircle, Loader, Terminal, ExternalLink } from 'lucide-svelte';
-  import { Button, Card } from '$lib/components/ui';
+  import { CaipiIcon, CheckIcon, SpinnerIcon } from '$lib/components/icons';
   import { appStore, type CliStatus } from '$lib/stores';
 
   interface CliInstallStatus {
@@ -66,126 +65,86 @@
   const canProceed = $derived(installStatus?.installed && authStatus?.authenticated);
 </script>
 
-<div class="flex flex-col items-center justify-center h-full p-8">
-  <div class="max-w-md w-full space-y-8">
-    <!-- Logo/Title -->
-    <div class="text-center">
-      <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-        <Terminal class="w-8 h-8 text-primary" />
-      </div>
-      <h1 class="text-3xl font-bold">Caipi</h1>
-      <p class="text-muted-foreground mt-2">
-        A friendly chat interface for Claude Code
-      </p>
-    </div>
-
-    <!-- Status Card -->
-    <Card class="p-6">
-      <h2 class="font-semibold mb-4">Setup Status</h2>
-
-      {#if error}
-        <div class="text-destructive text-sm mb-4">{error}</div>
-        <Button onclick={checkCliStatus} variant="outline" class="w-full">
-          Retry
-        </Button>
-      {:else}
-        <div class="space-y-4">
-          <!-- CLI Installation -->
-          <div class="flex items-start gap-3">
-            {#if checkingInstall}
-              <Loader class="w-5 h-5 text-muted-foreground mt-0.5 animate-spin" />
-            {:else if installStatus?.installed}
-              <CheckCircle class="w-5 h-5 text-green-500 mt-0.5" />
-            {:else}
-              <XCircle class="w-5 h-5 text-destructive mt-0.5" />
-            {/if}
-            <div class="flex-1">
-              <div class="font-medium">Claude Code CLI</div>
-              {#if checkingInstall}
-                <div class="text-sm text-muted-foreground">
-                  Checking installation...
-                </div>
-              {:else if installStatus?.installed}
-                <div class="text-sm text-muted-foreground">
-                  Installed {installStatus.version ? `(${installStatus.version})` : ''}
-                </div>
-              {:else}
-                <div class="text-sm text-muted-foreground">
-                  Not installed. Install with:
-                </div>
-                <code class="text-xs bg-muted px-2 py-1 rounded mt-1 block">
-                  npm install -g @anthropic-ai/claude-code
-                </code>
-              {/if}
-            </div>
-          </div>
-
-          <!-- Authentication -->
-          <div class="flex items-start gap-3">
-            {#if checkingInstall || checkingAuth}
-              <Loader class="w-5 h-5 text-muted-foreground mt-0.5 animate-spin" />
-            {:else if authStatus?.authenticated}
-              <CheckCircle class="w-5 h-5 text-green-500 mt-0.5" />
-            {:else if installStatus?.installed}
-              <XCircle class="w-5 h-5 text-destructive mt-0.5" />
-            {:else}
-              <div class="w-5 h-5 mt-0.5 rounded-full border-2 border-muted-foreground/30"></div>
-            {/if}
-            <div class="flex-1">
-              <div class="font-medium">Authentication</div>
-              {#if checkingInstall}
-                <div class="text-sm text-muted-foreground">
-                  Waiting for CLI check...
-                </div>
-              {:else if checkingAuth}
-                <div class="text-sm text-muted-foreground">
-                  Checking authentication...
-                </div>
-              {:else if authStatus?.authenticated}
-                <div class="text-sm text-muted-foreground">
-                  Authenticated and ready
-                </div>
-              {:else if installStatus?.installed}
-                <div class="text-sm text-muted-foreground">
-                  Not authenticated. Run:
-                </div>
-                <code class="text-xs bg-muted px-2 py-1 rounded mt-1 block">
-                  claude login
-                </code>
-              {:else}
-                <div class="text-sm text-muted-foreground">
-                  Install CLI first
-                </div>
-              {/if}
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-6 space-y-3">
-          {#if canProceed}
-            <Button onclick={proceed} class="w-full">
-              Get Started
-            </Button>
-          {:else if !checkingInstall && !checkingAuth}
-            <Button onclick={checkCliStatus} variant="outline" class="w-full">
-              Check Again
-            </Button>
-          {/if}
-        </div>
-      {/if}
-    </Card>
-
-    <!-- Help Link -->
-    <div class="text-center">
-      <a
-        href="https://docs.anthropic.com/en/docs/claude-code"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-      >
-        Learn more about Claude Code
-        <ExternalLink class="w-3 h-3" />
-      </a>
-    </div>
+<div class="flex flex-col items-center justify-center h-full gap-8 pt-12 px-10 pb-10" data-tauri-drag-region>
+  <!-- Logo and Title -->
+  <div class="flex flex-col items-center text-center">
+    <CaipiIcon size={64} />
+    <h1 class="text-lg font-semibold mt-4 text-primary">
+      Caipi
+    </h1>
+    <p class="text-xs text-muted mt-1">
+      A friendly UI for Claude Code
+    </p>
   </div>
+
+  <!-- System Check Card -->
+  <div
+    class="w-[280px] rounded-lg p-4 px-5"
+    style="background: var(--card); border: 1px solid var(--border);"
+  >
+    <div class="text-xs font-medium text-muted uppercase tracking-[0.5px] mb-3">
+      System Check
+    </div>
+
+    <div class="flex flex-col gap-2.5">
+      <!-- CLI Installation Check -->
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-secondary">Claude CLI installed</span>
+        <span class="text-accent">
+          {#if checkingInstall}
+            <SpinnerIcon size={14} />
+          {:else if installStatus?.installed}
+            <CheckIcon size={14} />
+          {:else}
+            <span class="text-muted">✗</span>
+          {/if}
+        </span>
+      </div>
+
+      <!-- Authentication Check -->
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-secondary">Authenticated</span>
+        <span class="text-accent">
+          {#if checkingInstall || checkingAuth}
+            <SpinnerIcon size={14} />
+          {:else if authStatus?.authenticated}
+            <CheckIcon size={14} />
+          {:else}
+            <span class="text-muted">✗</span>
+          {/if}
+        </span>
+      </div>
+    </div>
+
+    {#if error}
+      <div class="mt-3 text-xs text-red-500">{error}</div>
+    {/if}
+
+    {#if !checkingInstall && !checkingAuth && !installStatus?.installed}
+      <div class="mt-3 text-xs text-secondary">
+        Install with: <code class="bg-muted px-1.5 py-0.5 rounded text-xs">npm install -g @anthropic-ai/claude-code</code>
+      </div>
+    {/if}
+
+    {#if !checkingInstall && !checkingAuth && installStatus?.installed && !authStatus?.authenticated}
+      <div class="mt-3 text-xs text-secondary">
+        Run: <code class="bg-muted px-1.5 py-0.5 rounded text-xs">claude login</code>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Continue Button -->
+  <button
+    onclick={canProceed ? proceed : checkCliStatus}
+    disabled={checkingInstall || checkingAuth}
+    class="px-6 py-2 text-sm font-medium rounded-md transition-all duration-150"
+    style="
+      background-color: {canProceed ? 'var(--primary)' : 'var(--secondary)'};
+      color: {canProceed ? '#fff' : 'var(--text-dim)'};
+      opacity: {checkingInstall || checkingAuth ? 0.6 : 1};
+      cursor: {checkingInstall || checkingAuth ? 'not-allowed' : 'pointer'};
+    "
+  >
+    {canProceed ? 'Continue' : 'Check Again'}
+  </button>
 </div>

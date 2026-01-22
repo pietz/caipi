@@ -7,7 +7,7 @@ Caipi is a Tauri 2.0 desktop application that provides a friendly chat UI for Cl
 ## Tech Stack
 
 - **Frontend**: Svelte 5 (with runes) + TypeScript + SvelteKit (static adapter)
-- **Styling**: Tailwind CSS v3 + shadcn-style components with CSS variables
+- **Styling**: Tailwind CSS v3 + custom CSS variables
 - **Backend**: Rust + Tauri 2.0
 - **Claude Integration**: `claude-agent-sdk-rs` v0.6
 
@@ -38,16 +38,19 @@ cargo build    # Build the backend
 caipi/
 ├── src/                          # Svelte frontend
 │   ├── lib/
+│   │   ├── assets/               # Static assets (caipi-logo.png)
 │   │   ├── components/
-│   │   │   ├── ui/               # Base components (Button, Card, Dialog, etc.)
+│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Titlebar, etc.)
+│   │   │   ├── icons/            # SVG icon components (FolderIcon, SendIcon, CaipiIcon, etc.)
+│   │   │   ├── sidebar/          # Sidebars (FileExplorer, ContextPanel, TaskList, SkillsList)
 │   │   │   ├── onboarding/       # Welcome screen with CLI detection
 │   │   │   ├── folder/           # Folder picker with drag-drop
 │   │   │   ├── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard)
 │   │   │   └── permission/       # Permission modal
-│   │   ├── stores/               # Svelte stores (app.ts, chat.ts)
+│   │   ├── stores/               # Svelte stores (app.ts, chat.ts, files.ts)
 │   │   └── utils/                # Utilities (cn function)
 │   ├── routes/                   # SvelteKit routes (+page.svelte, +layout.svelte)
-│   └── app.css                   # Global styles + Tailwind
+│   └── app.css                   # Global styles + CSS variables
 ├── src-tauri/                    # Rust backend
 │   ├── src/
 │   │   ├── lib.rs                # Tauri app setup, command registration
@@ -55,6 +58,7 @@ caipi/
 │   │   ├── commands/             # Tauri commands
 │   │   │   ├── setup.rs          # CLI detection (check_cli_installed, check_cli_authenticated)
 │   │   │   ├── folder.rs         # Folder operations (get_recent_folders, save_recent_folder)
+│   │   │   ├── files.rs          # File operations (list_directory)
 │   │   │   └── chat.rs           # Chat/session management (create_session, send_message)
 │   │   ├── claude/               # SDK integration
 │   │   │   ├── agent.rs          # AgentSession wrapper, streaming events
@@ -62,6 +66,47 @@ caipi/
 │   │   └── storage/              # Local data persistence
 │   └── capabilities/default.json # Tauri permission capabilities
 └── package.json
+```
+
+## Design System
+
+### Brand Colors (from logo)
+```
+Dark blue-gray:  #122e38   (mascot outline, potential dark accents)
+Forest green:    #439c3a   (deeper green tones)
+Acid green:      #a9d80d   (bright lime highlights)
+```
+
+### UI Colors
+```
+Background:      #0d0d0d
+Sidebar:         rgba(0, 0, 0, 0.2)
+Card:            rgba(255, 255, 255, 0.02)
+Border:          rgba(255, 255, 255, 0.06)
+Hover:           rgba(255, 255, 255, 0.04)
+Selected:        rgba(59, 130, 246, 0.15)
+
+Text primary:    #e5e5e5
+Text secondary:  #a3a3a3
+Text muted:      #737373
+Text dim:        #525252
+Text darkest:    #404040
+
+Accent blue:     #3b82f6
+Folder purple:   #a78bfa
+File gray:       #8b8b8b
+```
+
+### Typography
+```
+Base font:       -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif
+Base size:       14px
+
+Title large:     18px, weight 600  (main headings)
+Title medium:    14px (text-sm), weight 600  (section headers)
+Body:            14px  (message content, inputs, project names)
+Small:           13px  (file tree items, task items)
+Tiny:            12px  (labels, hints, timestamps, paths)
 ```
 
 ## Architecture
@@ -83,8 +128,9 @@ caipi/
 - `claude:error` - Error occurred
 
 ### State Management
-- `app.ts` store: Current screen, selected folder, settings
-- `chat.ts` store: Messages, tool activities, streaming state
+- `app.ts` store: Current screen, selected folder, sidebar toggles, settings
+- `chat.ts` store: Messages, tool activities, streaming state, tasks, skills, token count
+- `files.ts` store: File tree state, expanded paths, selected file
 
 ## Svelte 5 Runes
 
@@ -94,19 +140,22 @@ This project uses Svelte 5 runes syntax:
 - `$effect()` for side effects
 - `$props()` for component props
 
-## Styling
+## UI Components
 
-Uses Tailwind CSS v3 with CSS variables for theming (shadcn-style):
-- Colors defined in `app.css` as CSS variables (e.g., `--background`, `--foreground`)
-- Components use `bg-background`, `text-foreground`, etc.
-- Dark theme is default
+### Sidebars
+- **Left sidebar (200px)**: File explorer with tree view, toggled via header button
+- **Right sidebar (220px)**: Context panel with task list and active skills
+
+### Chat Interface
+- Role-based message labels (no avatars)
+- Dividers between messages
+- Input with focus outline feedback
+- Footer with keyboard hints and token/time stats
 
 ## Known Issues
 
-1. **Send button alignment**: The send button in MessageInput.svelte is not perfectly vertically aligned with the textarea
-2. **Horizontal scroll bounce**: Elements show slight horizontal movement when scrolling (can fix with `overscroll-behavior: none`)
-3. **Unused Rust code**: `translate_permission`, `translate_bash_command` functions and `AgentError::Session` variant are defined but not yet used
-4. **Bundle size**: Main chunk is ~1.1MB (could benefit from code splitting)
+1. **Unused Rust code**: `translate_permission`, `translate_bash_command` functions and `AgentError::Session` variant are defined but not yet used
+2. **svelte:self deprecation**: FileTreeItem uses deprecated `<svelte:self>` for recursion (still functional)
 
 ## Tauri Permissions
 

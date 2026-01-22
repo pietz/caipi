@@ -3,60 +3,138 @@
 @tailwind utilities;
 
 @layer base {
+  /* Light theme (default) */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    /* Core */
+    --background: #fafafa;
+    --foreground: #171717;
+
+    /* Title bar */
+    --titlebar: rgba(250, 250, 250, 0.95);
+    --titlebar-border: rgba(0, 0, 0, 0.08);
+
+    /* Sidebars */
+    --sidebar: rgba(0, 0, 0, 0.02);
+
+    /* Borders */
+    --border: rgba(0, 0, 0, 0.08);
+    --border-hover: rgba(0, 0, 0, 0.12);
+    --border-input: rgba(0, 0, 0, 0.12);
+
+    /* Backgrounds */
+    --card: rgba(0, 0, 0, 0.02);
+    --hover: rgba(0, 0, 0, 0.04);
+    --selected: rgba(59, 130, 246, 0.12);
+    --input-bg: rgba(0, 0, 0, 0.03);
+    --header-bg: rgba(0, 0, 0, 0.02);
+
+    /* Text colors */
+    --text-primary: #171717;
+    --text-secondary: #525252;
+    --text-muted: #737373;
+    --text-dim: #a3a3a3;
+    --text-darkest: #d4d4d4;
+    --text-selected: #171717;
+
+    /* Accent colors */
+    --accent-blue: #2563eb;
+    --folder-purple: #7c3aed;
+    --file-gray: #6b7280;
+
+    /* Traffic lights */
+    --traffic-red: #ff5f57;
+    --traffic-yellow: #febc2e;
+    --traffic-green: #28c840;
+
+    /* Semantic mappings */
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
+    --secondary: rgba(0, 0, 0, 0.05);
+    --secondary-foreground: #525252;
+    --muted: rgba(0, 0, 0, 0.05);
+    --muted-foreground: #737373;
+    --accent: rgba(0, 0, 0, 0.05);
+    --accent-foreground: #171717;
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+    --ring: #2563eb;
     --radius: 0.5rem;
+
+    /* Scrollbar */
+    --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
   }
 
+  /* Dark theme */
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    /* Core */
+    --background: #0d0d0d;
+    --foreground: #e5e5e5;
+
+    /* Title bar */
+    --titlebar: rgba(30, 30, 30, 0.95);
+    --titlebar-border: rgba(255, 255, 255, 0.06);
+
+    /* Sidebars */
+    --sidebar: rgba(0, 0, 0, 0.2);
+
+    /* Borders */
+    --border: rgba(255, 255, 255, 0.06);
+    --border-hover: rgba(255, 255, 255, 0.08);
+    --border-input: rgba(255, 255, 255, 0.08);
+
+    /* Backgrounds */
+    --card: rgba(255, 255, 255, 0.02);
+    --hover: rgba(255, 255, 255, 0.04);
+    --selected: rgba(59, 130, 246, 0.15);
+    --input-bg: rgba(255, 255, 255, 0.03);
+    --header-bg: rgba(0, 0, 0, 0.1);
+
+    /* Text colors */
+    --text-primary: #e5e5e5;
+    --text-secondary: #a3a3a3;
+    --text-muted: #737373;
+    --text-dim: #525252;
+    --text-darkest: #404040;
+    --text-selected: #c9c9c9;
+
+    /* Accent colors */
+    --accent-blue: #3b82f6;
+    --folder-purple: #a78bfa;
+    --file-gray: #8b8b8b;
+
+    /* Semantic mappings */
+    --primary: #3b82f6;
+    --primary-foreground: #ffffff;
+    --secondary: rgba(255, 255, 255, 0.05);
+    --secondary-foreground: #a3a3a3;
+    --muted: rgba(255, 255, 255, 0.05);
+    --muted-foreground: #737373;
+    --accent: rgba(255, 255, 255, 0.05);
+    --accent-foreground: #e5e5e5;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --ring: #3b82f6;
+
+    /* Scrollbar */
+    --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
   }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: var(--border);
   }
+
   html, body {
-    @apply bg-background text-foreground;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
     overscroll-behavior: none;
+    font-size: 16px;
+    line-height: 1.4;
   }
 }
 
@@ -67,16 +145,22 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: hsl(var(--muted));
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Placeholder text */
+textarea::placeholder,
+input::placeholder {
+  color: var(--text-dim);
 }
 
 /* Animations */
@@ -88,6 +172,11 @@
 @keyframes zoom-in-95 {
   from { transform: scale(0.95); }
   to { transform: scale(1); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .animate-in {
@@ -102,7 +191,11 @@
   animation: zoom-in-95 0.2s ease-out;
 }
 
-/* Code highlighting */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Code highlighting - Light theme */
 pre code.hljs {
   display: block;
   overflow-x: auto;
@@ -114,39 +207,113 @@ code.hljs {
 }
 
 .hljs {
-  color: hsl(var(--foreground));
-  background: hsl(var(--muted));
+  color: var(--text-primary);
+  background: var(--muted);
 }
 
 .hljs-comment,
 .hljs-quote {
-  color: hsl(var(--muted-foreground));
+  color: var(--text-muted);
   font-style: italic;
 }
 
+/* Light theme syntax colors */
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-subst {
-  color: #c678dd;
+  color: #8250df;
 }
 
 .hljs-string,
 .hljs-doctag {
-  color: #98c379;
+  color: #0a3069;
 }
 
 .hljs-number,
 .hljs-literal,
 .hljs-variable,
 .hljs-template-variable {
-  color: #d19a66;
+  color: #0550ae;
 }
 
 .hljs-function .hljs-title {
-  color: #61afef;
+  color: #6639ba;
 }
 
 .hljs-type,
 .hljs-class .hljs-title {
+  color: #953800;
+}
+
+/* Dark theme syntax colors */
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-subst {
+  color: #c678dd;
+}
+
+.dark .hljs-string,
+.dark .hljs-doctag {
+  color: #98c379;
+}
+
+.dark .hljs-number,
+.dark .hljs-literal,
+.dark .hljs-variable,
+.dark .hljs-template-variable {
+  color: #d19a66;
+}
+
+.dark .hljs-function .hljs-title {
+  color: #61afef;
+}
+
+.dark .hljs-type,
+.dark .hljs-class .hljs-title {
   color: #e5c07b;
+}
+
+/* Utility classes for mockup colors */
+.bg-background { background-color: var(--background); }
+.bg-titlebar { background-color: var(--titlebar); }
+.bg-sidebar { background-color: var(--sidebar); }
+.bg-card { background-color: var(--card); }
+.bg-hover { background-color: var(--hover); }
+.bg-selected { background-color: var(--selected); }
+.bg-input { background-color: var(--input-bg); }
+.bg-header { background-color: var(--header-bg); }
+.bg-primary { background-color: var(--primary); }
+.bg-secondary { background-color: var(--secondary); }
+.bg-muted { background-color: var(--muted); }
+
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-dim { color: var(--text-dim); }
+.text-darkest { color: var(--text-darkest); }
+.text-selected { color: var(--text-selected); }
+.text-accent { color: var(--accent-blue); }
+.text-folder { color: var(--folder-purple); }
+.text-file { color: var(--file-gray); }
+.text-foreground { color: var(--foreground); }
+.text-muted-foreground { color: var(--muted-foreground); }
+
+.border-border { border-color: var(--border); }
+.border-hover { border-color: var(--border-hover); }
+.border-input { border-color: var(--border-input); }
+
+/* Prose styling for markdown */
+.prose {
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.prose pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.prose code::before,
+.prose code::after {
+  content: none;
 }

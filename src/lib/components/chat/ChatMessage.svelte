@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { cn } from '$lib/utils';
-  import { Copy, Check, User, Bot } from 'lucide-svelte';
   import { marked } from 'marked';
   import hljs from 'highlight.js';
   import type { Message } from '$lib/stores';
@@ -8,10 +6,10 @@
   interface Props {
     message: Message;
     streaming?: boolean;
+    showDivider?: boolean;
   }
 
-  let { message, streaming = false }: Props = $props();
-  let copied = $state(false);
+  let { message, streaming = false, showDivider = false }: Props = $props();
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -23,82 +21,40 @@
 
   marked.use({ renderer });
 
-  function formatTimestamp(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  async function copyToClipboard() {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    } catch (e) {
-      console.error('Failed to copy:', e);
-    }
-  }
-
   const isUser = $derived(message.role === 'user');
   const htmlContent = $derived(
     message.content ? marked.parse(message.content) as string : ''
   );
 </script>
 
-<div class={cn('group flex gap-4 p-4', isUser ? 'bg-muted/30' : '')}>
-  <!-- Avatar -->
-  <div
-    class={cn(
-      'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-      isUser ? 'bg-primary' : 'bg-secondary'
-    )}
-  >
-    {#if isUser}
-      <User class="w-4 h-4 text-primary-foreground" />
-    {:else}
-      <Bot class="w-4 h-4 text-secondary-foreground" />
-    {/if}
-  </div>
+<div>
+  <!-- Divider between messages -->
+  {#if showDivider}
+    <div
+      class="h-px my-4"
+      style="background-color: rgba(255, 255, 255, 0.04);"
+    ></div>
+  {/if}
 
-  <!-- Content -->
-  <div class="flex-1 min-w-0">
-    <div class="flex items-center gap-2 mb-1">
-      <span class="font-medium text-sm">
-        {isUser ? 'You' : 'Claude'}
-      </span>
-      <span class="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-        {formatTimestamp(message.timestamp)}
-      </span>
+  <div class="flex flex-col gap-1.5">
+    <!-- Role label -->
+    <div
+      class="text-xs font-medium text-muted uppercase tracking-[0.5px]"
+    >
+      {isUser ? 'You' : 'Claude'}
     </div>
 
+    <!-- Message content -->
     <div
-      class={cn(
-        'prose prose-sm dark:prose-invert max-w-none',
-        'prose-pre:bg-muted prose-pre:border prose-pre:border-border',
-        'prose-code:before:content-none prose-code:after:content-none',
-        streaming && 'animate-pulse'
-      )}
+      class="text-sm leading-[1.6] whitespace-pre-wrap"
+      style="color: {isUser ? 'var(--text-secondary)' : 'var(--text-primary)'};"
     >
-      {@html htmlContent}
       {#if streaming}
-        <span class="inline-block w-2 h-4 bg-foreground animate-pulse ml-0.5"></span>
+        {@html htmlContent}
+        <span class="inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5"></span>
+      {:else}
+        {@html htmlContent}
       {/if}
     </div>
-
-    <!-- Copy Button -->
-    {#if !isUser && message.content}
-      <button
-        onclick={copyToClipboard}
-        class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-muted rounded"
-        title="Copy message"
-      >
-        {#if copied}
-          <Check class="w-4 h-4 text-green-500" />
-        {:else}
-          <Copy class="w-4 h-4 text-muted-foreground" />
-        {/if}
-      </button>
-    {/if}
   </div>
 </div>

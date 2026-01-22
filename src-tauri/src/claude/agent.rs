@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub enum AgentError {
     #[error("SDK error: {0}")]
     Sdk(String),
+    #[allow(dead_code)]
     #[error("Session error: {0}")]
     Session(String),
 }
@@ -32,6 +33,7 @@ pub struct AgentSession {
     pub folder_path: String,
     pub messages: Vec<ChatMessage>,
     client: Option<ClaudeClient>,
+    #[allow(dead_code)]
     pending_permissions: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
 }
 
@@ -177,6 +179,13 @@ impl AgentSession {
                 // Interrupt current operation
                 client.interrupt().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
             }
+        }
+        Ok(())
+    }
+
+    pub async fn abort(&mut self) -> Result<(), AgentError> {
+        if let Some(client) = &mut self.client {
+            client.interrupt().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
         }
         Ok(())
     }

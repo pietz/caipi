@@ -25,11 +25,14 @@ pub fn run() {
             commands::validate_folder,
             commands::get_recent_folders,
             commands::save_recent_folder,
+            // File commands
+            commands::list_directory,
             // Chat commands
             commands::create_session,
             commands::send_message,
             commands::respond_permission,
             commands::get_session_messages,
+            commands::abort_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

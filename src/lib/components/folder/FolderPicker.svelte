@@ -1,8 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { FolderOpen, Clock, ChevronRight, Upload } from 'lucide-svelte';
-  import { Button, Card, Spinner } from '$lib/components/ui';
+  import { FolderIcon, SpinnerIcon } from '$lib/components/icons';
   import { appStore } from '$lib/stores';
 
   interface RecentFolder {
@@ -16,6 +15,8 @@
   let validating = $state(false);
   let error = $state<string | null>(null);
   let dragOver = $state(false);
+  let dropZoneHover = $state(false);
+  let hoveredFolder = $state<string | null>(null);
 
   async function loadRecentFolders() {
     try {
@@ -89,7 +90,6 @@
     const items = e.dataTransfer?.items;
     if (!items || items.length === 0) return;
 
-    // Get the first item
     const item = items[0];
     if (item.kind !== 'file') return;
 
@@ -99,8 +99,6 @@
       return;
     }
 
-    // Unfortunately, we can't get the full path from a drag-drop in a secure context
-    // So we'll need to use the native dialog
     error = 'Drag and drop is not fully supported. Please use the browse button.';
   }
 
@@ -122,85 +120,90 @@
   });
 </script>
 
-<div class="flex flex-col items-center justify-center h-full p-8">
-  <div class="max-w-lg w-full space-y-6">
-    <!-- Header -->
-    <div class="text-center">
-      <h1 class="text-2xl font-bold">Select a Project</h1>
-      <p class="text-muted-foreground mt-2">
-        Choose a folder to work with Claude
-      </p>
-    </div>
+<div class="flex flex-col items-center justify-center h-full pt-12 px-8 pb-8 relative" data-tauri-drag-region>
+  <!-- Version number -->
+  <span class="absolute top-3 right-4 text-xs text-darkest">v0.1.0</span>
 
-    <!-- Drop Zone -->
-    <div
-      role="button"
-      tabindex="0"
-      class="relative border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer
-        {dragOver ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'}"
-      ondragover={handleDragOver}
-      ondragleave={handleDragLeave}
-      ondrop={handleDrop}
-      onclick={selectFolder}
-      onkeydown={(e) => e.key === 'Enter' && selectFolder()}
-    >
-      {#if validating}
-        <Spinner size="lg" class="mx-auto mb-4" />
-        <p class="text-muted-foreground">Validating folder...</p>
-      {:else}
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
-          <Upload class="w-8 h-8 text-muted-foreground" />
-        </div>
-        <p class="text-lg font-medium">
-          Drop a folder here
-        </p>
-        <p class="text-muted-foreground mt-1">
-          or click to browse
-        </p>
-      {/if}
-    </div>
+  <div class="w-full max-w-lg">
+  <!-- Header -->
+  <div class="mb-6">
+    <h2 class="text-sm font-semibold text-primary mb-1">
+      Open a Project
+    </h2>
+    <p class="text-xs text-muted">
+      Select a folder to start working with Claude
+    </p>
+  </div>
 
-    {#if error}
-      <div class="text-destructive text-sm text-center">{error}</div>
-    {/if}
-
-    <!-- Recent Folders -->
-    {#if recentFolders.length > 0}
-      <div class="space-y-2">
-        <h2 class="text-sm font-medium text-muted-foreground flex items-center gap-2">
-          <Clock class="w-4 h-4" />
-          Recent Projects
-        </h2>
-        <Card class="divide-y divide-border">
-          {#each recentFolders as folder}
-            <button
-              class="w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left"
-              onclick={() => validateAndProceed(folder.path)}
-              disabled={validating}
-            >
-              <FolderOpen class="w-5 h-5 text-muted-foreground flex-shrink-0" />
-              <div class="flex-1 min-w-0">
-                <div class="font-medium truncate">{folder.name}</div>
-                <div class="text-xs text-muted-foreground truncate">{folder.path}</div>
-              </div>
-              <div class="text-xs text-muted-foreground flex-shrink-0">
-                {formatTime(folder.timestamp)}
-              </div>
-              <ChevronRight class="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            </button>
-          {/each}
-        </Card>
+  <!-- Drop Zone -->
+  <button
+    type="button"
+    ondragover={handleDragOver}
+    ondragleave={handleDragLeave}
+    ondrop={handleDrop}
+    onclick={selectFolder}
+    onmouseenter={() => dropZoneHover = true}
+    onmouseleave={() => dropZoneHover = false}
+    class="w-full rounded-lg p-8 flex flex-col items-center cursor-pointer mb-6 transition-all duration-150"
+    style="
+      border: 1px dashed {dragOver ? 'var(--accent-blue)' : dropZoneHover ? 'var(--text-dim)' : 'var(--border-hover)'};
+      background-color: {dragOver ? 'rgba(59, 130, 246, 0.05)' : dropZoneHover ? 'var(--hover)' : 'transparent'};
+    "
+    disabled={validating}
+  >
+    {#if validating}
+      <div class="text-dim mb-2">
+        <SpinnerIcon size={32} />
       </div>
+      <p class="text-xs text-secondary">Validating folder...</p>
+    {:else}
+      <div class="text-dim mb-2">
+        <FolderIcon size={32} />
+      </div>
+      <p class="text-xs text-secondary mb-1">
+        Drop a folder here or click to browse
+      </p>
+      <p class="text-xs text-dim">
+        <span class="opacity-70">⌘O</span> to open folder
+      </p>
     {/if}
+  </button>
 
-    <!-- Back Button -->
-    <div class="text-center">
-      <Button
-        variant="ghost"
-        onclick={() => appStore.setScreen('onboarding')}
-      >
-        Back to Setup
-      </Button>
+  {#if error}
+    <div class="text-xs text-red-500 text-center mb-4">{error}</div>
+  {/if}
+
+  <!-- Recent Projects -->
+  {#if recentFolders.length > 0}
+    <div>
+      <div class="text-xs font-medium text-dim uppercase tracking-[0.5px] mb-2">
+        Recent Projects
+      </div>
+      <div class="flex flex-col gap-0.5">
+        {#each recentFolders as folder}
+          <button
+            type="button"
+            class="flex items-center justify-between py-2.5 px-3 rounded-md cursor-pointer transition-colors duration-100 text-left w-full"
+            style="background-color: {hoveredFolder === folder.path ? 'var(--hover)' : 'transparent'};"
+            onmouseenter={() => hoveredFolder = folder.path}
+            onmouseleave={() => hoveredFolder = null}
+            onclick={() => validateAndProceed(folder.path)}
+            disabled={validating}
+          >
+            <div class="flex items-center gap-2.5">
+              <span class="text-folder">
+                <FolderIcon size={16} />
+              </span>
+              <div>
+                <div class="text-sm text-primary">{folder.name}</div>
+                <div class="text-xs text-dim">{folder.path}</div>
+              </div>
+            </div>
+            <span class="text-xs text-dim">{formatTime(folder.timestamp)}</span>
+          </button>
+        {/each}
+      </div>
     </div>
+  {/if}
   </div>
 </div>

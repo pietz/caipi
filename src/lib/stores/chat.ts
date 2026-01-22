@@ -22,12 +22,23 @@ export interface PermissionRequest {
   timestamp: number;
 }
 
+export interface TaskItem {
+  id: string;
+  text: string;
+  done: boolean;
+  active: boolean;
+}
+
 export interface ChatState {
   messages: Message[];
   activities: ToolActivity[];
   pendingPermission: PermissionRequest | null;
   isStreaming: boolean;
   streamingContent: string;
+  tasks: TaskItem[];
+  activeSkills: string[];
+  tokenCount: number;
+  sessionDuration: number;
 }
 
 const initialState: ChatState = {
@@ -36,6 +47,10 @@ const initialState: ChatState = {
   pendingPermission: null,
   isStreaming: false,
   streamingContent: '',
+  tasks: [],
+  activeSkills: [],
+  tokenCount: 0,
+  sessionDuration: 0,
 };
 
 function createChatStore() {
@@ -94,6 +109,41 @@ function createChatStore() {
       activities: [],
     })),
 
+    // Task management
+    setTasks: (tasks: TaskItem[]) => update(s => ({
+      ...s,
+      tasks,
+    })),
+
+    addTask: (task: TaskItem) => update(s => ({
+      ...s,
+      tasks: [...s.tasks, task],
+    })),
+
+    updateTask: (id: string, updates: Partial<TaskItem>) => update(s => ({
+      ...s,
+      tasks: s.tasks.map(t =>
+        t.id === id ? { ...t, ...updates } : t
+      ),
+    })),
+
+    // Skills management
+    setActiveSkills: (skills: string[]) => update(s => ({
+      ...s,
+      activeSkills: skills,
+    })),
+
+    // Stats
+    setTokenCount: (count: number) => update(s => ({
+      ...s,
+      tokenCount: count,
+    })),
+
+    setSessionDuration: (duration: number) => update(s => ({
+      ...s,
+      sessionDuration: duration,
+    })),
+
     reset: () => set(initialState),
   };
 }
@@ -105,3 +155,5 @@ export const messages = derived(chatStore, $chat => $chat.messages);
 export const activities = derived(chatStore, $chat => $chat.activities);
 export const isStreaming = derived(chatStore, $chat => $chat.isStreaming);
 export const pendingPermission = derived(chatStore, $chat => $chat.pendingPermission);
+export const tasks = derived(chatStore, $chat => $chat.tasks);
+export const activeSkills = derived(chatStore, $chat => $chat.activeSkills);

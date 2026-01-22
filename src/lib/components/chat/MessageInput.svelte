@@ -1,17 +1,28 @@
 <script lang="ts">
+  import { SendIcon, StopIcon } from '$lib/components/icons';
+  import { Button } from '$lib/components/ui';
+  import { chatStore } from '$lib/stores';
   import { cn } from '$lib/utils';
-  import { Send, Loader } from 'lucide-svelte';
-  import { Button, Textarea } from '$lib/components/ui';
 
   interface Props {
     onSend: (message: string) => void;
+    onAbort?: () => void;
     disabled?: boolean;
     placeholder?: string;
   }
 
-  let { onSend, disabled = false, placeholder = 'Message Claude...' }: Props = $props();
+  let { onSend, onAbort, disabled = false, placeholder = 'Ask Claude something...' }: Props = $props();
   let value = $state('');
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  let focused = $state(false);
+
+  let tokenCount = $state(0);
+  let sessionDuration = $state(0);
+
+  chatStore.subscribe((state) => {
+    tokenCount = state.tokenCount;
+    sessionDuration = state.sessionDuration;
+  });
 
   function handleSubmit(e?: Event) {
     e?.preventDefault();
@@ -39,39 +50,73 @@
     target.style.height = 'auto';
     target.style.height = Math.min(target.scrollHeight, 200) + 'px';
   }
+
+  function formatDuration(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  }
+
+  function formatTokens(count: number): string {
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1)}k`;
+    }
+    return count.toString();
+  }
+
+  const hasContent = $derived(value.trim().length > 0);
 </script>
 
-<form
-  onsubmit={handleSubmit}
-  class="flex items-end gap-2 p-4 border-t border-border bg-background"
->
-  <textarea
-    bind:this={textareaRef}
-    bind:value
-    onkeydown={handleKeydown}
-    oninput={handleInput}
-    {placeholder}
-    {disabled}
-    rows="1"
+<div class="py-3 px-4 border-t border-border bg-header">
+  <!-- Input wrapper -->
+  <div
     class={cn(
-      'flex-1 resize-none rounded-lg border border-input bg-background px-4 py-2.5',
-      'text-sm ring-offset-background placeholder:text-muted-foreground',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-      'disabled:cursor-not-allowed disabled:opacity-50',
-      'max-h-[200px] overflow-y-auto'
+      'flex items-center gap-2 rounded-lg py-2.5 px-3 transition-colors duration-150 bg-input border',
+      focused ? 'border-[var(--ring)]' : 'border-input'
     )}
-  ></textarea>
-
-  <Button
-    type="submit"
-    size="icon"
-    disabled={disabled || !value.trim()}
-    class="flex-shrink-0 self-end"
   >
+    <textarea
+      bind:this={textareaRef}
+      bind:value
+      onkeydown={handleKeydown}
+      oninput={handleInput}
+      onfocus={() => focused = true}
+      onblur={() => focused = false}
+      {placeholder}
+      disabled={disabled}
+      rows={1}
+      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-[1.4] p-0 m-0 align-middle max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50"
+    ></textarea>
+
     {#if disabled}
-      <Loader class="w-5 h-5 animate-spin" />
+      <Button
+        variant="destructive"
+        size="sm"
+        onclick={onAbort}
+        class="shrink-0 px-2 py-1.5"
+        title="Stop generation"
+      >
+        <StopIcon size={14} />
+      </Button>
     {:else}
-      <Send class="w-5 h-5" />
+      <Button
+        variant={hasContent ? 'default' : 'secondary'}
+        size="sm"
+        onclick={handleSubmit}
+        disabled={!hasContent}
+        class="shrink-0 px-2 py-1.5"
+      >
+        <SendIcon size={14} />
+      </Button>
     {/if}
-  </Button>
-</form>
+  </div>
+
+  <!-- Footer row with hints and stats -->
+  <div class="flex justify-between items-center mt-2 text-xs text-darkest">
+    <span>⇧↵ new line · ⌘↵ send</span>
+    <div class="flex gap-4">
+      <span>{formatTokens(tokenCount)} / 200k tokens</span>
+      <span>{formatDuration(sessionDuration)}</span>
+    </div>
+  </div>
+</div>

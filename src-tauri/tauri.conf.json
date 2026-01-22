@@ -13,6 +13,9 @@
     "windows": [
       {
         "title": "Caipi",
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 15, "y": 15 },
         "width": 900,
         "height": 700,
         "minWidth": 600,
