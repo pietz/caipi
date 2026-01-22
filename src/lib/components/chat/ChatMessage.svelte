@@ -2,6 +2,7 @@
   import { marked } from 'marked';
   import hljs from 'highlight.js';
   import type { Message } from '$lib/stores';
+  import ActivityCard from './ActivityCard.svelte';
 
   interface Props {
     message: Message;
@@ -10,6 +11,8 @@
   }
 
   let { message, streaming = false, showDivider = false }: Props = $props();
+
+  const hasActivities = $derived(message.activities && message.activities.length > 0);
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -45,16 +48,25 @@
     </div>
 
     <!-- Message content -->
-    <div
-      class="text-sm leading-[1.6] whitespace-pre-wrap"
-      style="color: {isUser ? 'var(--text-secondary)' : 'var(--text-primary)'};"
-    >
-      {#if streaming}
-        {@html htmlContent}
-        <span class="inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5"></span>
-      {:else}
-        {@html htmlContent}
-      {/if}
-    </div>
+    {#if message.content}
+      <div
+        class="text-sm leading-[1.6] whitespace-pre-wrap"
+        style="color: {isUser ? 'var(--text-secondary)' : 'var(--text-primary)'};"
+      >
+        {#if streaming}
+          {@html htmlContent}
+          <span class="inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5"></span>
+        {:else}
+          {@html htmlContent}
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Activities (for completed messages) -->
+    {#if hasActivities}
+      {#each message.activities as activity (activity.id)}
+        <ActivityCard {activity} />
+      {/each}
+    {/if}
   </div>
 </div>

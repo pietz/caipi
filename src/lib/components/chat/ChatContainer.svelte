@@ -12,7 +12,6 @@
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
-  import PermissionModal from '$lib/components/permission/PermissionModal.svelte';
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import {
     appStore,
@@ -20,6 +19,7 @@
     type Message,
     type ToolActivity,
     type PermissionRequest,
+    type StreamItem,
   } from '$lib/stores';
 
   interface ChatEvent {
@@ -56,6 +56,7 @@
   // Local state derived from chat store
   let messages = $state<Message[]>([]);
   let activities = $state<ToolActivity[]>([]);
+  let streamItems = $state<StreamItem[]>([]);
   let isStreaming = $state(false);
   let streamingContent = $state('');
   let pendingPermission = $state<PermissionRequest | null>(null);
@@ -64,6 +65,7 @@
   chatStore.subscribe((state) => {
     messages = state.messages;
     activities = state.activities;
+    streamItems = state.streamItems;
     isStreaming = state.isStreaming;
     streamingContent = state.streamingContent;
     pendingPermission = state.pendingPermission;
@@ -74,11 +76,38 @@
     unlisten = await listen<ChatEvent>('claude:event', (event) => {
       handleClaudeEvent(event.payload);
     });
+
+    // Global keyboard listener for permission shortcuts
+    window.addEventListener('keydown', handleGlobalKeydown);
   });
 
   onDestroy(() => {
     unlisten?.();
+    window.removeEventListener('keydown', handleGlobalKeydown);
   });
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Only handle if permission is pending
+    if (!pendingPermission) return;
+
+    // Check if Enter or Escape
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      // Check if we're in a textarea with content
+      const activeElement = document.activeElement as HTMLTextAreaElement | null;
+      const isTextareaWithContent = activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
+
+      // If textarea has content, don't intercept (let normal behavior happen)
+      if (isTextareaWithContent) return;
+
+      e.preventDefault();
+
+      if (e.key === 'Enter') {
+        handlePermissionResponse(true);  // Allow
+      } else if (e.key === 'Escape') {
+        handlePermissionResponse(false); // Deny
+      }
+    }
+  }
 
   function handleClaudeEvent(event: ChatEvent) {
     switch (event.type) {
@@ -109,6 +138,8 @@
 
       case 'PermissionRequest':
         if (event.id && event.tool && event.description) {
+          // Just set the permission request - ActivityCard will detect it
+          // by matching tool type with the running activity
           chatStore.setPermissionRequest({
             id: event.id,
             tool: event.tool,
@@ -119,18 +150,8 @@
         break;
 
       case 'Complete':
-        // Add the streamed content as an assistant message
-        const content = streamingContent;
-        if (content) {
-          chatStore.addMessage({
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content,
-            timestamp: Date.now() / 1000,
-          });
-        }
-        chatStore.setStreaming(false);
-        chatStore.clearActivities();
+        // Convert streamItems to a message with embedded activities
+        chatStore.finalizeStream();
         break;
 
       case 'Error':
@@ -170,7 +191,7 @@
     }
   }
 
-  async function handlePermissionResponse(allowed: boolean, remember: boolean) {
+  async function handlePermissionResponse(allowed: boolean) {
     if (!sessionId || !pendingPermission) return;
 
     try {
@@ -183,6 +204,7 @@
       console.error('Failed to respond to permission:', e);
     }
 
+    // Just clear the permission request - the activity stays and will show spinner again
     chatStore.setPermissionRequest(null);
   }
 
@@ -315,25 +337,28 @@
               <ChatMessage {message} showDivider={index > 0} />
             {/each}
 
-            <!-- Activities (during streaming) -->
-            {#if isStreaming}
-              {#each activities as activity (activity.id)}
-                <ActivityCard {activity} />
+            <!-- Stream Items (during streaming) - maintains correct order of text and tools -->
+            {#if isStreaming && streamItems.length > 0}
+              {#each streamItems as item, index (item.id)}
+                {#if item.type === 'text' && item.content}
+                  <ChatMessage
+                    message={{
+                      id: item.id,
+                      role: 'assistant',
+                      content: item.content,
+                      timestamp: item.timestamp,
+                    }}
+                    streaming={index === streamItems.length - 1 && item.type === 'text'}
+                    showDivider={messages.length > 0 || index > 0}
+                  />
+                {:else if item.type === 'tool' && item.activity}
+                  <ActivityCard
+                    activity={item.activity}
+                    {pendingPermission}
+                    onPermissionResponse={handlePermissionResponse}
+                  />
+                {/if}
               {/each}
-
-              <!-- Streaming Message -->
-              {#if streamingContent}
-                <ChatMessage
-                  message={{
-                    id: 'streaming',
-                    role: 'assistant',
-                    content: streamingContent,
-                    timestamp: Date.now() / 1000,
-                  }}
-                  streaming={true}
-                  showDivider={messages.length > 0 || activities.length > 0}
-                />
-              {/if}
             {/if}
           </div>
         {/if}
@@ -355,11 +380,4 @@
     </div>
   </div>
 
-  <!-- Permission Modal -->
-  {#if pendingPermission}
-    <PermissionModal
-      request={pendingPermission}
-      onResponse={handlePermissionResponse}
-    />
-  {/if}
 </div>

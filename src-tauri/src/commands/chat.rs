@@ -18,6 +18,7 @@ pub struct Message {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolActivity {
     pub id: String,
     pub tool_type: String,
