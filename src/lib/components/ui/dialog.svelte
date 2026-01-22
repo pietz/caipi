@@ -40,14 +40,16 @@
       class="fixed inset-0 bg-black/80 animate-in fade-in-0"
       onclick={handleBackdropClick}
       role="presentation"
+      style="z-index: 1;"
     ></div>
 
     <!-- Content -->
     <div
       class={cn(
-        'fixed z-50 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg',
+        'fixed w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg',
         'animate-in fade-in-0 zoom-in-95 duration-200'
       )}
+      style="z-index: 2;"
     >
       {#if title || onClose}
         <div class="flex items-center justify-between mb-4">

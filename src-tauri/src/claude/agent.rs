@@ -1,12 +1,15 @@
 use crate::commands::chat::Message as ChatMessage;
 use claude_agent_sdk_rs::{
-    ClaudeClient, ClaudeAgentOptions, Message, ContentBlock, ToolUseBlock, PermissionMode,
+    ClaudeClient, ClaudeAgentOptions, Message, ContentBlock, ToolUseBlock,
+    HookEvent, HookMatcher, HookCallback, HookInput, HookContext, HookJsonOutput,
+    SyncHookJsonOutput, HookSpecificOutput, PreToolUseHookSpecificOutput,
 };
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -23,22 +26,29 @@ pub enum AgentEvent {
     Text(String),
     ToolStart { id: String, tool_type: String, target: String },
     ToolEnd { id: String, status: String },
-    PermissionRequest { id: String, tool: String, description: String },
     Complete,
     Error(String),
 }
+
+/// Response from the UI for a permission request
+#[derive(Debug, Clone)]
+pub struct PermissionResponse {
+    pub allowed: bool,
+}
+
+/// Global permission channels - separate from session store to avoid deadlock
+pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
 
 pub struct AgentSession {
     pub id: String,
     pub folder_path: String,
     pub messages: Vec<ChatMessage>,
     client: Option<ClaudeClient>,
-    #[allow(dead_code)]
-    pending_permissions: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
+    app_handle: AppHandle,
 }
 
 impl AgentSession {
-    pub async fn new(folder_path: String) -> Result<Self, AgentError> {
+    pub async fn new(folder_path: String, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
 
         Ok(Self {
@@ -46,7 +56,7 @@ impl AgentSession {
             folder_path,
             messages: Vec::new(),
             client: None,
-            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
+            app_handle,
         })
     }
 
@@ -62,10 +72,150 @@ impl AgentSession {
             timestamp: chrono::Utc::now().timestamp(),
         });
 
-        // Configure the agent
+        // Get the permission channels from Tauri state
+        let permission_channels: tauri::State<'_, PermissionChannels> = self.app_handle.state();
+        let permission_channels = permission_channels.inner().clone();
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+
+        let pre_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, _matcher: Option<String>, _ctx: HookContext| {
+            let permission_channels = permission_channels.clone();
+            let app_handle = app_handle.clone();
+            let session_id = session_id.clone();
+
+            Box::pin(async move {
+                // Only handle PreToolUse events
+                let (tool_name, tool_input) = match &input {
+                    HookInput::PreToolUse(pre_tool) => {
+                        (pre_tool.tool_name.clone(), pre_tool.tool_input.clone())
+                    }
+                    _ => {
+                        // Not a PreToolUse event, continue without intervention
+                        return HookJsonOutput::Sync(SyncHookJsonOutput::default());
+                    }
+                };
+
+                // Check if this tool requires permission
+                let requires_permission = matches!(
+                    tool_name.as_str(),
+                    "Write" | "Edit" | "Bash" | "NotebookEdit"
+                );
+
+                if !requires_permission {
+                    // Allow read-only tools without asking
+                    return HookJsonOutput::Sync(SyncHookJsonOutput {
+                        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+                            PreToolUseHookSpecificOutput {
+                                permission_decision: Some("allow".to_string()),
+                                permission_decision_reason: Some("Read-only operation".to_string()),
+                                updated_input: None,
+                            }
+                        )),
+                        ..Default::default()
+                    });
+                }
+
+                // Extract a description from the tool input
+                let description = match tool_name.as_str() {
+                    "Write" | "Edit" => {
+                        tool_input.get("file_path")
+                            .and_then(|v| v.as_str())
+                            .map(|p| format!("Modify file: {}", p))
+                            .unwrap_or_else(|| format!("Use tool: {}", tool_name))
+                    }
+                    "Bash" => {
+                        tool_input.get("command")
+                            .and_then(|v| v.as_str())
+                            .map(|cmd| {
+                                if cmd.len() > 80 {
+                                    format!("Run command: {}...", &cmd[..77])
+                                } else {
+                                    format!("Run command: {}", cmd)
+                                }
+                            })
+                            .unwrap_or_else(|| "Run bash command".to_string())
+                    }
+                    _ => format!("Use tool: {}", tool_name),
+                };
+
+                // Create a oneshot channel for this permission request
+                let (tx, rx) = oneshot::channel();
+
+                // Generate a unique request ID
+                let request_id = Uuid::new_v4().to_string();
+
+                // Store the sender in the global permission channels (keyed by request_id)
+                {
+                    let mut channels = permission_channels.lock().await;
+                    channels.insert(request_id.clone(), tx);
+                }
+
+                // Emit the permission request event to the frontend
+                let _ = app_handle.emit("claude:event", serde_json::json!({
+                    "type": "PermissionRequest",
+                    "id": request_id,
+                    "sessionId": session_id,
+                    "tool": tool_name,
+                    "description": description
+                }));
+
+                // Wait for the response from the UI
+                match rx.await {
+                    Ok(response) => {
+                        if response.allowed {
+                            HookJsonOutput::Sync(SyncHookJsonOutput {
+                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+                                    PreToolUseHookSpecificOutput {
+                                        permission_decision: Some("allow".to_string()),
+                                        permission_decision_reason: Some("User approved".to_string()),
+                                        updated_input: None,
+                                    }
+                                )),
+                                ..Default::default()
+                            })
+                        } else {
+                            HookJsonOutput::Sync(SyncHookJsonOutput {
+                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+                                    PreToolUseHookSpecificOutput {
+                                        permission_decision: Some("deny".to_string()),
+                                        permission_decision_reason: Some("User denied".to_string()),
+                                        updated_input: None,
+                                    }
+                                )),
+                                ..Default::default()
+                            })
+                        }
+                    }
+                    Err(_) => {
+                        // Channel was closed (e.g., session aborted)
+                        HookJsonOutput::Sync(SyncHookJsonOutput {
+                            hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+                                PreToolUseHookSpecificOutput {
+                                    permission_decision: Some("deny".to_string()),
+                                    permission_decision_reason: Some("Permission request cancelled".to_string()),
+                                    updated_input: None,
+                                }
+                            )),
+                            ..Default::default()
+                        })
+                    }
+                }
+            })
+        });
+
+        // Create hooks map
+        let mut hooks: HashMap<HookEvent, Vec<HookMatcher>> = HashMap::new();
+        hooks.insert(
+            HookEvent::PreToolUse,
+            vec![HookMatcher::builder()
+                .hooks(vec![pre_tool_use_hook])
+                .build()]
+        );
+
+        // Configure the agent with hooks
         let options = ClaudeAgentOptions::builder()
             .cwd(&self.folder_path)
-            .permission_mode(PermissionMode::Default)
+            .hooks(hooks)
             .build();
 
         // Create client if needed
@@ -127,23 +277,8 @@ impl AgentSession {
                                 on_event(AgentEvent::Complete);
                                 break;
                             }
-                            Message::System(sys) => {
-                                // Handle system messages if needed
-                                if sys.subtype == "permission_request" {
-                                    // Parse permission request from data
-                                    if let Some(tool) = sys.data.get("tool").and_then(|v| v.as_str()) {
-                                        let description = sys.data.get("description")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("Unknown operation")
-                                            .to_string();
-
-                                        on_event(AgentEvent::PermissionRequest {
-                                            id: sys.uuid.clone().unwrap_or_default(),
-                                            tool: tool.to_string(),
-                                            description,
-                                        });
-                                    }
-                                }
+                            Message::System(_sys) => {
+                                // System messages are handled via hooks
                             }
                             _ => {}
                         }
@@ -166,20 +301,6 @@ impl AgentSession {
             });
         }
 
-        Ok(())
-    }
-
-    pub async fn respond_permission(&mut self, _request_id: &str, allowed: bool) -> Result<(), AgentError> {
-        // For now, permission responses are handled through the CLI's default permission system
-        // The SDK handles permissions through PermissionMode
-        if let Some(client) = &mut self.client {
-            if allowed {
-                // Continue execution - the SDK will handle this
-            } else {
-                // Interrupt current operation
-                client.interrupt().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
-            }
-        }
         Ok(())
     }
 

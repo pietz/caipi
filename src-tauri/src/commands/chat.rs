@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::claude::agent::{AgentSession, AgentEvent};
+use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse};
 
 // Global session store
 pub type SessionStore = Arc<Mutex<HashMap<String, AgentSession>>>;
@@ -43,7 +43,7 @@ pub async fn create_session(
     app: AppHandle,
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let session = AgentSession::new(folder_path).await.map_err(|e| e.to_string())?;
+    let session = AgentSession::new(folder_path, app.clone()).await.map_err(|e| e.to_string())?;
     let session_id = session.id.clone();
 
     let mut store = sessions.lock().await;
@@ -68,6 +68,7 @@ pub async fn send_message(
     let app_handle = app.clone();
 
     // Send message and stream events
+    // Note: PermissionRequest events are emitted directly from the can_use_tool callback
     match session.send_message(&message, move |event| {
         let chat_event = match event {
             AgentEvent::Text(content) => ChatEvent::Text { content },
@@ -83,9 +84,6 @@ pub async fn send_message(
                 }
             }
             AgentEvent::ToolEnd { id, status } => ChatEvent::ToolEnd { id, status },
-            AgentEvent::PermissionRequest { id, tool, description } => {
-                ChatEvent::PermissionRequest { id, tool, description }
-            }
             AgentEvent::Complete => ChatEvent::Complete,
             AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
         };
@@ -102,19 +100,26 @@ pub async fn send_message(
 
 #[tauri::command]
 pub async fn respond_permission(
-    session_id: String,
+    _session_id: String,
     request_id: String,
     allowed: bool,
     app: AppHandle,
 ) -> Result<(), String> {
-    let sessions: tauri::State<'_, SessionStore> = app.state();
-    let mut store = sessions.lock().await;
-    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+    // Use the separate permission channels to avoid deadlock with session store
+    let permission_channels: tauri::State<'_, PermissionChannels> = app.state();
 
-    session
-        .respond_permission(&request_id, allowed)
-        .await
-        .map_err(|e| e.to_string())
+    // Take the sender from the channels map
+    let sender = {
+        let mut channels = permission_channels.lock().await;
+        channels.remove(&request_id)
+    };
+
+    if let Some(tx) = sender {
+        let _ = tx.send(PermissionResponse { allowed });
+        Ok(())
+    } else {
+        Err(format!("No pending permission request with id: {}", request_id))
+    }
 }
 
 #[tauri::command]
