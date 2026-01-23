@@ -15,7 +15,7 @@ pub fn emit_text(app: &AppHandle, content: String) {
 }
 
 /// Emit a tool start event
-pub fn emit_tool_start(app: &AppHandle, id: String, tool_type: String, target: String) {
+pub fn emit_tool_start(app: &AppHandle, id: String, tool_type: String, target: String, input: Option<serde_json::Value>) {
     let _ = app.emit(EVENT_NAME, &ChatEvent::ToolStart {
         activity: ToolActivity {
             id,
@@ -23,6 +23,7 @@ pub fn emit_tool_start(app: &AppHandle, id: String, tool_type: String, target: S
             target,
             status: "running".to_string(),
             timestamp: chrono::Utc::now().timestamp(),
+            input,
         },
     });
 }

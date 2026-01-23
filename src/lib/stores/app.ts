@@ -25,6 +25,17 @@ export interface AppState {
   model: ModelType;
 }
 
+// Load persisted model from localStorage (default to sonnet)
+function getPersistedModel(): ModelType {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('caipi:model');
+    if (saved === 'opus' || saved === 'sonnet' || saved === 'haiku') {
+      return saved;
+    }
+  }
+  return 'sonnet';
+}
+
 const initialState: AppState = {
   screen: 'loading',
   cliStatus: null,
@@ -36,7 +47,7 @@ const initialState: AppState = {
   rightSidebarOpen: false,
   authType: null,
   permissionMode: 'default',
-  model: 'opus',
+  model: getPersistedModel(),
 };
 
 const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
@@ -64,11 +75,20 @@ function createAppStore() {
       const nextIndex = (currentIndex + 1) % PERMISSION_MODES.length;
       return { ...s, permissionMode: PERMISSION_MODES[nextIndex] };
     }),
-    setModel: (model: ModelType) => update(s => ({ ...s, model })),
+    setModel: (model: ModelType) => {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('caipi:model', model);
+      }
+      update(s => ({ ...s, model }));
+    },
     cycleModel: () => update(s => {
       const currentIndex = MODELS.indexOf(s.model);
       const nextIndex = (currentIndex + 1) % MODELS.length;
-      return { ...s, model: MODELS[nextIndex] };
+      const newModel = MODELS[nextIndex];
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('caipi:model', newModel);
+      }
+      return { ...s, model: newModel };
     }),
     syncState: (permissionMode: PermissionMode, model: ModelType) => {
       update(s => ({ ...s, permissionMode, model }));

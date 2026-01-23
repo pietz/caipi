@@ -71,6 +71,27 @@ pub fn extract_tool_target(tool: &ToolUseBlock) -> String {
                 .unwrap_or("notebook")
                 .to_string()
         }
+        "TaskCreate" => {
+            tool.input.get("subject")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "new task".to_string())
+        }
+        "TaskUpdate" => {
+            tool.input.get("taskId")
+                .and_then(|v| v.as_str())
+                .map(|id| format!("task {}", truncate_str(id, 20)))
+                .unwrap_or_else(|| "task".to_string())
+        }
+        "TaskList" | "TaskGet" => "tasks".to_string(),
+        "TodoWrite" => {
+            // Count how many todos in the array
+            tool.input.get("todos")
+                .and_then(|v| v.as_array())
+                .map(|arr| format!("{} todo(s)", arr.len()))
+                .unwrap_or_else(|| "todos".to_string())
+        }
+        "TodoRead" => "reading todos".to_string(),
         _ => {
             // Try common field names for unknown tools
             let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];

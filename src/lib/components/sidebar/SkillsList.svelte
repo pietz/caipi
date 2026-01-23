@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SkillIcon } from '$lib/components/icons';
+  import { ActivityIcon } from '$lib/components/icons';
   import { chatStore } from '$lib/stores';
 
   let activeSkills = $state<string[]>([]);
@@ -15,20 +15,25 @@
   </div>
 
   {#if activeSkills.length === 0}
-    <div class="text-xs text-dim">No active skills</div>
+    <div class="text-sm text-dim">No active skills</div>
   {:else}
-    <div class="flex flex-col gap-1.5">
+    <div class="flex flex-col gap-2">
       {#each activeSkills as skill}
-        <div class="flex items-center gap-2 text-xs text-primary">
-          <span
-            class="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0"
-            style="background-color: rgba(167, 139, 250, 0.2);"
-          >
-            <SkillIcon size={10} class="text-purple-400" />
-          </span>
+        <div class="skill-item">
+          <ActivityIcon size={14} class="text-purple-400" />
           <span>{skill}</span>
         </div>
       {/each}
     </div>
   {/if}
 </div>
+
+<style>
+  .skill-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+</style>

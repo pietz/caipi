@@ -25,6 +25,8 @@ pub struct ToolActivity {
     pub target: String,
     pub status: String, // "running", "completed", "error"
     pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -66,7 +68,7 @@ pub async fn create_session(
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
     let mode = permission_mode.unwrap_or_else(|| "default".to_string());
-    let model = model.unwrap_or_else(|| "opus".to_string());
+    let model = model.unwrap_or_else(|| "sonnet".to_string());
     let session = AgentSession::new(folder_path, mode, model, app.clone()).await.map_err(|e| e.to_string())?;
     let session_id = session.id.clone();
 
@@ -99,7 +101,7 @@ pub async fn send_message(
     match session.send_message(&message, move |event| {
         let chat_event = match event {
             AgentEvent::Text(content) => ChatEvent::Text { content },
-            AgentEvent::ToolStart { id, tool_type, target } => {
+            AgentEvent::ToolStart { id, tool_type, target, input } => {
                 ChatEvent::ToolStart {
                     activity: ToolActivity {
                         id,
@@ -107,6 +109,7 @@ pub async fn send_message(
                         target,
                         status: "running".to_string(),
                         timestamp: chrono::Utc::now().timestamp(),
+                        input,
                     },
                 }
             }

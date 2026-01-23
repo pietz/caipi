@@ -116,6 +116,7 @@ export function createStreamCoordinator(options: StreamCoordinatorOptions = {}) 
       toolType: event.activity.toolType,
       status: 'running' as const,
     };
+
     chatStore.addActivity(newActivity);
 
     // If there's a pending permission request with matching tool type but no activityId,
@@ -146,6 +147,52 @@ export function createStreamCoordinator(options: StreamCoordinatorOptions = {}) 
         const activity = activities.find((a: ToolActivity) => a.id === event.id);
         if (activity?.toolType === 'Skill' && activity.target) {
           chatStore.addActiveSkill(activity.target);
+        }
+
+        // Handle TodoWrite - sync entire todo list
+        if (activity?.toolType === 'TodoWrite' && activity.input) {
+          try {
+            const input = activity.input as Record<string, unknown>;
+
+            // Try different possible field names for the todos array
+            const todosArray = input.todos ?? input.items ?? input.tasks ??
+              (Array.isArray(input) ? input : null);
+
+            if (todosArray && Array.isArray(todosArray)) {
+              const todos = todosArray.map((todo: Record<string, unknown>) => ({
+                id: String(todo.id ?? crypto.randomUUID()),
+                text: String(todo.content ?? todo.text ?? todo.subject ?? 'Todo'),
+                done: todo.status === 'completed',
+                active: todo.status === 'in_progress',
+              }));
+              chatStore.setTodos(todos);
+            }
+          } catch (err) {
+            console.error('[TodoWrite] Error processing input:', err);
+          }
+        }
+
+        // Handle TaskCreate - add todo to list (legacy/alternative tool)
+        if (activity?.toolType === 'TaskCreate' && activity.input) {
+          const input = activity.input as { subject?: string; description?: string; activeForm?: string };
+          chatStore.addTodo({
+            id: activity.id,
+            text: input.subject || 'New todo',
+            done: false,
+            active: true,
+          });
+        }
+
+        // Handle TaskUpdate - update existing todo (legacy/alternative tool)
+        if (activity?.toolType === 'TaskUpdate' && activity.input) {
+          const input = activity.input as { taskId?: string; status?: string; subject?: string };
+          if (input.taskId) {
+            chatStore.updateTodo(input.taskId, {
+              done: input.status === 'completed',
+              active: input.status === 'in_progress',
+              ...(input.subject && { text: input.subject }),
+            });
+          }
         }
       }
     }

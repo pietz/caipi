@@ -274,7 +274,7 @@
       <!-- Messages -->
       <div
         bind:this={messagesContainer}
-        class="flex-1 overflow-y-auto p-4"
+        class="flex-1 overflow-y-auto p-6"
       >
         {#if messages.length === 0 && !isStreaming}
           <!-- Empty State -->

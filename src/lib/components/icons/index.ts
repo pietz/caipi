@@ -1,4 +1,5 @@
 // Icon components matching mockup exactly
+export { default as ActivityIcon } from './ActivityIcon.svelte';
 export { default as FolderIcon } from './FolderIcon.svelte';
 export { default as FileIcon } from './FileIcon.svelte';
 export { default as ChevronIcon } from './ChevronIcon.svelte';

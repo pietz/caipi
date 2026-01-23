@@ -29,7 +29,7 @@ pub enum AgentError {
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     Text(String),
-    ToolStart { id: String, tool_type: String, target: String },
+    ToolStart { id: String, tool_type: String, target: String, input: Option<serde_json::Value> },
     #[allow(dead_code)]  // Emitted directly from PostToolUse hook now
     ToolEnd { id: String, status: String },
     SessionInit { auth_type: String },
@@ -89,7 +89,7 @@ fn string_to_model_id(model: &str) -> &'static str {
         "opus" => "claude-opus-4-5",
         "sonnet" => "claude-sonnet-4-5",
         "haiku" => "claude-haiku-4-5",
-        _ => "claude-opus-4-5",
+        _ => "claude-sonnet-4-5",
     }
 }
 
@@ -269,10 +269,17 @@ impl AgentSession {
                                                     }
                                                     ContentBlock::ToolUse(tool) => {
                                                         let target = extract_tool_target(tool);
+                                                        // Include input for task/todo tools so frontend can update task list
+                                                        let input = if tool.name.starts_with("Task") || tool.name.starts_with("Todo") {
+                                                            Some(tool.input.clone())
+                                                        } else {
+                                                            None
+                                                        };
                                                         on_event(AgentEvent::ToolStart {
                                                             id: tool.id.clone(),
                                                             tool_type: tool.name.clone(),
                                                             target,
+                                                            input,
                                                         });
                                                     }
                                                     _ => {

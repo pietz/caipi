@@ -6,6 +6,7 @@ export interface ToolActivity {
   target: string;
   status: 'running' | 'completed' | 'error' | 'aborted';
   timestamp: number;
+  input?: Record<string, unknown>;
 }
 
 export interface ActivityState {

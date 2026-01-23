@@ -105,7 +105,7 @@
   const hasContent = $derived(value.trim().length > 0);
 </script>
 
-<div class="py-3 px-4 border-t border-border bg-header">
+<div class="p-2 border-t border-border bg-header">
   <!-- Input wrapper -->
   <div
     class={cn(

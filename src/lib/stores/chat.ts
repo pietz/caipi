@@ -7,8 +7,8 @@ import { permissionStore, type PermissionRequest } from './permissionStore';
 export type { Message, ToolActivity, PermissionRequest };
 export type { StreamItem } from './messageStore';
 
-// Task management (keeping in chat.ts for now)
-export interface TaskItem {
+// Todo management (keeping in chat.ts for now)
+export interface TodoItem {
   id: string;
   text: string;
   done: boolean;
@@ -17,14 +17,14 @@ export interface TaskItem {
 
 // Stats and metadata
 export interface ChatMetadata {
-  tasks: TaskItem[];
+  todos: TodoItem[];
   activeSkills: string[];
   tokenCount: number;
   sessionDuration: number;
 }
 
 const initialMetadata: ChatMetadata = {
-  tasks: [],
+  todos: [],
   activeSkills: [],
   tokenCount: 0,
   sessionDuration: 0,
@@ -36,20 +36,20 @@ function createChatMetadataStore() {
   return {
     subscribe,
 
-    // Task management
-    setTasks: (tasks: TaskItem[]) => update(s => ({
+    // Todo management
+    setTodos: (todos: TodoItem[]) => update(s => ({
       ...s,
-      tasks,
+      todos,
     })),
 
-    addTask: (task: TaskItem) => update(s => ({
+    addTodo: (todo: TodoItem) => update(s => ({
       ...s,
-      tasks: [...s.tasks, task],
+      todos: [...s.todos, todo],
     })),
 
-    updateTask: (id: string, updates: Partial<TaskItem>) => update(s => ({
+    updateTodo: (id: string, updates: Partial<TodoItem>) => update(s => ({
       ...s,
-      tasks: s.tasks.map(t =>
+      todos: s.todos.map(t =>
         t.id === id ? { ...t, ...updates } : t
       ),
     })),
@@ -142,9 +142,9 @@ export const chatStore = {
   },
 
   // Metadata operations
-  setTasks: metadataStore.setTasks,
-  addTask: metadataStore.addTask,
-  updateTask: metadataStore.updateTask,
+  setTodos: metadataStore.setTodos,
+  addTodo: metadataStore.addTodo,
+  updateTodo: metadataStore.updateTodo,
   setActiveSkills: metadataStore.setActiveSkills,
   addActiveSkill: metadataStore.addActiveSkill,
   setTokenCount: metadataStore.setTokenCount,
@@ -164,8 +164,8 @@ export { messages, streamItems, isStreaming, messageQueue } from './messageStore
 export { activities } from './activityStore';
 export { pendingPermissions } from './permissionStore';
 
-// Export tasks and skills as derived stores
-export const tasks = derived(metadataStore, $store => $store.tasks);
+// Export todos and skills as derived stores
+export const todos = derived(metadataStore, $store => $store.todos);
 export const activeSkills = derived(metadataStore, $store => $store.activeSkills);
 
 // Export individual stores for direct access if needed
