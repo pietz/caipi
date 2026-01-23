@@ -23,6 +23,8 @@
     type ToolActivity,
     type PermissionRequest,
     type StreamItem,
+    type PermissionMode,
+    type ModelType,
   } from '$lib/stores';
 
   interface ChatEvent {
@@ -37,6 +39,8 @@
     message?: string;
     authType?: string;
     planContent?: string;
+    permissionMode?: string;
+    model?: string;
   }
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
@@ -199,6 +203,15 @@
       case 'SessionInit':
         if (event.authType) {
           appStore.setAuthType(event.authType);
+        }
+        break;
+
+      case 'StateChanged':
+        if (event.permissionMode && event.model) {
+          appStore.syncState(
+            event.permissionMode as PermissionMode,
+            event.model as ModelType
+          );
         }
         break;
 

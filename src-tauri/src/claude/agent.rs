@@ -274,6 +274,14 @@ impl AgentSession {
         Ok(())
     }
 
+    pub async fn get_permission_mode(&self) -> String {
+        self.permission_mode.read().await.clone()
+    }
+
+    pub async fn get_model(&self) -> String {
+        self.model.read().await.clone()
+    }
+
     pub async fn send_message<F>(&self, message: &str, on_event: F) -> Result<(), AgentError>
     where
         F: Fn(AgentEvent) + Send + Sync + 'static,

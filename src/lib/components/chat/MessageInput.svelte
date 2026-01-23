@@ -38,30 +38,21 @@
     haiku: { label: 'Haiku 4.5' },
   };
 
-  async function handleModeClick() {
+  function handleModeClick() {
+    // Optimistic update - backend will confirm via StateChanged event
     appStore.cyclePermissionMode();
-    // If we have an active session, update the backend
     if (sessionId) {
-      try {
-        // Read the new mode after cycling
-        const newMode = get(appStore).permissionMode;
-        await invoke('set_permission_mode', { sessionId, mode: newMode });
-      } catch (e) {
-        console.error('Failed to set permission mode:', e);
-      }
+      const newMode = get(appStore).permissionMode;
+      invoke('set_permission_mode', { sessionId, mode: newMode });
     }
   }
 
-  async function handleModelClick() {
+  function handleModelClick() {
+    // Optimistic update - backend will confirm via StateChanged event
     appStore.cycleModel();
-    // If we have an active session, update the backend
     if (sessionId) {
-      try {
-        const newModel = get(appStore).model;
-        await invoke('set_model', { sessionId, model: newModel });
-      } catch (e) {
-        console.error('Failed to set model:', e);
-      }
+      const newModel = get(appStore).model;
+      invoke('set_model', { sessionId, model: newModel });
     }
   }
 

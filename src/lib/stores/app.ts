@@ -70,6 +70,9 @@ function createAppStore() {
       const nextIndex = (currentIndex + 1) % MODELS.length;
       return { ...s, model: MODELS[nextIndex] };
     }),
+    syncState: (permissionMode: PermissionMode, model: ModelType) => {
+      update(s => ({ ...s, permissionMode, model }));
+    },
     reset: () => set(initialState),
   };
 }

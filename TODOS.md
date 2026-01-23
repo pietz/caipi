@@ -8,21 +8,6 @@
 
 These issues are blocking scalability and should be addressed before adding new features.
 
-### Single Source of Truth for App State
-Permission mode and model are stored in both frontend (`app.ts`) and backend (`AgentSession`).
-
-**Current flow:**
-1. User clicks permission button → updates frontend store
-2. Frontend calls `set_permission_mode` → updates backend
-3. If either fails or is skipped, they diverge
-
-**Options:**
-- **Frontend-driven:** Backend queries frontend for current mode on each tool use
-- **Backend-driven:** Frontend always fetches state from backend after changes
-- **Event-driven:** Backend emits state changes, frontend subscribes
-
-**Decision needed:** Pick one pattern and apply consistently.
-
 ### Establish Feature Boundaries
 State and logic are scattered with no clear ownership.
 
@@ -127,6 +112,7 @@ Agent responses have too much vertical spacing between paragraphs.
 
 ## Completed
 
+- ~~Single Source of Truth for App State~~ (implemented event-driven pattern: backend emits `StateChanged` event after updating permission mode/model, frontend syncs via `appStore.syncState()`)
 - ~~Extract Permission Hook Logic (agent.rs)~~ (refactored 180-line hook to ~40 lines using 7 helper functions: `allow_response`, `deny_response`, `check_abort_decision`, `extract_tool_info`, `check_mode_decision`, `requires_permission`, `build_permission_description`, `prompt_user_permission`)
 - ~~Split chat.ts Store~~ (split into messageStore, activityStore, permissionStore with chat.ts as coordinator)
 - ~~Permission Modes UI~~ (3 modes: Default, Edit, Danger)

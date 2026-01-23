@@ -43,6 +43,11 @@ pub enum ChatEvent {
         description: String,
     },
     SessionInit { auth_type: String },
+    StateChanged {
+        #[serde(rename = "permissionMode")]
+        permission_mode: String,
+        model: String,
+    },
     Complete,
     #[serde(rename = "AbortComplete")]
     AbortComplete {
@@ -191,7 +196,17 @@ pub async fn set_permission_mode(
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
 
-    session.set_permission_mode(mode).await.map_err(|e| e.to_string())
+    let result = session.set_permission_mode(mode).await;
+
+    // Emit current state regardless of success/failure to keep frontend in sync
+    let current_mode = session.get_permission_mode().await;
+    let current_model = session.get_model().await;
+    let _ = app.emit("claude:event", &ChatEvent::StateChanged {
+        permission_mode: current_mode,
+        model: current_model,
+    });
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -208,7 +223,17 @@ pub async fn set_model(
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
 
-    session.set_model(model).await.map_err(|e| e.to_string())
+    let result = session.set_model(model).await;
+
+    // Emit current state regardless of success/failure to keep frontend in sync
+    let current_mode = session.get_permission_mode().await;
+    let current_model = session.get_model().await;
+    let _ = app.emit("claude:event", &ChatEvent::StateChanged {
+        permission_mode: current_mode,
+        model: current_model,
+    });
+
+    result.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
