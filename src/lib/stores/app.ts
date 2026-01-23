@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 
 export type AppScreen = 'loading' | 'onboarding' | 'folder' | 'chat';
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 export type ModelType = 'opus' | 'sonnet' | 'haiku';
 
 export interface CliStatus {
@@ -39,7 +39,7 @@ const initialState: AppState = {
   model: 'opus',
 };
 
-const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 const MODELS: ModelType[] = ['opus', 'sonnet', 'haiku'];
 
 function createAppStore() {

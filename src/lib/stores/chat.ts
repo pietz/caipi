@@ -24,13 +24,6 @@ export interface PermissionRequest {
   timestamp: number;
 }
 
-export interface PlanRequest {
-  id: string;
-  activityId: string | null;  // ID of the ExitPlanMode activity
-  planContent: string;
-  timestamp: number;
-}
-
 export interface TaskItem {
   id: string;
   text: string;
@@ -54,7 +47,6 @@ export interface ChatState {
   streamItems: StreamItem[];
   streamItemCounter: number;  // Counter for stable insertion ordering
   pendingPermissions: Record<string, PermissionRequest>;  // Keyed by activityId for parallel tools
-  pendingPlan: PlanRequest | null;
   isStreaming: boolean;
   streamingContent: string;
   messageQueue: string[];  // Queue of messages to send after current turn completes
@@ -70,7 +62,6 @@ const initialState: ChatState = {
   streamItems: [],
   streamItemCounter: 0,
   pendingPermissions: {},
-  pendingPlan: null,
   isStreaming: false,
   streamingContent: '',
   messageQueue: [],
@@ -150,11 +141,6 @@ function createChatStore() {
     clearPermissionRequests: () => update(s => ({
       ...s,
       pendingPermissions: {},
-    })),
-
-    setPlanRequest: (request: PlanRequest | null) => update(s => ({
-      ...s,
-      pendingPlan: request,
     })),
 
     setStreaming: (isStreaming: boolean) => update(s => ({
@@ -343,7 +329,6 @@ export const activities = derived(chatStore, $chat => $chat.activities);
 export const streamItems = derived(chatStore, $chat => $chat.streamItems);
 export const isStreaming = derived(chatStore, $chat => $chat.isStreaming);
 export const pendingPermissions = derived(chatStore, $chat => $chat.pendingPermissions);
-export const pendingPlan = derived(chatStore, $chat => $chat.pendingPlan);
 export const tasks = derived(chatStore, $chat => $chat.tasks);
 export const activeSkills = derived(chatStore, $chat => $chat.activeSkills);
 export const messageQueue = derived(chatStore, $chat => $chat.messageQueue);

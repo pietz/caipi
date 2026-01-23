@@ -1,9 +1,9 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { get } from 'svelte/store';
-  import { SendIcon, StopIcon, ShieldIcon, EditIcon, ClipboardIcon, AlertTriangleIcon } from '$lib/components/icons';
+  import { SendIcon, StopIcon, ShieldIcon, EditIcon, AlertTriangleIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
-  import { chatStore, appStore, type PlanRequest } from '$lib/stores';
+  import { chatStore, appStore } from '$lib/stores';
   import type { PermissionMode, ModelType } from '$lib/stores/app';
   import { cn } from '$lib/utils';
 
@@ -11,13 +11,11 @@
     onSend: (message: string) => void;
     onQueue: (message: string) => void;
     onAbort?: () => void;
-    onPlanFeedback?: (feedback: string) => void;
     isStreaming?: boolean;
-    pendingPlan?: PlanRequest | null;
     placeholder?: string;
   }
 
-  let { onSend, onQueue, onAbort, onPlanFeedback, isStreaming = false, pendingPlan = null, placeholder = 'Ask Claude something...' }: Props = $props();
+  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude something...' }: Props = $props();
   let value = $state('');
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
   let focused = $state(false);
@@ -42,7 +40,6 @@
   const modeConfig: Record<PermissionMode, { label: string; color: string }> = {
     default: { label: 'Default', color: 'text-blue-400' },
     acceptEdits: { label: 'Edit', color: 'text-purple-400' },
-    plan: { label: 'Plan', color: 'text-green-400' },
     bypassPermissions: { label: 'Danger', color: 'text-red-400' },
   };
 
@@ -85,16 +82,6 @@
 
     const msg = value.trim();
 
-    // If there's a pending plan, send as feedback
-    if (pendingPlan && onPlanFeedback) {
-      onPlanFeedback(msg);
-      value = '';
-      if (textareaRef) {
-        textareaRef.style.height = 'auto';
-      }
-      return;
-    }
-
     if (isStreaming) {
       onQueue(msg);  // Queue during streaming
     } else {
@@ -136,9 +123,6 @@
   }
 
   const hasContent = $derived(value.trim().length > 0);
-  const effectivePlaceholder = $derived(
-    pendingPlan ? 'Request changes to the plan...' : placeholder
-  );
 </script>
 
 <div class="py-3 px-4 border-t border-border bg-header">
@@ -146,7 +130,6 @@
   <div
     class={cn(
       'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-input border',
-      pendingPlan ? 'border-green-500/50 bg-green-500/5' :
       focused ? 'border-[var(--ring)]' : 'border-input'
     )}
   >
@@ -157,7 +140,7 @@
       oninput={handleInput}
       onfocus={() => focused = true}
       onblur={() => focused = false}
-      placeholder={effectivePlaceholder}
+      {placeholder}
       rows={1}
       class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
     ></textarea>
@@ -204,8 +187,6 @@
           <AlertTriangleIcon size={12} />
         {:else if permissionMode === 'acceptEdits'}
           <EditIcon size={12} />
-        {:else if permissionMode === 'plan'}
-          <ClipboardIcon size={12} />
         {:else}
           <ShieldIcon size={12} />
         {/if}

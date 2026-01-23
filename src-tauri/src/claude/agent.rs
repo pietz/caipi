@@ -39,18 +39,8 @@ pub struct PermissionResponse {
     pub allowed: bool,
 }
 
-/// Response from the UI for a plan approval request
-#[derive(Debug, Clone)]
-pub struct PlanResponse {
-    pub approved: bool,
-    pub comment: Option<String>,  // Feedback for the agent if rejected/requesting changes
-}
-
 /// Global permission channels - separate from session store to avoid deadlock
 pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
-
-/// Global plan channels - for plan approval requests
-pub type PlanChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PlanResponse>>>>;
 
 pub struct AgentSession {
     pub id: String,
@@ -138,21 +128,15 @@ impl AgentSession {
         // Get the permission channels from Tauri state
         let permission_channels: tauri::State<'_, PermissionChannels> = self.app_handle.state();
         let permission_channels = permission_channels.inner().clone();
-        // Get the plan channels from Tauri state
-        let plan_channels: tauri::State<'_, PlanChannels> = self.app_handle.state();
-        let plan_channels = plan_channels.inner().clone();
         let app_handle = self.app_handle.clone();
         let session_id = self.id.clone();
         let permission_mode_arc = self.permission_mode.clone();
-        let folder_path = self.folder_path.clone();
 
         let pre_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
             let permission_channels = permission_channels.clone();
-            let plan_channels = plan_channels.clone();
             let app_handle = app_handle.clone();
             let session_id = session_id.clone();
             let permission_mode_arc = permission_mode_arc.clone();
-            let folder_path = folder_path.clone();
             let tool_use_id = tool_use_id.clone();
 
             Box::pin(async move {
@@ -166,76 +150,6 @@ impl AgentSession {
                         return HookJsonOutput::Sync(SyncHookJsonOutput::default());
                     }
                 };
-
-                // Handle ExitPlanMode - show plan approval UI
-                if tool_name == "ExitPlanMode" {
-                    // Try to read the plan file from ~/.claude/plans/ directory
-                    let plan_content = read_latest_plan_file(&folder_path).await;
-
-                    // Create a oneshot channel for plan approval
-                    let (tx, rx) = oneshot::channel();
-                    let request_id = Uuid::new_v4().to_string();
-
-                    // Store the sender in the plan channels
-                    {
-                        let mut channels = plan_channels.lock().await;
-                        channels.insert(request_id.clone(), tx);
-                    }
-
-                    // Emit the plan ready event to the frontend
-                    let _ = app_handle.emit("claude:event", serde_json::json!({
-                        "type": "PlanReady",
-                        "id": request_id,
-                        "sessionId": session_id,
-                        "toolUseId": tool_use_id,
-                        "planContent": plan_content.unwrap_or_else(|| "Plan content not available".to_string()),
-                    }));
-
-                    // Wait for the response from the UI
-                    match rx.await {
-                        Ok(response) => {
-                            if response.approved {
-                                // Plan approved - allow ExitPlanMode to proceed
-                                return HookJsonOutput::Sync(SyncHookJsonOutput {
-                                    hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                        PreToolUseHookSpecificOutput {
-                                            permission_decision: Some("allow".to_string()),
-                                            permission_decision_reason: Some("User approved the plan".to_string()),
-                                            updated_input: None,
-                                        }
-                                    )),
-                                    ..Default::default()
-                                });
-                            } else {
-                                // Plan rejected or changes requested
-                                let reason = response.comment.unwrap_or_else(|| "User rejected the plan".to_string());
-                                return HookJsonOutput::Sync(SyncHookJsonOutput {
-                                    hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                        PreToolUseHookSpecificOutput {
-                                            permission_decision: Some("deny".to_string()),
-                                            permission_decision_reason: Some(reason),
-                                            updated_input: None,
-                                        }
-                                    )),
-                                    ..Default::default()
-                                });
-                            }
-                        }
-                        Err(_) => {
-                            // Channel was closed
-                            return HookJsonOutput::Sync(SyncHookJsonOutput {
-                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                    PreToolUseHookSpecificOutput {
-                                        permission_decision: Some("deny".to_string()),
-                                        permission_decision_reason: Some("Plan approval request cancelled".to_string()),
-                                        updated_input: None,
-                                    }
-                                )),
-                                ..Default::default()
-                            });
-                        }
-                    }
-                }
 
                 // Get the current permission mode
                 let current_mode = permission_mode_arc.read().await.clone();
@@ -271,35 +185,6 @@ impl AgentSession {
                             });
                         }
                         // Fall through to prompt for Bash
-                    }
-                    "plan" => {
-                        // In plan mode, deny all write operations (the SDK should handle this, but just in case)
-                        let requires_permission = matches!(
-                            tool_name.as_str(),
-                            "Write" | "Edit" | "Bash" | "NotebookEdit"
-                        );
-                        if requires_permission {
-                            return HookJsonOutput::Sync(SyncHookJsonOutput {
-                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                    PreToolUseHookSpecificOutput {
-                                        permission_decision: Some("deny".to_string()),
-                                        permission_decision_reason: Some("Plan mode - write operations not allowed".to_string()),
-                                        updated_input: None,
-                                    }
-                                )),
-                                ..Default::default()
-                            });
-                        }
-                        return HookJsonOutput::Sync(SyncHookJsonOutput {
-                            hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                PreToolUseHookSpecificOutput {
-                                    permission_decision: Some("allow".to_string()),
-                                    permission_decision_reason: Some("Read-only operation".to_string()),
-                                    updated_input: None,
-                                }
-                            )),
-                            ..Default::default()
-                        });
                     }
                     _ => {
                         // Default mode - check if this tool requires permission
@@ -590,60 +475,6 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
     }
 }
 
-/// Reads the most recent plan file from ~/.claude/plans/ directory
-async fn read_latest_plan_file(folder_path: &str) -> Option<String> {
-    // Plan files are stored in ~/.claude/plans/ based on the project path
-    let home = std::env::var("HOME").ok()?;
-    let plans_dir = std::path::Path::new(&home).join(".claude").join("plans");
-
-    if !plans_dir.exists() {
-        return None;
-    }
-
-    // Find all .md files and get the most recent one
-    let mut latest_file: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
-
-    if let Ok(entries) = std::fs::read_dir(&plans_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "md").unwrap_or(false) {
-                if let Ok(metadata) = path.metadata() {
-                    if let Ok(modified) = metadata.modified() {
-                        if latest_file.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
-                            latest_file = Some((modified, path));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Read the content of the latest plan file
-    if let Some((_, path)) = latest_file {
-        return std::fs::read_to_string(path).ok();
-    }
-
-    // If no file found in plans dir, try to find plan in project's .claude directory
-    let project_claude_dir = std::path::Path::new(folder_path).join(".claude");
-    if project_claude_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&project_claude_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                // Look for files that might be plan files (typically .md)
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(name) = path.file_name() {
-                        if name.to_string_lossy().contains("plan") {
-                            return std::fs::read_to_string(path).ok();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
 fn extract_tool_target(tool: &ToolUseBlock) -> String {
     // Extract the target (file path, pattern, etc.) from tool input
     match tool.name.as_str() {
@@ -698,7 +529,6 @@ fn extract_tool_target(tool: &ToolUseBlock) -> String {
                 .unwrap_or("task".to_string())
         }
         "AskUserQuestion" => "asking question...".to_string(),
-        "ExitPlanMode" => "plan ready for approval".to_string(),
         "NotebookEdit" => {
             tool.input.get("notebook_path")
                 .and_then(|v| v.as_str())

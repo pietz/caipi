@@ -12,20 +12,9 @@
     MoonIcon,
   } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
-  import { marked } from 'marked';
-  import hljs from 'highlight.js';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
-
-  // Configure marked with custom renderer for code highlighting
-  const renderer = new marked.Renderer();
-  renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
-    const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-    const highlighted = hljs.highlight(text, { language }).value;
-    return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
-  };
-  marked.use({ renderer });
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import {
     appStore,
@@ -33,7 +22,6 @@
     type Message,
     type ToolActivity,
     type PermissionRequest,
-    type PlanRequest,
     type StreamItem,
   } from '$lib/stores';
 
@@ -86,7 +74,6 @@
   let isStreaming = $state(false);
   let streamingContent = $state('');
   let pendingPermissions = $state<Record<string, PermissionRequest>>({});
-  let pendingPlan = $state<PlanRequest | null>(null);
 
   // Subscribe to chat store
   chatStore.subscribe((state) => {
@@ -96,7 +83,6 @@
     isStreaming = state.isStreaming;
     streamingContent = state.streamingContent;
     pendingPermissions = state.pendingPermissions;
-    pendingPlan = state.pendingPlan;
   });
 
   onMount(async () => {
@@ -115,25 +101,6 @@
   });
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    // Handle plan approval shortcuts
-    if (pendingPlan) {
-      if (e.key === 'Enter' || e.key === 'Escape') {
-        const activeElement = document.activeElement as HTMLTextAreaElement | null;
-        const isTextareaWithContent = activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
-
-        if (isTextareaWithContent) return;
-
-        e.preventDefault();
-
-        if (e.key === 'Enter') {
-          handlePlanResponse(true);  // Approve
-        } else if (e.key === 'Escape') {
-          handlePlanResponse(false); // Reject
-        }
-      }
-      return;
-    }
-
     // Handle permission shortcuts - approve/deny first pending permission in UI order
     const permissionKeys = Object.keys(pendingPermissions);
     if (permissionKeys.length === 0) return;
@@ -233,33 +200,6 @@
             activityId: matchingActivityId,
             tool: event.tool,
             description: event.description,
-            timestamp: Date.now() / 1000,
-          });
-        }
-        break;
-
-      case 'PlanReady':
-        if (event.id && event.planContent) {
-          // Use toolUseId for exact matching when available
-          let matchingActivityId: string | null = null;
-
-          if (event.toolUseId) {
-            const exactMatch = activities.find((a) => a.id === event.toolUseId);
-            matchingActivityId = exactMatch?.id || null;
-          }
-
-          if (!matchingActivityId) {
-            // Fallback: find by tool type
-            const matchingActivity = activities.find(
-              (a) => a.status === 'running' && a.toolType === 'ExitPlanMode'
-            );
-            matchingActivityId = matchingActivity?.id || null;
-          }
-
-          chatStore.setPlanRequest({
-            id: event.id,
-            activityId: matchingActivityId,
-            planContent: event.planContent,
             timestamp: Date.now() / 1000,
           });
         }
@@ -379,29 +319,6 @@
     if (permission) {
       handlePermissionResponseForRequest(permission, allowed);
     }
-  }
-
-  async function handlePlanResponse(approved: boolean, comment?: string) {
-    if (!sessionId || !pendingPlan) return;
-
-    try {
-      await invoke('respond_plan', {
-        sessionId,
-        requestId: pendingPlan.id,
-        approved,
-        comment: comment || null,
-      });
-    } catch (e) {
-      console.error('Failed to respond to plan:', e);
-    }
-
-    // Clear the plan request
-    chatStore.setPlanRequest(null);
-  }
-
-  function handlePlanFeedback(feedback: string) {
-    // Send feedback as a rejection with comment
-    handlePlanResponse(false, feedback);
   }
 
   function scrollToBottom() {
@@ -575,32 +492,11 @@
                     showDivider={messages.length > 0 || index > 0}
                   />
                 {:else if item.type === 'tool' && item.activity}
-                  <!-- Plan content display above ExitPlanMode activity -->
-                  {#if item.activity.toolType === 'ExitPlanMode' && pendingPlan && pendingPlan.activityId === item.activity.id}
-                    <div class="mt-2">
-                      <div class="h-px my-2" style:background-color="rgba(255, 255, 255, 0.04)"></div>
-                      <div class="flex flex-col gap-1">
-                        <div class="text-xs font-medium uppercase tracking-wide" style:color="var(--text-muted)">
-                          Claude <span class="text-green-400">(Plan)</span>
-                        </div>
-                        <div
-                          class="plan-content text-sm leading-relaxed p-3 rounded-md border"
-                          style:background-color="rgba(74, 222, 128, 0.05)"
-                          style:border-color="rgba(74, 222, 128, 0.2)"
-                          style:color="var(--text-primary)"
-                        >
-                          {@html marked.parse(pendingPlan.planContent) as string}
-                        </div>
-                      </div>
-                    </div>
-                  {/if}
                   <div class="mt-1">
                     <ActivityCard
                       activity={item.activity}
                       {pendingPermissions}
-                      {pendingPlan}
                       onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
-                      onPlanResponse={handlePlanResponse}
                     />
                   </div>
                 {/if}
@@ -615,9 +511,7 @@
         onSend={sendMessage}
         onQueue={queueMessage}
         onAbort={abortSession}
-        onPlanFeedback={handlePlanFeedback}
         {isStreaming}
-        {pendingPlan}
       />
     </div>
 
@@ -634,64 +528,3 @@
   </div>
 
 </div>
-
-<style>
-  /* Plan content markdown styles */
-  :global(.plan-content p) {
-    margin: 0.5em 0;
-  }
-
-  :global(.plan-content p:first-child) {
-    margin-top: 0;
-  }
-
-  :global(.plan-content p:last-child) {
-    margin-bottom: 0;
-  }
-
-  :global(.plan-content ul),
-  :global(.plan-content ol) {
-    margin: 0.5em 0;
-    padding-left: 1.5em;
-  }
-
-  :global(.plan-content li) {
-    margin: 0.25em 0;
-  }
-
-  :global(.plan-content pre) {
-    margin: 0.5em 0;
-    border-radius: 6px;
-    overflow-x: auto;
-  }
-
-  :global(.plan-content code:not(pre code)) {
-    background: var(--muted);
-    padding: 0.15em 0.4em;
-    border-radius: 4px;
-    font-size: 0.9em;
-  }
-
-  :global(.plan-content blockquote) {
-    margin: 0.5em 0;
-    padding-left: 1em;
-    border-left: 3px solid rgba(74, 222, 128, 0.4);
-    color: var(--text-secondary);
-  }
-
-  :global(.plan-content h1),
-  :global(.plan-content h2),
-  :global(.plan-content h3),
-  :global(.plan-content h4) {
-    margin: 0.75em 0 0.5em 0;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  :global(.plan-content h1:first-child),
-  :global(.plan-content h2:first-child),
-  :global(.plan-content h3:first-child),
-  :global(.plan-content h4:first-child) {
-    margin-top: 0;
-  }
-</style>

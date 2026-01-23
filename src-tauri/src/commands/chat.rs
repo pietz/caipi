@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse, PlanChannels, PlanResponse};
+use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse};
 
 // Global session store
 pub type SessionStore = Arc<Mutex<HashMap<String, AgentSession>>>;
@@ -126,31 +126,6 @@ pub async fn respond_permission(
         Ok(())
     } else {
         Err(format!("No pending permission request with id: {}", request_id))
-    }
-}
-
-#[tauri::command]
-pub async fn respond_plan(
-    _session_id: String,
-    request_id: String,
-    approved: bool,
-    comment: Option<String>,
-    app: AppHandle,
-) -> Result<(), String> {
-    // Use the separate plan channels to avoid deadlock with session store
-    let plan_channels: tauri::State<'_, PlanChannels> = app.state();
-
-    // Take the sender from the channels map
-    let sender = {
-        let mut channels = plan_channels.lock().await;
-        channels.remove(&request_id)
-    };
-
-    if let Some(tx) = sender {
-        let _ = tx.send(PlanResponse { approved, comment });
-        Ok(())
-    } else {
-        Err(format!("No pending plan request with id: {}", request_id))
     }
 }
 

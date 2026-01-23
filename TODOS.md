@@ -4,104 +4,264 @@
 
 ---
 
+## Tech Debt (Critical)
+
+These issues are blocking scalability and should be addressed before adding new features.
+
+### Fix Session Store Lock Held Across Await (BLOCKING)
+In `send_message` (`chat.rs:70-99`), the global session lock is held while `session.send_message(...).await` runs (streaming + tool calls). This blocks ALL other session operations.
+
+**Impact:**
+- `abort_session` cannot acquire lock during a long turn → stop button doesn't work
+- `set_permission_mode` blocked → can't change mode mid-conversation
+- `set_model` blocked → can't switch models mid-conversation
+
+**Fix:**
+- Clone session data needed for the async work
+- Release lock before the `.await`
+- Or restructure to not need mutable borrow during streaming
+
+### Unify Event Schema Between Rust and Frontend
+Two different "protocols" on the same `claude:event` channel:
+
+**Typed (chat.rs:30-40):**
+```rust
+pub enum ChatEvent {
+    PermissionRequest { id: String, tool: String, description: String },
+    // ...
+}
+```
+
+**Ad-hoc JSON (agent.rs:250-257, 320-324):**
+```rust
+app_handle.emit("claude:event", serde_json::json!({
+    "type": "PermissionRequest",
+    "id": request_id,
+    "sessionId": session_id,      // Not in typed version!
+    "toolUseId": tool_use_id,     // Not in typed version!
+    "description": description
+}));
+```
+
+**Impact:**
+- Frontend event handler grows with special cases
+- Field names can drift between Rust and TypeScript
+- Refactors are risky without type safety
+
+**Fix:**
+- All events should go through the typed `ChatEvent` enum
+- Add missing fields to `ChatEvent::PermissionRequest`
+- Remove direct `serde_json::json!` emissions from hooks
+
+### Fix Store Subscription Memory Leaks
+Components use `.subscribe()` without cleanup on unmount, causing memory leaks.
+
+**Affected files:**
+- `ChatContainer.svelte` (lines 59-86)
+- `MessageInput.svelte`
+- `FileTreeItem.svelte` (lines 24-27)
+- `TaskList.svelte` (lines 7-9)
+- `FileExplorer.svelte`
+
+**Fix:**
+- Replace manual `.subscribe()` calls with Svelte 5 reactive patterns
+- Either use `$effect` with proper cleanup, or migrate to `$derived` (see next item)
+
+### Migrate to Proper Svelte 5 Runes
+Current code mixes old subscription patterns with `$state`, creating redundancy.
+
+**Current anti-pattern:**
+```typescript
+let permissionMode = $state<PermissionMode>('default');
+appStore.subscribe((state) => {
+  permissionMode = state.permissionMode;
+});
+```
+
+**Should be:**
+```typescript
+let appState = $derived(get(appStore));
+// Or expose reactive getters from stores
+```
+
+**Note:** This naturally resolves the memory leak issue when done correctly.
+
+### Split chat.ts Store (335 lines)
+The chat store handles too many concerns: messages, activities, permissions, tasks, skills, tokens.
+
+**Split into:**
+- `messageStore.ts` - messages and streaming
+- `activityStore.ts` - tool activities
+- `permissionStore.ts` - pending permissions (currently in ChatContainer!)
+- Keep `chat.ts` as a thin coordinator if needed
+
+**Bonus:** This enables proper unit testing of individual stores.
+
+### Extract Permission Hook Logic (agent.rs)
+The `pre_tool_use_hook` closure is 166 lines (lines 135-301) of nested async logic.
+
+**Problems:**
+- Impossible to unit test
+- Hard to modify without breaking things
+- Multiple conditional paths for permission modes
+
+**Refactor to:**
+- Extract into separate functions: `handle_default_mode()`, `handle_edit_mode()`, etc.
+- Create a `PermissionHandler` struct if needed
+- Target: hook closure < 30 lines, calling well-named functions
+
+### Single Source of Truth for App State
+Permission mode and model are stored in both frontend (`app.ts`) and backend (`AgentSession`).
+
+**Current flow:**
+1. User clicks permission button → updates frontend store
+2. Frontend calls `set_permission_mode` → updates backend
+3. If either fails or is skipped, they diverge
+
+**Options:**
+- **Frontend-driven:** Backend queries frontend for current mode on each tool use
+- **Backend-driven:** Frontend always fetches state from backend after changes
+- **Event-driven:** Backend emits state changes, frontend subscribes
+
+**Decision needed:** Pick one pattern and apply consistently.
+
+### Add Unit Test Infrastructure
+Zero tests exist for complex logic (permission handling, event routing, store operations).
+
+**Minimum coverage needed:**
+- Frontend: Store operations, event handling utilities
+- Backend: Permission logic, tool target extraction, storage operations
+
+**Setup:**
+- Frontend: Vitest + @testing-library/svelte
+- Backend: Standard Rust `#[cfg(test)]` modules
+
+### Establish Feature Boundaries
+State and logic are scattered with no clear ownership.
+
+**Current problems:**
+- "Permission handling" spans: ChatContainer, chat store, app store, agent.rs
+- "Message streaming" spans: ChatContainer, chat store, agent.rs
+- No natural place for new features
+
+**Goal:** Each feature should have a clear home (store + component + backend module).
+
+---
+
 ## High Priority
 
-No high priority tasks at the moment.
+### Skills Support
+Skills are a new Anthropic feature that we want to support in Caipi.
+
+**Research needed:**
+- Understand how skills work in the `claude-agent-sdk-rs`
+- How are skills discovered/listed on the user's system?
+- How does the agent retrieve and invoke skills?
+- What events/data does the SDK emit for skill usage?
+
+**Implementation:**
+- Detect and list user-installed skills
+- Display available skills in the UI (possibly in the right sidebar)
+- Allow the agent to retrieve and use skills when needed
+- Show skill invocation status in the activity feed
+
+### Refactor ChatContainer.svelte (God Component)
+ChatContainer.svelte has grown to ~540 lines with too many responsibilities:
+- Event listening and processing (`handleClaudeEvent` switch statement)
+- Permission handling logic
+- Message queue management
+- Keyboard shortcut handling
+- UI rendering
+
+Every new feature touches this file, increasing risk of bugs and merge conflicts.
+
+**Refactor to:**
+- Extract event handling into a separate module/service
+- Extract keyboard shortcut handling
+- Keep ChatContainer focused on layout and composition
+- Target: ~200-300 lines
 
 ---
 
 ## Medium Priority
 
-### Permission Modes UI
-Claude Code has different operation modes that need to be exposed in the UI:
-- **Default mode:** Can read files, but cannot write or execute
-- **Accept edits mode:** Can read and write, but cannot execute
-- **Plan mode:** Can read, ends with a plan that needs approval/rejection
-- **Dangerous mode:** Read, write, and execute all tools without confirmation
+### Store Bloat in chat.ts
+The chat store manages too many concerns:
+- Messages, activities, streamItems
+- Permissions
+- Tasks, skills
+- Token count, session duration
+
+The `finalizeStream()` function has subtle ordering logic that's easy to break.
+
+**Consider:**
+- Split into focused stores (e.g., `streamStore`, `permissionStore`)
+- Or at least extract `finalizeStream()` logic into a well-documented utility
+
+### Duplicated Activity Matching Logic
+"Find activity by toolUseId, fall back to tool type" appears in 2-3 places.
+
+**Fix:**
+- Extract into a utility function: `findActivityForEvent(activities, toolUseId, toolType)`
+
+### Rename "Recent Projects" to "Recent Folders"
+The folder picker shows "Recent projects" but these are really just folders.
 
 **Requirements:**
-- Add a button underneath the input bar to cycle through modes
-- Display current mode visually (icon or label)
-- Consider color-coding for dangerous mode
-
-### Model Switching
-Users need to be able to switch between available Claude models.
-
-**Requirements:**
-- Add a button underneath the input bar showing current model
-- Clicking cycles through: Opus 4.5 → Sonnet 4.5 → Haiku 4.5
-- Persist selection across sessions (or per conversation)
-
-### Stop Button Styling
-The stop button appears on a transparent background, losing the visual consistency with the send button.
-
-**Requirements:**
-- Keep the same button styling as the send button
-- Only swap the icon (send → stop)
-- Maintain proper contrast and visibility
+- Update label from "Recent projects" to "Recent folders"
+- Check for any other references to "projects" that should be "folders"
 
 ### Show Context Usage Percentage
 The token count below the input bar isn't very meaningful to users.
 
 **Requirements:**
 - Replace raw token count with percentage of context window used
-- SDK should provide this information
+- Don't show exact token numbers, just the percentage
+- SDK should provide this information (or we calculate from known context window size)
 - Consider a visual indicator (progress bar or percentage text)
 
 ### Timer Below Input Not Working
 The timer display below the input bar doesn't show meaningful timing information.
 
 **Requirements:**
-- Track time since conversation started or since last message
-- Or track agent response time
+- Timer should run while Claude is actively processing
+- Timer should pause when waiting for user input (to keep timing fair)
+- Display the cumulative time Claude spent processing for the current turn
+- Reset when a new user message is sent
 - Display in a clear format (e.g., "2m 34s")
 
+### Tool Spinner Only During Execution
+The activity card spinner currently appears as soon as a tool is requested, but it should only spin when the tool is actually executing.
+
+**Current behavior:**
+- Spinner shows during the "prompting" phase (tool requested but not yet running)
+
+**Desired behavior:**
+- No spinner while tool is being prepared/prompted
+- Spinner only appears when the tool is actively executing
+- This gives users accurate feedback about what's actually happening
+
 ### Excessive Whitespace in Responses
-Agent responses have too much vertical spacing between paragraphs, making them look sparse.
+Agent responses have too much vertical spacing between paragraphs.
 
 **Requirements:**
 - Review CSS for message content rendering
 - Adjust paragraph margins/spacing
 - Ensure consistent typography with reasonable line height
 
-### Send Button Styling
-Two issues with the send button:
-- Icon color is dark gray on medium gray background - should be **white** for better contrast
-- Button may not be square (taller than wide) - should be equal dimensions
-
 ---
 
-## Low Priority
+## Completed
 
-### Remove "Shift+Enter for New Line" Hint
-The hint text about Shift+Enter for new lines takes up space and can be assumed as standard behavior.
-
-**Requirements:**
-- Remove or hide this hint
-- Consider showing it only on first use or in a tooltip
-
-### App Icon Replacement
-Currently using the default Tauri/framework logo in the macOS dock.
-
-**Requirements:**
-- Use the Caipi glass icon (without circle background)
-- Place in rounded square shape appropriate for macOS
-- Research macOS icon requirements - needs specific transparent padding for menu bar icons
-- May need multiple sizes/formats
-
-### Logo Watermark Adjustments
-The Caipi logo watermark in the empty chat background:
-- Increase opacity slightly (currently too faint)
-- Make it a bit larger (currently quite small)
-
-### Light/Dark Mode Toggle
-Add a toggle in the top-right corner of the UI (possibly next to version number):
-- Sun icon for light mode
-- Moon icon for dark mode
-- Clicking toggles between modes
-
-### Settings Pane
-No settings UI exists yet. Need to design and implement a settings panel. (Future feature - scope TBD)
+- ~~Permission Modes UI~~ (3 modes: Default, Edit, Danger)
+- ~~Model Switching~~ (cycling button with dot sizes)
+- ~~Stop Button Styling~~ (consistent with send button)
+- ~~Light/Dark Mode Toggle~~ (sun/moon in header)
+- ~~App Icon Replacement~~ (Caipi glass icon)
+- ~~Logo Watermark Adjustments~~ (opacity and size)
+- ~~Send Button Styling~~ (white icon, square shape)
+- ~~Remove "Shift+Enter for New Line" Hint~~
+- ~~Parallel permissions bug~~ (multiple pending permissions support)
 
 ---
 
@@ -110,5 +270,10 @@ No settings UI exists yet. Need to design and implement a settings panel. (Futur
 - Window resizing works well
 - Main page layout looks good
 - Sidebar toggles work correctly
-- Folder picker and recent projects work as expected
+- Folder picker and recent folders work as expected
 - Permission dialog UI works correctly
+- Plan mode removed (too complex to implement reliably from outside Claude Code's internals)
+- Permission modes (Default, Edit, Danger) all work correctly with proper restrictions
+- Light/dark mode switcher works
+- Right sidebar (context panel) works correctly
+- Message context persists correctly across the conversation
