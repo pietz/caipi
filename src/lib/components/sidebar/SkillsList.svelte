@@ -11,7 +11,7 @@
 
 <div class="p-3">
   <div class="text-xs font-medium text-muted uppercase tracking-[0.5px] mb-2.5">
-    Active Skills
+    Skills
   </div>
 
   {#if activeSkills.length === 0}

@@ -6,7 +6,7 @@
 
 <div class="p-3">
   <div class="text-xs font-medium text-muted uppercase tracking-[0.5px] mb-2.5">
-    To-Do List
+    To-Dos
   </div>
 
   {#if todos.length === 0}

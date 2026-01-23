@@ -65,6 +65,13 @@
 </script>
 
 <div class="flex flex-col h-full" style="background-color: var(--sidebar);">
+  <!-- Header -->
+  <div class="p-3 pb-0">
+    <div class="text-xs font-medium text-muted uppercase tracking-[0.5px]">
+      Explorer
+    </div>
+  </div>
+
   <!-- Tree -->
   <div class="flex-1 overflow-auto pt-2">
     {#if loading}
