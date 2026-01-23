@@ -93,6 +93,133 @@ fn string_to_model_id(model: &str) -> &'static str {
     }
 }
 
+// ============================================================================
+// Permission Hook Helpers
+// ============================================================================
+
+/// Create an "allow" response for the pre-tool-use hook
+fn allow_response(reason: &str) -> HookJsonOutput {
+    HookJsonOutput::Sync(SyncHookJsonOutput {
+        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+            PreToolUseHookSpecificOutput {
+                permission_decision: Some("allow".to_string()),
+                permission_decision_reason: Some(reason.to_string()),
+                updated_input: None,
+            }
+        )),
+        ..Default::default()
+    })
+}
+
+/// Create a "deny" response for the pre-tool-use hook
+fn deny_response(reason: &str) -> HookJsonOutput {
+    HookJsonOutput::Sync(SyncHookJsonOutput {
+        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+            PreToolUseHookSpecificOutput {
+                permission_decision: Some("deny".to_string()),
+                permission_decision_reason: Some(reason.to_string()),
+                updated_input: None,
+            }
+        )),
+        ..Default::default()
+    })
+}
+
+/// Check if the session has been aborted
+fn check_abort_decision(abort_flag: &Arc<AtomicBool>) -> Option<HookJsonOutput> {
+    if abort_flag.load(Ordering::SeqCst) {
+        Some(deny_response("Session aborted"))
+    } else {
+        None
+    }
+}
+
+/// Extract tool name and input from hook input
+fn extract_tool_info(input: &HookInput) -> Option<(String, serde_json::Value)> {
+    match input {
+        HookInput::PreToolUse(pre_tool) => {
+            Some((pre_tool.tool_name.clone(), pre_tool.tool_input.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Check if the permission mode allows the tool without prompting
+fn check_mode_decision(mode: &str, tool_name: &str) -> Option<HookJsonOutput> {
+    match mode {
+        "bypassPermissions" => Some(allow_response("Bypass mode - all tools allowed")),
+        "acceptEdits" if tool_name != "Bash" => {
+            Some(allow_response("AcceptEdits mode - file operations allowed"))
+        }
+        _ => None,
+    }
+}
+
+/// Check if the tool requires permission prompting
+fn requires_permission(tool_name: &str) -> bool {
+    matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit")
+}
+
+/// Build a human-readable description for the permission prompt
+fn build_permission_description(tool_name: &str, tool_input: &serde_json::Value) -> String {
+    match tool_name {
+        "Write" | "Edit" => {
+            tool_input.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|p| format!("Modify file: {}", p))
+                .unwrap_or_else(|| format!("Use tool: {}", tool_name))
+        }
+        "Bash" => {
+            tool_input.get("command")
+                .and_then(|v| v.as_str())
+                .map(|cmd| {
+                    if cmd.len() > 80 {
+                        format!("Run command: {}...", &cmd[..77])
+                    } else {
+                        format!("Run command: {}", cmd)
+                    }
+                })
+                .unwrap_or_else(|| "Run bash command".to_string())
+        }
+        _ => format!("Use tool: {}", tool_name),
+    }
+}
+
+/// Prompt the user for permission and await their response
+async fn prompt_user_permission(
+    permission_channels: PermissionChannels,
+    app_handle: AppHandle,
+    session_id: String,
+    tool_name: String,
+    tool_use_id: Option<String>,
+    description: String,
+) -> HookJsonOutput {
+    let (tx, rx) = oneshot::channel();
+    let request_id = Uuid::new_v4().to_string();
+
+    // Store sender in the global permission channels
+    {
+        let mut channels = permission_channels.lock().await;
+        channels.insert(request_id.clone(), tx);
+    }
+
+    // Emit permission request event to frontend
+    let _ = app_handle.emit("claude:event", &ChatEvent::PermissionRequest {
+        id: request_id,
+        session_id,
+        tool: tool_name,
+        tool_use_id,
+        description,
+    });
+
+    // Await user response
+    match rx.await {
+        Ok(response) if response.allowed => allow_response("User approved"),
+        Ok(_) => deny_response("User denied"),
+        Err(_) => deny_response("Permission request cancelled"),
+    }
+}
+
 impl AgentSession {
     pub async fn new(folder_path: String, permission_mode: String, model: String, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
@@ -179,180 +306,41 @@ impl AgentSession {
             let app_handle = app_handle.clone();
             let session_id = session_id.clone();
             let permission_mode_arc = permission_mode_arc.clone();
-            let tool_use_id = tool_use_id.clone();
             let abort_flag = abort_flag.clone();
 
             Box::pin(async move {
-                // Check if abort was requested - deny all tools if so
-                if abort_flag.load(Ordering::SeqCst) {
-                    return HookJsonOutput::Sync(SyncHookJsonOutput {
-                        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                            PreToolUseHookSpecificOutput {
-                                permission_decision: Some("deny".to_string()),
-                                permission_decision_reason: Some("Session aborted".to_string()),
-                                updated_input: None,
-                            }
-                        )),
-                        ..Default::default()
-                    });
+                // 1. Check if abort was requested
+                if let Some(deny) = check_abort_decision(&abort_flag) {
+                    return deny;
                 }
 
-                // Only handle PreToolUse events
-                let (tool_name, tool_input) = match &input {
-                    HookInput::PreToolUse(pre_tool) => {
-                        (pre_tool.tool_name.clone(), pre_tool.tool_input.clone())
-                    }
-                    _ => {
-                        // Not a PreToolUse event, continue without intervention
-                        return HookJsonOutput::Sync(SyncHookJsonOutput::default());
-                    }
+                // 2. Extract tool info (only handle PreToolUse events)
+                let (tool_name, tool_input) = match extract_tool_info(&input) {
+                    Some(info) => info,
+                    None => return HookJsonOutput::Sync(SyncHookJsonOutput::default()),
                 };
 
-                // Get the current permission mode
+                // 3. Check permission mode for auto-decisions
                 let current_mode = permission_mode_arc.read().await.clone();
-
-                // Check permission based on mode
-                match current_mode.as_str() {
-                    "bypassPermissions" => {
-                        // Allow everything without prompting
-                        return HookJsonOutput::Sync(SyncHookJsonOutput {
-                            hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                PreToolUseHookSpecificOutput {
-                                    permission_decision: Some("allow".to_string()),
-                                    permission_decision_reason: Some("Bypass mode - all tools allowed".to_string()),
-                                    updated_input: None,
-                                }
-                            )),
-                            ..Default::default()
-                        });
-                    }
-                    "acceptEdits" => {
-                        // Auto-allow Write/Edit, only prompt for Bash
-                        let is_bash = tool_name == "Bash";
-                        if !is_bash {
-                            return HookJsonOutput::Sync(SyncHookJsonOutput {
-                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                    PreToolUseHookSpecificOutput {
-                                        permission_decision: Some("allow".to_string()),
-                                        permission_decision_reason: Some("AcceptEdits mode - file operations allowed".to_string()),
-                                        updated_input: None,
-                                    }
-                                )),
-                                ..Default::default()
-                            });
-                        }
-                        // Fall through to prompt for Bash
-                    }
-                    _ => {
-                        // Default mode - check if this tool requires permission
-                    }
+                if let Some(decision) = check_mode_decision(&current_mode, &tool_name) {
+                    return decision;
                 }
 
-                // Check if this tool requires permission (for default mode and Bash in acceptEdits)
-                let requires_permission = matches!(
-                    tool_name.as_str(),
-                    "Write" | "Edit" | "Bash" | "NotebookEdit"
-                );
-
-                if !requires_permission {
-                    // Allow read-only tools without asking
-                    return HookJsonOutput::Sync(SyncHookJsonOutput {
-                        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                            PreToolUseHookSpecificOutput {
-                                permission_decision: Some("allow".to_string()),
-                                permission_decision_reason: Some("Read-only operation".to_string()),
-                                updated_input: None,
-                            }
-                        )),
-                        ..Default::default()
-                    });
+                // 4. Check if this tool requires permission prompting
+                if !requires_permission(&tool_name) {
+                    return allow_response("Read-only operation");
                 }
 
-                // Extract a description from the tool input
-                let description = match tool_name.as_str() {
-                    "Write" | "Edit" => {
-                        tool_input.get("file_path")
-                            .and_then(|v| v.as_str())
-                            .map(|p| format!("Modify file: {}", p))
-                            .unwrap_or_else(|| format!("Use tool: {}", tool_name))
-                    }
-                    "Bash" => {
-                        tool_input.get("command")
-                            .and_then(|v| v.as_str())
-                            .map(|cmd| {
-                                if cmd.len() > 80 {
-                                    format!("Run command: {}...", &cmd[..77])
-                                } else {
-                                    format!("Run command: {}", cmd)
-                                }
-                            })
-                            .unwrap_or_else(|| "Run bash command".to_string())
-                    }
-                    _ => format!("Use tool: {}", tool_name),
-                };
-
-                // Create a oneshot channel for this permission request
-                let (tx, rx) = oneshot::channel();
-
-                // Generate a unique request ID
-                let request_id = Uuid::new_v4().to_string();
-
-                // Store the sender in the global permission channels (keyed by request_id)
-                {
-                    let mut channels = permission_channels.lock().await;
-                    channels.insert(request_id.clone(), tx);
-                }
-
-                // Emit the permission request event to the frontend
-                let _ = app_handle.emit("claude:event", &ChatEvent::PermissionRequest {
-                    id: request_id,
-                    session_id: session_id,
-                    tool: tool_name,
-                    tool_use_id: tool_use_id,
-                    description: description,
-                });
-
-                // Wait for the response from the UI
-                match rx.await {
-                    Ok(response) => {
-                        if response.allowed {
-                            HookJsonOutput::Sync(SyncHookJsonOutput {
-                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                    PreToolUseHookSpecificOutput {
-                                        permission_decision: Some("allow".to_string()),
-                                        permission_decision_reason: Some("User approved".to_string()),
-                                        updated_input: None,
-                                    }
-                                )),
-                                ..Default::default()
-                            })
-                        } else {
-                            HookJsonOutput::Sync(SyncHookJsonOutput {
-                                hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                    PreToolUseHookSpecificOutput {
-                                        permission_decision: Some("deny".to_string()),
-                                        permission_decision_reason: Some("User denied".to_string()),
-                                        updated_input: None,
-                                    }
-                                )),
-                                ..Default::default()
-                            })
-                        }
-                    }
-                    Err(_) => {
-                        // Channel was closed (e.g., session aborted)
-                        HookJsonOutput::Sync(SyncHookJsonOutput {
-                            hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-                                PreToolUseHookSpecificOutput {
-                                    permission_decision: Some("deny".to_string()),
-                                    permission_decision_reason: Some("Permission request cancelled".to_string()),
-                                    updated_input: None,
-                                }
-                            )),
-                            ..Default::default()
-                        })
-                    }
-                }
+                // 5. Build description and prompt user
+                let description = build_permission_description(&tool_name, &tool_input);
+                prompt_user_permission(
+                    permission_channels,
+                    app_handle,
+                    session_id,
+                    tool_name,
+                    tool_use_id,
+                    description,
+                ).await
             })
         });
 
