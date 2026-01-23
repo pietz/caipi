@@ -1,7 +1,7 @@
 use crate::commands::chat::{Message as ChatMessage, ChatEvent};
 use claude_agent_sdk_rs::{
     ClaudeClient, ClaudeAgentOptions, Message, ContentBlock,
-    PermissionMode,
+    PermissionMode, SettingSource,
 };
 use futures::StreamExt;
 use std::sync::Arc;
@@ -195,6 +195,7 @@ impl AgentSession {
             .hooks(hooks)
             .permission_mode(sdk_mode)
             .model(model_id)
+            .setting_sources(vec![SettingSource::User, SettingSource::Project])
             .build();
 
         // Create client if needed and perform all client operations while holding the lock

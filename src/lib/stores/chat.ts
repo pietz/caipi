@@ -60,6 +60,13 @@ function createChatMetadataStore() {
       activeSkills: skills,
     })),
 
+    addActiveSkill: (skill: string) => update(s => ({
+      ...s,
+      activeSkills: s.activeSkills.includes(skill)
+        ? s.activeSkills
+        : [...s.activeSkills, skill],
+    })),
+
     // Stats
     setTokenCount: (count: number) => update(s => ({
       ...s,
@@ -139,6 +146,7 @@ export const chatStore = {
   addTask: metadataStore.addTask,
   updateTask: metadataStore.updateTask,
   setActiveSkills: metadataStore.setActiveSkills,
+  addActiveSkill: metadataStore.addActiveSkill,
   setTokenCount: metadataStore.setTokenCount,
   setSessionDuration: metadataStore.setSessionDuration,
 

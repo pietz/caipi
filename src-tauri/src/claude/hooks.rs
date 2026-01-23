@@ -88,7 +88,7 @@ pub fn check_mode_decision(mode: &str, tool_name: &str) -> Option<HookJsonOutput
 
 /// Check if the tool requires permission prompting
 pub fn requires_permission(tool_name: &str) -> bool {
-    matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit")
+    matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit" | "Skill")
 }
 
 /// Build a human-readable description for the permission prompt
@@ -111,6 +111,12 @@ pub fn build_permission_description(tool_name: &str, tool_input: &serde_json::Va
                     }
                 })
                 .unwrap_or_else(|| "Run bash command".to_string())
+        }
+        "Skill" => {
+            tool_input.get("skill")
+                .and_then(|v| v.as_str())
+                .map(|s| format!("Load skill: {}", s))
+                .unwrap_or_else(|| "Load skill".to_string())
         }
         _ => format!("Use tool: {}", tool_name),
     }
@@ -285,6 +291,7 @@ mod tests {
         assert!(requires_permission("Edit"));
         assert!(requires_permission("Bash"));
         assert!(requires_permission("NotebookEdit"));
+        assert!(requires_permission("Skill"));
         assert!(!requires_permission("Read"));
         assert!(!requires_permission("Glob"));
     }
@@ -301,6 +308,12 @@ mod tests {
         assert_eq!(
             build_permission_description("Bash", &bash_input),
             "Run command: ls -la"
+        );
+
+        let skill_input = serde_json::json!({"skill": "email"});
+        assert_eq!(
+            build_permission_description("Skill", &skill_input),
+            "Load skill: email"
         );
     }
 }

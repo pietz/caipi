@@ -139,6 +139,15 @@ export function createStreamCoordinator(options: StreamCoordinatorOptions = {}) 
         event.id,
         event.status as ToolActivity['status']
       );
+
+      // Track skill activation only after successful completion (user approved)
+      if (event.status === 'completed') {
+        const activities = chatStore.getActivities();
+        const activity = activities.find((a: ToolActivity) => a.id === event.id);
+        if (activity?.toolType === 'Skill' && activity.target) {
+          chatStore.addActiveSkill(activity.target);
+        }
+      }
     }
   }
 

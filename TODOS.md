@@ -4,38 +4,22 @@
 
 ---
 
-## Tech Debt (Critical)
-
-These issues are blocking scalability and should be addressed before adding new features.
-
-### Establish Feature Boundaries
-State and logic are scattered with no clear ownership.
-
-**Current problems:**
-- "Permission handling" spans: ChatContainer, chat store, app store, agent.rs
-- "Message streaming" spans: ChatContainer, chat store, agent.rs
-- No natural place for new features
-
-**Goal:** Each feature should have a clear home (store + component + backend module).
-
----
-
 ## High Priority
 
-### Skills Support
-Skills are a new Anthropic feature that we want to support in Caipi.
+### Connect Agent Task List to UI
+The Claude agent can create and manage tasks via `TaskCreate`, `TaskUpdate`, `TaskList`, and `TaskGet` tools. These tasks should be displayed in our right sidebar's task list component.
 
 **Research needed:**
-- Understand how skills work in the `claude-agent-sdk-rs`
-- How are skills discovered/listed on the user's system?
-- How does the agent retrieve and invoke skills?
-- What events/data does the SDK emit for skill usage?
+- Understand how task-related events are emitted by `claude-agent-sdk-rs`
+- What data structure do tasks have (id, subject, description, status, owner, blocks/blockedBy)?
+- How do we receive task creation, updates, and completion events?
 
 **Implementation:**
-- Detect and list user-installed skills
-- Display available skills in the UI (possibly in the right sidebar)
-- Allow the agent to retrieve and use skills when needed
-- Show skill invocation status in the activity feed
+- Listen for task-related events from the SDK
+- Store task state in the chat store (or a dedicated task store)
+- Display tasks in the `TaskList.svelte` component in the right sidebar
+- Show task status (pending, in_progress, completed)
+- Update UI in real-time as the agent creates/updates/completes tasks
 
 ### Refactor ChatContainer.svelte (God Component)
 ChatContainer.svelte has grown to ~540 lines with too many responsibilities:
@@ -112,6 +96,7 @@ Agent responses have too much vertical spacing between paragraphs.
 
 ## Completed
 
+- ~~Skills Support~~ (enabled skill discovery via `setting_sources` in SDK, skills require permission before loading, tracked in right sidebar after user approval, styled to match task list)
 - ~~Single Source of Truth for App State~~ (implemented event-driven pattern: backend emits `StateChanged` event after updating permission mode/model, frontend syncs via `appStore.syncState()`)
 - ~~Extract Permission Hook Logic (agent.rs)~~ (refactored 180-line hook to ~40 lines using 7 helper functions: `allow_response`, `deny_response`, `check_abort_decision`, `extract_tool_info`, `check_mode_decision`, `requires_permission`, `build_permission_description`, `prompt_user_permission`)
 - ~~Split chat.ts Store~~ (split into messageStore, activityStore, permissionStore with chat.ts as coordinator)
