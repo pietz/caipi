@@ -33,9 +33,22 @@ pub enum ChatEvent {
     Text { content: String },
     ToolStart { activity: ToolActivity },
     ToolEnd { id: String, status: String },
-    PermissionRequest { id: String, tool: String, description: String },
+    PermissionRequest {
+        id: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        tool: String,
+        #[serde(rename = "toolUseId")]
+        tool_use_id: Option<String>,
+        description: String,
+    },
     SessionInit { auth_type: String },
     Complete,
+    #[serde(rename = "AbortComplete")]
+    AbortComplete {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+    },
     Error { message: String },
 }
 

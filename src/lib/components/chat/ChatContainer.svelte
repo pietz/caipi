@@ -128,7 +128,7 @@
           // If there's a pending permission request with matching tool type but no activityId,
           // link it to this activity (handles case where permission request arrives before ToolStart)
           // Find by request id (since we don't have activityId yet)
-          for (const [key, permission] of Object.entries(pendingPermissions)) {
+          for (const [key, permission] of Object.entries(pendingPermissions) as [string, PermissionRequest][]) {
             if (permission.activityId === null && permission.tool === newActivity.toolType) {
               // Remove the old entry and add with the new activityId
               chatStore.removePermissionRequest(key);
@@ -159,14 +159,14 @@
 
           if (event.toolUseId) {
             // Exact match by tool_use_id
-            const exactMatch = activities.find((a) => a.id === event.toolUseId);
+            const exactMatch = activities.find((a: ToolActivity) => a.id === event.toolUseId);
             matchingActivityId = exactMatch?.id || null;
           }
 
           if (!matchingActivityId) {
             // Fallback: find by tool type that doesn't already have a pending permission
             const matchingActivity = activities.find(
-              (a) => a.status === 'running' && a.toolType === event.tool && !pendingPermissions[a.id]
+              (a: ToolActivity) => a.status === 'running' && a.toolType === event.tool && !pendingPermissions[a.id]
             );
             matchingActivityId = matchingActivity?.id || null;
           }

@@ -8,49 +8,6 @@
 
 These issues are blocking scalability and should be addressed before adding new features.
 
-### Unify Event Schema Between Rust and Frontend
-Two different "protocols" on the same `claude:event` channel:
-
-**Typed (chat.rs:30-40):**
-```rust
-pub enum ChatEvent {
-    PermissionRequest { id: String, tool: String, description: String },
-    // ...
-}
-```
-
-**Ad-hoc JSON (agent.rs:250-257, 320-324):**
-```rust
-app_handle.emit("claude:event", serde_json::json!({
-    "type": "PermissionRequest",
-    "id": request_id,
-    "sessionId": session_id,      // Not in typed version!
-    "toolUseId": tool_use_id,     // Not in typed version!
-    "description": description
-}));
-```
-
-**Impact:**
-- Frontend event handler grows with special cases
-- Field names can drift between Rust and TypeScript
-- Refactors are risky without type safety
-
-**Fix:**
-- All events should go through the typed `ChatEvent` enum
-- Add missing fields to `ChatEvent::PermissionRequest`
-- Remove direct `serde_json::json!` emissions from hooks
-
-### Split chat.ts Store (335 lines)
-The chat store handles too many concerns: messages, activities, permissions, tasks, skills, tokens.
-
-**Split into:**
-- `messageStore.ts` - messages and streaming
-- `activityStore.ts` - tool activities
-- `permissionStore.ts` - pending permissions (currently in ChatContainer!)
-- Keep `chat.ts` as a thin coordinator if needed
-
-**Bonus:** This enables proper unit testing of individual stores.
-
 ### Extract Permission Hook Logic (agent.rs)
 The `pre_tool_use_hook` closure is 166 lines (lines 135-301) of nested async logic.
 
@@ -128,19 +85,6 @@ Every new feature touches this file, increasing risk of bugs and merge conflicts
 
 ## Medium Priority
 
-### Store Bloat in chat.ts
-The chat store manages too many concerns:
-- Messages, activities, streamItems
-- Permissions
-- Tasks, skills
-- Token count, session duration
-
-The `finalizeStream()` function has subtle ordering logic that's easy to break.
-
-**Consider:**
-- Split into focused stores (e.g., `streamStore`, `permissionStore`)
-- Or at least extract `finalizeStream()` logic into a well-documented utility
-
 ### Duplicated Activity Matching Logic
 "Find activity by toolUseId, fall back to tool type" appears in 2-3 places.
 
@@ -196,6 +140,7 @@ Agent responses have too much vertical spacing between paragraphs.
 
 ## Completed
 
+- ~~Split chat.ts Store~~ (split into messageStore, activityStore, permissionStore with chat.ts as coordinator)
 - ~~Permission Modes UI~~ (3 modes: Default, Edit, Danger)
 - ~~Model Switching~~ (cycling button with dot sizes)
 - ~~Stop Button Styling~~ (consistent with send button)
@@ -210,6 +155,7 @@ Agent responses have too much vertical spacing between paragraphs.
 - ~~Fix Store Subscription Memory Leaks~~ (migrated to Svelte 5 `$derived` pattern with `$store` syntax)
 - ~~Migrate to Proper Svelte 5 Runes~~ (all components now use `$derived($store.property)`)
 - ~~Add Unit Test Infrastructure~~ (Vitest + testing-library for frontend, Rust test modules for backend)
+- ~~Unify Event Schema Between Rust and Frontend~~ (extended ChatEvent enum with missing fields, replaced all ad-hoc JSON emissions with typed variants)
 
 ---
 

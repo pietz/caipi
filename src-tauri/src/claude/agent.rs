@@ -1,4 +1,4 @@
-use crate::commands::chat::Message as ChatMessage;
+use crate::commands::chat::{Message as ChatMessage, ChatEvent};
 use claude_agent_sdk_rs::{
     ClaudeClient, ClaudeAgentOptions, Message, ContentBlock, ToolUseBlock,
     HookEvent, HookMatcher, HookCallback, HookInput, HookContext, HookJsonOutput,
@@ -304,14 +304,13 @@ impl AgentSession {
                 }
 
                 // Emit the permission request event to the frontend
-                let _ = app_handle.emit("claude:event", serde_json::json!({
-                    "type": "PermissionRequest",
-                    "id": request_id,
-                    "sessionId": session_id,
-                    "tool": tool_name,
-                    "toolUseId": tool_use_id,
-                    "description": description
-                }));
+                let _ = app_handle.emit("claude:event", &ChatEvent::PermissionRequest {
+                    id: request_id,
+                    session_id: session_id,
+                    tool: tool_name,
+                    tool_use_id: tool_use_id,
+                    description: description,
+                });
 
                 // Wait for the response from the UI
                 match rx.await {
@@ -374,11 +373,10 @@ impl AgentSession {
 
                     // Emit ToolEnd event immediately
                     if let Some(id) = tool_use_id {
-                        let _ = app_handle.emit("claude:event", serde_json::json!({
-                            "type": "ToolEnd",
-                            "id": id,
-                            "status": status
-                        }));
+                        let _ = app_handle.emit("claude:event", &ChatEvent::ToolEnd {
+                            id: id,
+                            status: status.to_string(),
+                        });
                     }
                 }
 
@@ -562,10 +560,9 @@ impl AgentSession {
         if was_aborted {
             // Emit AbortComplete after stream is fully drained
             // This signals the frontend that the abort is complete and it can finalize
-            let _ = self.app_handle.emit("claude:event", serde_json::json!({
-                "type": "AbortComplete",
-                "sessionId": self.id
-            }));
+            let _ = self.app_handle.emit("claude:event", &ChatEvent::AbortComplete {
+                session_id: self.id.clone(),
+            });
         }
         // Note: Normal completion emits Complete via on_event in the Result branch
 
