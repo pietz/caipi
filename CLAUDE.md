@@ -41,7 +41,7 @@ caipi/
 │   │   ├── assets/               # Static assets (caipi-logo.png)
 │   │   ├── components/
 │   │   │   ├── ui/               # Base components (Button, Card, Dialog, Titlebar, etc.)
-│   │   │   ├── icons/            # SVG icon components (FolderIcon, SendIcon, CaipiIcon, etc.)
+│   │   │   ├── icons/            # SVG icon components (FolderIcon, SendIcon, ShieldIcon, etc.)
 │   │   │   ├── sidebar/          # Sidebars (FileExplorer, ContextPanel, TaskList, SkillsList)
 │   │   │   ├── onboarding/       # Welcome screen with CLI detection
 │   │   │   ├── folder/           # Folder picker with drag-drop
@@ -59,7 +59,7 @@ caipi/
 │   │   │   ├── setup.rs          # CLI detection (check_cli_installed, check_cli_authenticated)
 │   │   │   ├── folder.rs         # Folder operations (get_recent_folders, save_recent_folder)
 │   │   │   ├── files.rs          # File operations (list_directory)
-│   │   │   └── chat.rs           # Chat/session management (create_session, send_message)
+│   │   │   └── chat.rs           # Chat/session management (create_session, send_message, set_permission_mode, set_model)
 │   │   ├── claude/               # SDK integration
 │   │   │   ├── agent.rs          # AgentSession wrapper, streaming events
 │   │   │   └── permissions.rs    # Permission translation helpers
@@ -128,9 +128,22 @@ Tiny:            12px  (labels, hints, timestamps, paths)
 - `claude:error` - Error occurred
 
 ### State Management
-- `app.ts` store: Current screen, selected folder, sidebar toggles, settings
+- `app.ts` store: Current screen, selected folder, sidebar toggles, permission mode, model selection
 - `chat.ts` store: Messages, tool activities, streaming state, tasks, skills, token count
 - `files.ts` store: File tree state, expanded paths, selected file
+
+### Permission Modes
+Controlled via footer button in chat input. Affects how tool permissions are handled:
+- **Default** (blue): Prompts for Write/Edit/Bash/NotebookEdit
+- **Edit** (purple): Auto-allows file edits, prompts only for Bash
+- **Plan** (green): Read-only, denies all write operations
+- **Danger** (red): Bypasses all permission checks
+
+### Model Selection
+Controlled via footer button in chat input. Available models:
+- **Opus 4.5** (large dot): `claude-opus-4-5-20251101`
+- **Sonnet 4.5** (medium dot): `claude-sonnet-4-5-20250514`
+- **Haiku 4.5** (small dot): `claude-haiku-3-5-20241022`
 
 ## Svelte 5 Runes
 
@@ -150,7 +163,7 @@ This project uses Svelte 5 runes syntax:
 - Role-based message labels (no avatars)
 - Dividers between messages
 - Input with focus outline feedback
-- Footer with keyboard hints and token/time stats
+- Footer with permission mode selector, model selector, and token/time stats
 
 ## Known Issues
 

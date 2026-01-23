@@ -15,3 +15,7 @@ export { default as CaipiIcon } from './CaipiIcon.svelte';
 export { default as StopIcon } from './StopIcon.svelte';
 export { default as SunIcon } from './SunIcon.svelte';
 export { default as MoonIcon } from './MoonIcon.svelte';
+export { default as ShieldIcon } from './ShieldIcon.svelte';
+export { default as AlertTriangleIcon } from './AlertTriangleIcon.svelte';
+export { default as EditIcon } from './EditIcon.svelte';
+export { default as ClipboardIcon } from './ClipboardIcon.svelte';

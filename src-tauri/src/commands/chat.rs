@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse};
+use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse, PlanChannels, PlanResponse};
 
 // Global session store
 pub type SessionStore = Arc<Mutex<HashMap<String, AgentSession>>>;
@@ -42,10 +42,14 @@ pub enum ChatEvent {
 #[tauri::command]
 pub async fn create_session(
     folder_path: String,
+    permission_mode: Option<String>,
+    model: Option<String>,
     app: AppHandle,
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let session = AgentSession::new(folder_path, app.clone()).await.map_err(|e| e.to_string())?;
+    let mode = permission_mode.unwrap_or_else(|| "default".to_string());
+    let model = model.unwrap_or_else(|| "opus".to_string());
+    let session = AgentSession::new(folder_path, mode, model, app.clone()).await.map_err(|e| e.to_string())?;
     let session_id = session.id.clone();
 
     let mut store = sessions.lock().await;
@@ -126,6 +130,31 @@ pub async fn respond_permission(
 }
 
 #[tauri::command]
+pub async fn respond_plan(
+    _session_id: String,
+    request_id: String,
+    approved: bool,
+    comment: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
+    // Use the separate plan channels to avoid deadlock with session store
+    let plan_channels: tauri::State<'_, PlanChannels> = app.state();
+
+    // Take the sender from the channels map
+    let sender = {
+        let mut channels = plan_channels.lock().await;
+        channels.remove(&request_id)
+    };
+
+    if let Some(tx) = sender {
+        let _ = tx.send(PlanResponse { approved, comment });
+        Ok(())
+    } else {
+        Err(format!("No pending plan request with id: {}", request_id))
+    }
+}
+
+#[tauri::command]
 pub async fn get_session_messages(
     session_id: String,
     app: AppHandle,
@@ -147,4 +176,30 @@ pub async fn abort_session(
     let session = store.get_mut(&session_id).ok_or("Session not found")?;
 
     session.abort().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_permission_mode(
+    session_id: String,
+    mode: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let sessions: tauri::State<'_, SessionStore> = app.state();
+    let mut store = sessions.lock().await;
+    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    session.set_permission_mode(mode).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_model(
+    session_id: String,
+    model: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let sessions: tauri::State<'_, SessionStore> = app.state();
+    let mut store = sessions.lock().await;
+    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    session.set_model(model).await.map_err(|e| e.to_string())
 }

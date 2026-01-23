@@ -3,7 +3,7 @@ mod claude;
 mod storage;
 
 use commands::chat::SessionStore;
-use claude::agent::PermissionChannels;
+use claude::agent::{PermissionChannels, PlanChannels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
+    let plan_channels: PlanChannels = Arc::new(Mutex::new(HashMap::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -19,6 +20,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(session_store)
         .manage(permission_channels)
+        .manage(plan_channels)
         .invoke_handler(tauri::generate_handler![
             // Setup commands
             commands::check_cli_status,
@@ -37,8 +39,11 @@ pub fn run() {
             commands::create_session,
             commands::send_message,
             commands::respond_permission,
+            commands::respond_plan,
             commands::get_session_messages,
             commands::abort_session,
+            commands::set_permission_mode,
+            commands::set_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

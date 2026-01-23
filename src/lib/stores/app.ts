@@ -1,6 +1,8 @@
 import { writable, derived, get } from 'svelte/store';
 
 export type AppScreen = 'loading' | 'onboarding' | 'folder' | 'chat';
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+export type ModelType = 'opus' | 'sonnet' | 'haiku';
 
 export interface CliStatus {
   installed: boolean;
@@ -19,6 +21,8 @@ export interface AppState {
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
   authType: string | null;
+  permissionMode: PermissionMode;
+  model: ModelType;
 }
 
 const initialState: AppState = {
@@ -31,7 +35,12 @@ const initialState: AppState = {
   leftSidebarOpen: false,
   rightSidebarOpen: false,
   authType: null,
+  permissionMode: 'default',
+  model: 'opus',
 };
+
+const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+const MODELS: ModelType[] = ['opus', 'sonnet', 'haiku'];
 
 function createAppStore() {
   const { subscribe, set, update } = writable<AppState>(initialState);
@@ -49,6 +58,18 @@ function createAppStore() {
     setLeftSidebarOpen: (open: boolean) => update(s => ({ ...s, leftSidebarOpen: open })),
     setRightSidebarOpen: (open: boolean) => update(s => ({ ...s, rightSidebarOpen: open })),
     setAuthType: (authType: string | null) => update(s => ({ ...s, authType })),
+    setPermissionMode: (mode: PermissionMode) => update(s => ({ ...s, permissionMode: mode })),
+    cyclePermissionMode: () => update(s => {
+      const currentIndex = PERMISSION_MODES.indexOf(s.permissionMode);
+      const nextIndex = (currentIndex + 1) % PERMISSION_MODES.length;
+      return { ...s, permissionMode: PERMISSION_MODES[nextIndex] };
+    }),
+    setModel: (model: ModelType) => update(s => ({ ...s, model })),
+    cycleModel: () => update(s => {
+      const currentIndex = MODELS.indexOf(s.model);
+      const nextIndex = (currentIndex + 1) % MODELS.length;
+      return { ...s, model: MODELS[nextIndex] };
+    }),
     reset: () => set(initialState),
   };
 }
@@ -62,3 +83,5 @@ export const appError = derived(appStore, $app => $app.error);
 export const leftSidebarOpen = derived(appStore, $app => $app.leftSidebarOpen);
 export const rightSidebarOpen = derived(appStore, $app => $app.rightSidebarOpen);
 export const authType = derived(appStore, $app => $app.authType);
+export const permissionMode = derived(appStore, $app => $app.permissionMode);
+export const model = derived(appStore, $app => $app.model);

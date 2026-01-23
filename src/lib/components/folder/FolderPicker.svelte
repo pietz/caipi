@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { get } from 'svelte/store';
   import { open } from '@tauri-apps/plugin-dialog';
   import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
@@ -71,8 +72,15 @@
       // Update app state
       appStore.setSelectedFolder(path);
 
-      // Create a new session
-      const sessionId = await invoke<string>('create_session', { folderPath: path });
+      // Get current settings
+      const { permissionMode, model } = get(appStore);
+
+      // Create a new session with permission mode and model
+      const sessionId = await invoke<string>('create_session', {
+        folderPath: path,
+        permissionMode,
+        model
+      });
       appStore.setSessionId(sessionId);
 
       // Navigate to chat

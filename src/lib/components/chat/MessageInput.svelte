@@ -1,35 +1,100 @@
 <script lang="ts">
-  import { SendIcon, StopIcon } from '$lib/components/icons';
+  import { invoke } from '@tauri-apps/api/core';
+  import { get } from 'svelte/store';
+  import { SendIcon, StopIcon, ShieldIcon, EditIcon, ClipboardIcon, AlertTriangleIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
-  import { chatStore } from '$lib/stores';
+  import { chatStore, appStore, type PlanRequest } from '$lib/stores';
+  import type { PermissionMode, ModelType } from '$lib/stores/app';
   import { cn } from '$lib/utils';
 
   interface Props {
     onSend: (message: string) => void;
     onQueue: (message: string) => void;
     onAbort?: () => void;
+    onPlanFeedback?: (feedback: string) => void;
     isStreaming?: boolean;
+    pendingPlan?: PlanRequest | null;
     placeholder?: string;
   }
 
-  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude something...' }: Props = $props();
+  let { onSend, onQueue, onAbort, onPlanFeedback, isStreaming = false, pendingPlan = null, placeholder = 'Ask Claude something...' }: Props = $props();
   let value = $state('');
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
   let focused = $state(false);
 
   let tokenCount = $state(0);
   let sessionDuration = $state(0);
+  let permissionMode = $state<PermissionMode>('default');
+  let currentModel = $state<ModelType>('opus');
+  let sessionId = $state<string | null>(null);
 
   chatStore.subscribe((state) => {
     tokenCount = state.tokenCount;
     sessionDuration = state.sessionDuration;
   });
 
+  appStore.subscribe((state) => {
+    permissionMode = state.permissionMode;
+    currentModel = state.model;
+    sessionId = state.sessionId;
+  });
+
+  const modeConfig: Record<PermissionMode, { label: string; color: string }> = {
+    default: { label: 'Default', color: 'text-blue-400' },
+    acceptEdits: { label: 'Edit', color: 'text-purple-400' },
+    plan: { label: 'Plan', color: 'text-green-400' },
+    bypassPermissions: { label: 'Danger', color: 'text-red-400' },
+  };
+
+  const modelConfig: Record<ModelType, { label: string }> = {
+    opus: { label: 'Opus 4.5' },
+    sonnet: { label: 'Sonnet 4.5' },
+    haiku: { label: 'Haiku 4.5' },
+  };
+
+  async function handleModeClick() {
+    appStore.cyclePermissionMode();
+    // If we have an active session, update the backend
+    if (sessionId) {
+      try {
+        // Get the new mode after cycling
+        const newMode = get(appStore).permissionMode;
+        await invoke('set_permission_mode', { sessionId, mode: newMode });
+      } catch (e) {
+        console.error('Failed to set permission mode:', e);
+      }
+    }
+  }
+
+  async function handleModelClick() {
+    appStore.cycleModel();
+    // If we have an active session, update the backend
+    if (sessionId) {
+      try {
+        const newModel = get(appStore).model;
+        await invoke('set_model', { sessionId, model: newModel });
+      } catch (e) {
+        console.error('Failed to set model:', e);
+      }
+    }
+  }
+
   function handleSubmit(e?: Event) {
     e?.preventDefault();
     if (!value.trim()) return;
 
     const msg = value.trim();
+
+    // If there's a pending plan, send as feedback
+    if (pendingPlan && onPlanFeedback) {
+      onPlanFeedback(msg);
+      value = '';
+      if (textareaRef) {
+        textareaRef.style.height = 'auto';
+      }
+      return;
+    }
+
     if (isStreaming) {
       onQueue(msg);  // Queue during streaming
     } else {
@@ -71,6 +136,9 @@
   }
 
   const hasContent = $derived(value.trim().length > 0);
+  const effectivePlaceholder = $derived(
+    pendingPlan ? 'Request changes to the plan...' : placeholder
+  );
 </script>
 
 <div class="py-3 px-4 border-t border-border bg-header">
@@ -78,6 +146,7 @@
   <div
     class={cn(
       'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-input border',
+      pendingPlan ? 'border-green-500/50 bg-green-500/5' :
       focused ? 'border-[var(--ring)]' : 'border-input'
     )}
   >
@@ -88,7 +157,7 @@
       oninput={handleInput}
       onfocus={() => focused = true}
       onblur={() => focused = false}
-      {placeholder}
+      placeholder={effectivePlaceholder}
       rows={1}
       class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
     ></textarea>
@@ -119,9 +188,44 @@
     {/if}
   </div>
 
-  <!-- Footer row with hints and stats -->
+  <!-- Footer row with mode/model selectors and stats -->
   <div class="flex justify-between items-center mt-2 text-xs text-darkest">
-    <span>Shift+Enter new line</span>
+    <div class="flex items-center gap-1">
+      <button
+        type="button"
+        onclick={handleModeClick}
+        class={cn(
+          'flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover',
+          modeConfig[permissionMode].color
+        )}
+        title="Click to cycle permission mode"
+      >
+        {#if permissionMode === 'bypassPermissions'}
+          <AlertTriangleIcon size={12} />
+        {:else if permissionMode === 'acceptEdits'}
+          <EditIcon size={12} />
+        {:else if permissionMode === 'plan'}
+          <ClipboardIcon size={12} />
+        {:else}
+          <ShieldIcon size={12} />
+        {/if}
+        <span>{modeConfig[permissionMode].label}</span>
+      </button>
+      <button
+        type="button"
+        onclick={handleModelClick}
+        class="flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover text-secondary"
+        title="Click to cycle model"
+      >
+        <span class="w-[10px] h-[10px] flex items-center justify-center">
+          <span
+            class="rounded-full bg-current"
+            style="width: {currentModel === 'opus' ? 10 : currentModel === 'sonnet' ? 7 : 5}px; height: {currentModel === 'opus' ? 10 : currentModel === 'sonnet' ? 7 : 5}px;"
+          ></span>
+        </span>
+        <span>{modelConfig[currentModel].label}</span>
+      </button>
+    </div>
     <div class="flex gap-4">
       <span>{formatTokens(tokenCount)} / 200k tokens</span>
       <span>{formatDuration(sessionDuration)}</span>

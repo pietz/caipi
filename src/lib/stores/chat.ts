@@ -24,6 +24,13 @@ export interface PermissionRequest {
   timestamp: number;
 }
 
+export interface PlanRequest {
+  id: string;
+  activityId: string | null;  // ID of the ExitPlanMode activity
+  planContent: string;
+  timestamp: number;
+}
+
 export interface TaskItem {
   id: string;
   text: string;
@@ -46,7 +53,8 @@ export interface ChatState {
   activities: ToolActivity[];
   streamItems: StreamItem[];
   streamItemCounter: number;  // Counter for stable insertion ordering
-  pendingPermission: PermissionRequest | null;
+  pendingPermissions: Record<string, PermissionRequest>;  // Keyed by activityId for parallel tools
+  pendingPlan: PlanRequest | null;
   isStreaming: boolean;
   streamingContent: string;
   messageQueue: string[];  // Queue of messages to send after current turn completes
@@ -61,7 +69,8 @@ const initialState: ChatState = {
   activities: [],
   streamItems: [],
   streamItemCounter: 0,
-  pendingPermission: null,
+  pendingPermissions: {},
+  pendingPlan: null,
   isStreaming: false,
   streamingContent: '',
   messageQueue: [],
@@ -118,9 +127,34 @@ function createChatStore() {
       ),
     })),
 
-    setPermissionRequest: (request: PermissionRequest | null) => update(s => ({
+    addPermissionRequest: (request: PermissionRequest) => update(s => {
+      // Use activityId as key (or request.id if no activityId)
+      const key = request.activityId || request.id;
+      return {
+        ...s,
+        pendingPermissions: {
+          ...s.pendingPermissions,
+          [key]: request,
+        },
+      };
+    }),
+
+    removePermissionRequest: (activityIdOrRequestId: string) => update(s => {
+      const { [activityIdOrRequestId]: removed, ...rest } = s.pendingPermissions;
+      return {
+        ...s,
+        pendingPermissions: rest,
+      };
+    }),
+
+    clearPermissionRequests: () => update(s => ({
       ...s,
-      pendingPermission: request,
+      pendingPermissions: {},
+    })),
+
+    setPlanRequest: (request: PlanRequest | null) => update(s => ({
+      ...s,
+      pendingPlan: request,
     })),
 
     setStreaming: (isStreaming: boolean) => update(s => ({
@@ -308,7 +342,8 @@ export const messages = derived(chatStore, $chat => $chat.messages);
 export const activities = derived(chatStore, $chat => $chat.activities);
 export const streamItems = derived(chatStore, $chat => $chat.streamItems);
 export const isStreaming = derived(chatStore, $chat => $chat.isStreaming);
-export const pendingPermission = derived(chatStore, $chat => $chat.pendingPermission);
+export const pendingPermissions = derived(chatStore, $chat => $chat.pendingPermissions);
+export const pendingPlan = derived(chatStore, $chat => $chat.pendingPlan);
 export const tasks = derived(chatStore, $chat => $chat.tasks);
 export const activeSkills = derived(chatStore, $chat => $chat.activeSkills);
 export const messageQueue = derived(chatStore, $chat => $chat.messageQueue);

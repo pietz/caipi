@@ -12,9 +12,20 @@
     MoonIcon,
   } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
+  import { marked } from 'marked';
+  import hljs from 'highlight.js';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
+
+  // Configure marked with custom renderer for code highlighting
+  const renderer = new marked.Renderer();
+  renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
+    const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
+    const highlighted = hljs.highlight(text, { language }).value;
+    return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
+  };
+  marked.use({ renderer });
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import {
     appStore,
@@ -22,6 +33,7 @@
     type Message,
     type ToolActivity,
     type PermissionRequest,
+    type PlanRequest,
     type StreamItem,
   } from '$lib/stores';
 
@@ -32,9 +44,11 @@
     id?: string;
     status?: string;
     tool?: string;
+    toolUseId?: string;  // The tool_use_id for matching to activity
     description?: string;
     message?: string;
     authType?: string;
+    planContent?: string;
   }
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
@@ -71,7 +85,8 @@
   let streamItems = $state<StreamItem[]>([]);
   let isStreaming = $state(false);
   let streamingContent = $state('');
-  let pendingPermission = $state<PermissionRequest | null>(null);
+  let pendingPermissions = $state<Record<string, PermissionRequest>>({});
+  let pendingPlan = $state<PlanRequest | null>(null);
 
   // Subscribe to chat store
   chatStore.subscribe((state) => {
@@ -80,7 +95,8 @@
     streamItems = state.streamItems;
     isStreaming = state.isStreaming;
     streamingContent = state.streamingContent;
-    pendingPermission = state.pendingPermission;
+    pendingPermissions = state.pendingPermissions;
+    pendingPlan = state.pendingPlan;
   });
 
   onMount(async () => {
@@ -99,24 +115,52 @@
   });
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    // Only handle if permission is pending
-    if (!pendingPermission) return;
+    // Handle plan approval shortcuts
+    if (pendingPlan) {
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        const activeElement = document.activeElement as HTMLTextAreaElement | null;
+        const isTextareaWithContent = activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
 
-    // Check if Enter or Escape
+        if (isTextareaWithContent) return;
+
+        e.preventDefault();
+
+        if (e.key === 'Enter') {
+          handlePlanResponse(true);  // Approve
+        } else if (e.key === 'Escape') {
+          handlePlanResponse(false); // Reject
+        }
+      }
+      return;
+    }
+
+    // Handle permission shortcuts - approve/deny first pending permission in UI order
+    const permissionKeys = Object.keys(pendingPermissions);
+    if (permissionKeys.length === 0) return;
+
     if (e.key === 'Enter' || e.key === 'Escape') {
-      // Check if we're in a textarea with content
       const activeElement = document.activeElement as HTMLTextAreaElement | null;
       const isTextareaWithContent = activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
 
-      // If textarea has content, don't intercept (let normal behavior happen)
       if (isTextareaWithContent) return;
 
       e.preventDefault();
 
-      if (e.key === 'Enter') {
-        handlePermissionResponse(true);  // Allow
-      } else if (e.key === 'Escape') {
-        handlePermissionResponse(false); // Deny
+      // Find the first pending permission by activity order in streamItems
+      const sortedItems = [...streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex);
+      const firstPendingActivity = sortedItems.find(
+        item => item.type === 'tool' && item.activity && pendingPermissions[item.activity.id]
+      );
+
+      if (firstPendingActivity?.activity) {
+        const permission = pendingPermissions[firstPendingActivity.activity.id];
+        if (permission) {
+          if (e.key === 'Enter') {
+            handlePermissionResponseForRequest(permission, true);  // Allow
+          } else if (e.key === 'Escape') {
+            handlePermissionResponseForRequest(permission, false); // Deny
+          }
+        }
       }
     }
   }
@@ -140,15 +184,17 @@
 
           // If there's a pending permission request with matching tool type but no activityId,
           // link it to this activity (handles case where permission request arrives before ToolStart)
-          if (
-            pendingPermission &&
-            pendingPermission.activityId === null &&
-            pendingPermission.tool === newActivity.toolType
-          ) {
-            chatStore.setPermissionRequest({
-              ...pendingPermission,
-              activityId: newActivity.id,
-            });
+          // Find by request id (since we don't have activityId yet)
+          for (const [key, permission] of Object.entries(pendingPermissions)) {
+            if (permission.activityId === null && permission.tool === newActivity.toolType) {
+              // Remove the old entry and add with the new activityId
+              chatStore.removePermissionRequest(key);
+              chatStore.addPermissionRequest({
+                ...permission,
+                activityId: newActivity.id,
+              });
+              break; // Only update one permission per ToolStart
+            }
           }
         }
         break;
@@ -164,18 +210,56 @@
 
       case 'PermissionRequest':
         if (event.id && event.tool && event.description) {
-          // Find the running activity that matches this permission request
-          // Since tools execute sequentially, the most recent running activity
-          // with the matching tool type is the one requesting permission
-          const matchingActivity = activities.find(
-            (a) => a.status === 'running' && a.toolType === event.tool
-          );
+          // Use toolUseId for exact matching when available (handles parallel tools)
+          // Fall back to finding by tool type for backwards compatibility
+          let matchingActivityId: string | null = null;
 
-          chatStore.setPermissionRequest({
+          if (event.toolUseId) {
+            // Exact match by tool_use_id
+            const exactMatch = activities.find((a) => a.id === event.toolUseId);
+            matchingActivityId = exactMatch?.id || null;
+          }
+
+          if (!matchingActivityId) {
+            // Fallback: find by tool type that doesn't already have a pending permission
+            const matchingActivity = activities.find(
+              (a) => a.status === 'running' && a.toolType === event.tool && !pendingPermissions[a.id]
+            );
+            matchingActivityId = matchingActivity?.id || null;
+          }
+
+          chatStore.addPermissionRequest({
             id: event.id,
-            activityId: matchingActivity?.id || null,
+            activityId: matchingActivityId,
             tool: event.tool,
             description: event.description,
+            timestamp: Date.now() / 1000,
+          });
+        }
+        break;
+
+      case 'PlanReady':
+        if (event.id && event.planContent) {
+          // Use toolUseId for exact matching when available
+          let matchingActivityId: string | null = null;
+
+          if (event.toolUseId) {
+            const exactMatch = activities.find((a) => a.id === event.toolUseId);
+            matchingActivityId = exactMatch?.id || null;
+          }
+
+          if (!matchingActivityId) {
+            // Fallback: find by tool type
+            const matchingActivity = activities.find(
+              (a) => a.status === 'running' && a.toolType === 'ExitPlanMode'
+            );
+            matchingActivityId = matchingActivity?.id || null;
+          }
+
+          chatStore.setPlanRequest({
+            id: event.id,
+            activityId: matchingActivityId,
+            planContent: event.planContent,
             timestamp: Date.now() / 1000,
           });
         }
@@ -271,21 +355,53 @@
     }
   }
 
-  async function handlePermissionResponse(allowed: boolean) {
-    if (!sessionId || !pendingPermission) return;
+  async function handlePermissionResponseForRequest(permission: PermissionRequest, allowed: boolean) {
+    if (!sessionId) return;
 
     try {
       await invoke('respond_permission', {
         sessionId,
-        requestId: pendingPermission.id,
+        requestId: permission.id,
         allowed,
       });
     } catch (e) {
       console.error('Failed to respond to permission:', e);
     }
 
-    // Just clear the permission request - the activity stays and will show spinner again
-    chatStore.setPermissionRequest(null);
+    // Remove this specific permission request
+    const key = permission.activityId || permission.id;
+    chatStore.removePermissionRequest(key);
+  }
+
+  // Convenience wrapper for ActivityCard callbacks
+  function handlePermissionResponse(activityId: string, allowed: boolean) {
+    const permission = pendingPermissions[activityId];
+    if (permission) {
+      handlePermissionResponseForRequest(permission, allowed);
+    }
+  }
+
+  async function handlePlanResponse(approved: boolean, comment?: string) {
+    if (!sessionId || !pendingPlan) return;
+
+    try {
+      await invoke('respond_plan', {
+        sessionId,
+        requestId: pendingPlan.id,
+        approved,
+        comment: comment || null,
+      });
+    } catch (e) {
+      console.error('Failed to respond to plan:', e);
+    }
+
+    // Clear the plan request
+    chatStore.setPlanRequest(null);
+  }
+
+  function handlePlanFeedback(feedback: string) {
+    // Send feedback as a rejection with comment
+    handlePlanResponse(false, feedback);
   }
 
   function scrollToBottom() {
@@ -459,11 +575,32 @@
                     showDivider={messages.length > 0 || index > 0}
                   />
                 {:else if item.type === 'tool' && item.activity}
+                  <!-- Plan content display above ExitPlanMode activity -->
+                  {#if item.activity.toolType === 'ExitPlanMode' && pendingPlan && pendingPlan.activityId === item.activity.id}
+                    <div class="mt-2">
+                      <div class="h-px my-2" style:background-color="rgba(255, 255, 255, 0.04)"></div>
+                      <div class="flex flex-col gap-1">
+                        <div class="text-xs font-medium uppercase tracking-wide" style:color="var(--text-muted)">
+                          Claude <span class="text-green-400">(Plan)</span>
+                        </div>
+                        <div
+                          class="plan-content text-sm leading-relaxed p-3 rounded-md border"
+                          style:background-color="rgba(74, 222, 128, 0.05)"
+                          style:border-color="rgba(74, 222, 128, 0.2)"
+                          style:color="var(--text-primary)"
+                        >
+                          {@html marked.parse(pendingPlan.planContent) as string}
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
                   <div class="mt-1">
                     <ActivityCard
                       activity={item.activity}
-                      {pendingPermission}
-                      onPermissionResponse={handlePermissionResponse}
+                      {pendingPermissions}
+                      {pendingPlan}
+                      onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
+                      onPlanResponse={handlePlanResponse}
                     />
                   </div>
                 {/if}
@@ -474,7 +611,14 @@
       </div>
 
       <!-- Input -->
-      <MessageInput onSend={sendMessage} onQueue={queueMessage} onAbort={abortSession} isStreaming={isStreaming} />
+      <MessageInput
+        onSend={sendMessage}
+        onQueue={queueMessage}
+        onAbort={abortSession}
+        onPlanFeedback={handlePlanFeedback}
+        {isStreaming}
+        {pendingPlan}
+      />
     </div>
 
     <!-- Right Sidebar - Context Panel -->
@@ -490,3 +634,64 @@
   </div>
 
 </div>
+
+<style>
+  /* Plan content markdown styles */
+  :global(.plan-content p) {
+    margin: 0.5em 0;
+  }
+
+  :global(.plan-content p:first-child) {
+    margin-top: 0;
+  }
+
+  :global(.plan-content p:last-child) {
+    margin-bottom: 0;
+  }
+
+  :global(.plan-content ul),
+  :global(.plan-content ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  :global(.plan-content li) {
+    margin: 0.25em 0;
+  }
+
+  :global(.plan-content pre) {
+    margin: 0.5em 0;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  :global(.plan-content code:not(pre code)) {
+    background: var(--muted);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  :global(.plan-content blockquote) {
+    margin: 0.5em 0;
+    padding-left: 1em;
+    border-left: 3px solid rgba(74, 222, 128, 0.4);
+    color: var(--text-secondary);
+  }
+
+  :global(.plan-content h1),
+  :global(.plan-content h2),
+  :global(.plan-content h3),
+  :global(.plan-content h4) {
+    margin: 0.75em 0 0.5em 0;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  :global(.plan-content h1:first-child),
+  :global(.plan-content h2:first-child),
+  :global(.plan-content h3:first-child),
+  :global(.plan-content h4:first-child) {
+    margin-top: 0;
+  }
+</style>
