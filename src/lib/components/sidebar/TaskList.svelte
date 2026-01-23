@@ -2,11 +2,7 @@
   import { CheckIcon } from '$lib/components/icons';
   import { chatStore, type TaskItem } from '$lib/stores';
 
-  let tasks = $state<TaskItem[]>([]);
-
-  chatStore.subscribe((state) => {
-    tasks = state.tasks;
-  });
+  const tasks = $derived($chatStore.tasks);
 </script>
 
 <div class="p-3" style="border-bottom: 1px solid var(--border);">

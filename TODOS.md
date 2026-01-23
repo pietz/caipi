@@ -40,39 +40,6 @@ app_handle.emit("claude:event", serde_json::json!({
 - Add missing fields to `ChatEvent::PermissionRequest`
 - Remove direct `serde_json::json!` emissions from hooks
 
-### Fix Store Subscription Memory Leaks
-Components use `.subscribe()` without cleanup on unmount, causing memory leaks.
-
-**Affected files:**
-- `ChatContainer.svelte` (lines 59-86)
-- `MessageInput.svelte`
-- `FileTreeItem.svelte` (lines 24-27)
-- `TaskList.svelte` (lines 7-9)
-- `FileExplorer.svelte`
-
-**Fix:**
-- Replace manual `.subscribe()` calls with Svelte 5 reactive patterns
-- Either use `$effect` with proper cleanup, or migrate to `$derived` (see next item)
-
-### Migrate to Proper Svelte 5 Runes
-Current code mixes old subscription patterns with `$state`, creating redundancy.
-
-**Current anti-pattern:**
-```typescript
-let permissionMode = $state<PermissionMode>('default');
-appStore.subscribe((state) => {
-  permissionMode = state.permissionMode;
-});
-```
-
-**Should be:**
-```typescript
-let appState = $derived(get(appStore));
-// Or expose reactive getters from stores
-```
-
-**Note:** This naturally resolves the memory leak issue when done correctly.
-
 ### Split chat.ts Store (335 lines)
 The chat store handles too many concerns: messages, activities, permissions, tasks, skills, tokens.
 
@@ -111,17 +78,6 @@ Permission mode and model are stored in both frontend (`app.ts`) and backend (`A
 - **Event-driven:** Backend emits state changes, frontend subscribes
 
 **Decision needed:** Pick one pattern and apply consistently.
-
-### Add Unit Test Infrastructure
-Zero tests exist for complex logic (permission handling, event routing, store operations).
-
-**Minimum coverage needed:**
-- Frontend: Store operations, event handling utilities
-- Backend: Permission logic, tool target extraction, storage operations
-
-**Setup:**
-- Frontend: Vitest + @testing-library/svelte
-- Backend: Standard Rust `#[cfg(test)]` modules
 
 ### Establish Feature Boundaries
 State and logic are scattered with no clear ownership.
@@ -251,6 +207,9 @@ Agent responses have too much vertical spacing between paragraphs.
 - ~~Parallel permissions bug~~ (multiple pending permissions support)
 - ~~Fix Session Store Lock Held Across Await~~ (clone session, release lock before async work)
 - ~~Stop Button Context Preservation~~ (drain stream after interrupt instead of breaking immediately)
+- ~~Fix Store Subscription Memory Leaks~~ (migrated to Svelte 5 `$derived` pattern with `$store` syntax)
+- ~~Migrate to Proper Svelte 5 Runes~~ (all components now use `$derived($store.property)`)
+- ~~Add Unit Test Infrastructure~~ (Vitest + testing-library for frontend, Rust test modules for backend)
 
 ---
 

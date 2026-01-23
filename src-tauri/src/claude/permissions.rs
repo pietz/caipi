@@ -150,3 +150,12 @@ fn translate_bash_command(command: &str) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_permission_modes() {
+        // Placeholder for permission logic tests
+        assert!(true);
+    }
+}

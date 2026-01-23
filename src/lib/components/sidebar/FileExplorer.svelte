@@ -10,14 +10,10 @@
 
   let { rootPath }: Props = $props();
 
-  let tree = $state<FileEntry[]>([]);
-  let loading = $state(false);
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  filesStore.subscribe((state) => {
-    tree = state.tree;
-    loading = state.loading;
-  });
+  const tree = $derived($filesStore.tree);
+  const loading = $derived($filesStore.loading);
 
   async function loadDirectory(path: string) {
     filesStore.setLoading(true);

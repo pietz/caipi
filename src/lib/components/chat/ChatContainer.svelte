@@ -42,48 +42,24 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
 
-  let sessionId = $state<string | null>(null);
-  let folderPath = $state<string | null>(null);
-  let folderName = $state<string>('');
-  let leftSidebarOpen = $state(false);
-  let rightSidebarOpen = $state(false);
-  let authType = $state<string | null>(null);
-  let currentTheme = $state<'light' | 'dark'>('dark');
+  // Theme
+  const currentTheme = $derived($resolvedTheme);
 
-  // Subscribe to resolved theme
-  resolvedTheme.subscribe((theme) => {
-    currentTheme = theme;
-  });
+  // App store values
+  const sessionId = $derived($appStore.sessionId);
+  const folderPath = $derived($appStore.selectedFolder);
+  const leftSidebarOpen = $derived($appStore.leftSidebarOpen);
+  const rightSidebarOpen = $derived($appStore.rightSidebarOpen);
+  const authType = $derived($appStore.authType);
+  const folderName = $derived(folderPath ? folderPath.split('/').pop() || folderPath : '');
 
-  // Subscribe to app store
-  appStore.subscribe((state) => {
-    sessionId = state.sessionId;
-    folderPath = state.selectedFolder;
-    leftSidebarOpen = state.leftSidebarOpen;
-    rightSidebarOpen = state.rightSidebarOpen;
-    authType = state.authType;
-    if (folderPath) {
-      folderName = folderPath.split('/').pop() || folderPath;
-    }
-  });
-
-  // Local state derived from chat store
-  let messages = $state<Message[]>([]);
-  let activities = $state<ToolActivity[]>([]);
-  let streamItems = $state<StreamItem[]>([]);
-  let isStreaming = $state(false);
-  let streamingContent = $state('');
-  let pendingPermissions = $state<Record<string, PermissionRequest>>({});
-
-  // Subscribe to chat store
-  chatStore.subscribe((state) => {
-    messages = state.messages;
-    activities = state.activities;
-    streamItems = state.streamItems;
-    isStreaming = state.isStreaming;
-    streamingContent = state.streamingContent;
-    pendingPermissions = state.pendingPermissions;
-  });
+  // Chat store values
+  const messages = $derived($chatStore.messages);
+  const activities = $derived($chatStore.activities);
+  const streamItems = $derived($chatStore.streamItems);
+  const isStreaming = $derived($chatStore.isStreaming);
+  const streamingContent = $derived($chatStore.streamingContent);
+  const pendingPermissions = $derived($chatStore.pendingPermissions);
 
   onMount(async () => {
     // Listen for Claude events

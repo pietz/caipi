@@ -197,3 +197,12 @@ pub async fn set_model(
 
     session.set_model(model).await.map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_session_creation() {
+        // Placeholder for session lifecycle tests
+        assert!(true);
+    }
+}

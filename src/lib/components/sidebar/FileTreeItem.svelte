@@ -16,15 +16,11 @@
 
   let { item, depth = 0 }: Props = $props();
 
-  let expanded = $state(false);
-  let selectedPath = $state<string | null>(null);
   let loadingChildren = $state(false);
   let childrenLoaded = $state(false);
 
-  filesStore.subscribe((state) => {
-    expanded = state.expandedPaths.has(item.path);
-    selectedPath = state.selectedPath;
-  });
+  const expanded = $derived($filesStore.expandedPaths.has(item.path));
+  const selectedPath = $derived($filesStore.selectedPath);
 
   const isFolder = $derived(item.type === 'folder');
   const isSelected = $derived(selectedPath === item.path);

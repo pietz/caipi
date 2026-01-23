@@ -20,22 +20,11 @@
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
   let focused = $state(false);
 
-  let tokenCount = $state(0);
-  let sessionDuration = $state(0);
-  let permissionMode = $state<PermissionMode>('default');
-  let currentModel = $state<ModelType>('opus');
-  let sessionId = $state<string | null>(null);
-
-  chatStore.subscribe((state) => {
-    tokenCount = state.tokenCount;
-    sessionDuration = state.sessionDuration;
-  });
-
-  appStore.subscribe((state) => {
-    permissionMode = state.permissionMode;
-    currentModel = state.model;
-    sessionId = state.sessionId;
-  });
+  const tokenCount = $derived($chatStore.tokenCount);
+  const sessionDuration = $derived($chatStore.sessionDuration);
+  const permissionMode = $derived($appStore.permissionMode);
+  const currentModel = $derived($appStore.model);
+  const sessionId = $derived($appStore.sessionId);
 
   const modeConfig: Record<PermissionMode, { label: string; color: string }> = {
     default: { label: 'Default', color: 'text-blue-400' },
@@ -54,7 +43,7 @@
     // If we have an active session, update the backend
     if (sessionId) {
       try {
-        // Get the new mode after cycling
+        // Read the new mode after cycling
         const newMode = get(appStore).permissionMode;
         await invoke('set_permission_mode', { sessionId, mode: newMode });
       } catch (e) {
