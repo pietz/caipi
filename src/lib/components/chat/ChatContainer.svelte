@@ -4,7 +4,7 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     FolderIcon,
-    HomeIcon,
+    MenuIcon,
     SidebarLeftIcon,
     SidebarRightIcon,
     CaipiIcon,
@@ -193,14 +193,14 @@
         <SidebarLeftIcon size={16} />
       </button>
 
-      <!-- Home button -->
+      <!-- Open project button -->
       <button
         type="button"
         onclick={goBack}
         class="p-1 rounded transition-all duration-100 text-muted hover:bg-hover hover:text-secondary"
-        title="Back to projects"
+        title="Open project"
       >
-        <HomeIcon size={16} />
+        <MenuIcon size={16} />
       </button>
 
       <!-- Separator -->

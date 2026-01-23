@@ -27,6 +27,7 @@ pub fn run() {
             commands::get_startup_info,
             commands::complete_onboarding,
             commands::reset_onboarding,
+            commands::set_default_folder,
             // Folder commands
             commands::validate_folder,
             commands::get_recent_folders,

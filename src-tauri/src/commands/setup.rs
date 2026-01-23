@@ -98,11 +98,13 @@ pub struct StartupInfo {
     pub onboarding_completed: bool,
     pub cli_status: Option<CliStatus>,
     pub cli_status_fresh: bool,
+    pub default_folder: Option<String>,
 }
 
 #[tauri::command]
 pub async fn get_startup_info() -> Result<StartupInfo, String> {
     let onboarding_completed = storage::get_onboarding_completed().map_err(|e| e.to_string())?;
+    let default_folder = storage::get_default_folder().map_err(|e| e.to_string())?;
 
     let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;
 
@@ -123,18 +125,28 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
         onboarding_completed,
         cli_status,
         cli_status_fresh,
+        default_folder,
     })
 }
 
 #[tauri::command]
-pub async fn complete_onboarding() -> Result<(), String> {
+pub async fn complete_onboarding(default_folder: Option<String>) -> Result<(), String> {
     // Get fresh CLI status and cache it
     let status = check_cli_status().await?;
     storage::set_cli_status_cache(status).map_err(|e| e.to_string())?;
 
+    // Save the default folder
+    storage::set_default_folder(default_folder).map_err(|e| e.to_string())?;
+
     // Mark onboarding as completed
     storage::set_onboarding_completed(true).map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_default_folder(path: Option<String>) -> Result<(), String> {
+    storage::set_default_folder(path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

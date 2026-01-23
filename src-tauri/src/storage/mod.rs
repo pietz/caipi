@@ -29,6 +29,8 @@ pub struct AppData {
     pub onboarding_completed: bool,
     #[serde(default)]
     pub cli_status_cache: Option<CliStatusCache>,
+    #[serde(default)]
+    pub default_folder: Option<String>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
@@ -121,6 +123,18 @@ pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
 pub fn clear_cli_status_cache() -> Result<(), StorageError> {
     let mut data = load_data()?;
     data.cli_status_cache = None;
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn get_default_folder() -> Result<Option<String>, StorageError> {
+    let data = load_data()?;
+    Ok(data.default_folder)
+}
+
+pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
+    let mut data = load_data()?;
+    data.default_folder = path;
     save_data(&data)?;
     Ok(())
 }

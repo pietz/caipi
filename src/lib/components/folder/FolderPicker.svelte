@@ -2,9 +2,15 @@
   import { invoke } from '@tauri-apps/api/core';
   import { get } from 'svelte/store';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon } from '$lib/components/icons';
+  import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon, CloseIcon } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { appStore } from '$lib/stores';
+
+  interface Props {
+    showClose?: boolean;
+  }
+
+  let { showClose = false }: Props = $props();
 
   interface RecentFolder {
     path: string;
@@ -133,6 +139,10 @@
     return date.toLocaleDateString();
   }
 
+  function goBackToChat() {
+    appStore.setScreen('chat');
+  }
+
   // Load recent folders on mount
   $effect(() => {
     loadRecentFolders();
@@ -154,7 +164,18 @@
         <MoonIcon size={16} />
       {/if}
     </button>
-    <span class="text-xs text-darkest">v0.1.0</span>
+    {#if showClose}
+      <button
+        type="button"
+        onclick={goBackToChat}
+        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+        title="Back to chat"
+      >
+        <CloseIcon size={16} />
+      </button>
+    {:else}
+      <span class="text-xs text-darkest">v0.1.0</span>
+    {/if}
   </div>
 
   <div class="w-full max-w-lg">

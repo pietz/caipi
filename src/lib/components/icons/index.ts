@@ -10,6 +10,8 @@ export { default as SidebarLeftIcon } from './SidebarLeftIcon.svelte';
 export { default as SidebarRightIcon } from './SidebarRightIcon.svelte';
 export { default as BackIcon } from './BackIcon.svelte';
 export { default as HomeIcon } from './HomeIcon.svelte';
+export { default as MenuIcon } from './MenuIcon.svelte';
+export { default as CloseIcon } from './CloseIcon.svelte';
 export { default as TerminalIcon } from './TerminalIcon.svelte';
 export { default as SkillIcon } from './SkillIcon.svelte';
 export { default as CaipiIcon } from './CaipiIcon.svelte';
