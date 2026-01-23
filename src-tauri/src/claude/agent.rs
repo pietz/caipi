@@ -3,6 +3,7 @@ use claude_agent_sdk_rs::{
     ClaudeClient, ClaudeAgentOptions, Message, ContentBlock, ToolUseBlock,
     HookEvent, HookMatcher, HookCallback, HookInput, HookContext, HookJsonOutput,
     SyncHookJsonOutput, HookSpecificOutput, PreToolUseHookSpecificOutput,
+    PostToolUseHookInput,
 };
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ pub enum AgentError {
 pub enum AgentEvent {
     Text(String),
     ToolStart { id: String, tool_type: String, target: String },
+    #[allow(dead_code)]  // Emitted directly from PostToolUse hook now
     ToolEnd { id: String, status: String },
     SessionInit { auth_type: String },
     Complete,
@@ -204,12 +206,48 @@ impl AgentSession {
             })
         });
 
+        // Create PostToolUse hook to emit ToolEnd immediately when a tool finishes
+        let app_handle_post = self.app_handle.clone();
+        let post_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
+            let app_handle = app_handle_post.clone();
+            let tool_use_id = tool_use_id.clone();
+
+            Box::pin(async move {
+                if let HookInput::PostToolUse(PostToolUseHookInput { tool_response, .. }) = &input {
+                    // Determine if the tool errored by checking the response
+                    let is_error = tool_response.get("is_error")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    let status = if is_error { "error" } else { "completed" };
+
+                    // Emit ToolEnd event immediately
+                    if let Some(id) = tool_use_id {
+                        let _ = app_handle.emit("claude:event", serde_json::json!({
+                            "type": "ToolEnd",
+                            "id": id,
+                            "status": status
+                        }));
+                    }
+                }
+
+                // Don't modify anything, just return default
+                HookJsonOutput::Sync(SyncHookJsonOutput::default())
+            })
+        });
+
         // Create hooks map
         let mut hooks: HashMap<HookEvent, Vec<HookMatcher>> = HashMap::new();
         hooks.insert(
             HookEvent::PreToolUse,
             vec![HookMatcher::builder()
                 .hooks(vec![pre_tool_use_hook])
+                .build()]
+        );
+        hooks.insert(
+            HookEvent::PostToolUse,
+            vec![HookMatcher::builder()
+                .hooks(vec![post_tool_use_hook])
                 .build()]
         );
 
@@ -288,23 +326,10 @@ impl AgentSession {
                                     });
                                 }
                             }
-                            Message::User(user_msg) => {
-                                // Check for tool results in user messages
-                                if let Some(content_blocks) = &user_msg.content {
-                                    for block in content_blocks.iter() {
-                                        if let ContentBlock::ToolResult(result) = block {
-                                            let status = if result.is_error.unwrap_or(false) {
-                                                "error"
-                                            } else {
-                                                "completed"
-                                            };
-                                            on_event(AgentEvent::ToolEnd {
-                                                id: result.tool_use_id.clone(),
-                                                status: status.to_string(),
-                                            });
-                                        }
-                                    }
-                                }
+                            Message::User(_user_msg) => {
+                                // Tool results are now handled by the PostToolUse hook
+                                // which fires immediately when a tool completes, ensuring
+                                // proper ordering (ToolEnd before subsequent Text events)
                             }
                             _ => {}
                         }

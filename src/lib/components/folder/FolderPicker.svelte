@@ -1,7 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { FolderIcon, SpinnerIcon } from '$lib/components/icons';
+  import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon } from '$lib/components/icons';
+  import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { appStore } from '$lib/stores';
 
   interface RecentFolder {
@@ -17,6 +18,16 @@
   let dragOver = $state(false);
   let dropZoneHover = $state(false);
   let hoveredFolder = $state<string | null>(null);
+  let currentTheme = $state<'light' | 'dark'>('dark');
+
+  // Subscribe to resolved theme
+  resolvedTheme.subscribe((theme) => {
+    currentTheme = theme;
+  });
+
+  function toggleTheme() {
+    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
+  }
 
   async function loadRecentFolders() {
     try {
@@ -121,8 +132,22 @@
 </script>
 
 <div class="flex flex-col items-center justify-center h-full pt-12 px-8 pb-8 relative" data-tauri-drag-region>
-  <!-- Version number -->
-  <span class="absolute top-3 right-4 text-xs text-darkest">v0.1.0</span>
+  <!-- Top right controls -->
+  <div class="absolute top-3 right-4 flex items-center gap-2">
+    <button
+      type="button"
+      onclick={toggleTheme}
+      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+      title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {#if currentTheme === 'dark'}
+        <SunIcon size={16} />
+      {:else}
+        <MoonIcon size={16} />
+      {/if}
+    </button>
+    <span class="text-xs text-darkest">v0.1.0</span>
+  </div>
 
   <div class="w-full max-w-lg">
   <!-- Header -->

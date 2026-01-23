@@ -14,9 +14,20 @@ function getSystemTheme(): ResolvedTheme {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+const STORAGE_KEY = 'caipi-theme-preference';
+
+function getStoredPreference(): ThemePreference {
+  if (!browser) return 'system';
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    return stored;
+  }
+  return 'system';
+}
+
 function createThemeStore() {
   const initialState: ThemeState = {
-    preference: 'system',
+    preference: browser ? getStoredPreference() : 'system',
     systemTheme: browser ? getSystemTheme() : 'dark',
   };
 
@@ -39,6 +50,9 @@ function createThemeStore() {
   return {
     subscribe,
     setPreference: (preference: ThemePreference) => {
+      if (browser) {
+        localStorage.setItem(STORAGE_KEY, preference);
+      }
       update(state => ({ ...state, preference }));
     },
   };

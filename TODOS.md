@@ -6,22 +6,7 @@
 
 ## High Priority
 
-### Input Disabled While Agent Runs
-Currently, the input bar is disabled during agent execution. Users should be able to type and queue messages.
-
-**Requirements:**
-- Keep input bar enabled during agent execution
-- Allow sending messages that get queued
-- Queued messages should be delivered to the agent as intermediate comments after the current turn
-- This matches Claude Code CLI behavior
-
-### Activity Card Missing Details for Some Tool Types
-When running certain tools (e.g., web research, parallel commands), the activity card only shows "..." with spinner icons. No information about what's actually running.
-
-**Requirements:**
-- Support displaying details for all tool types the SDK can emit
-- Show tool names and brief descriptions even for less common tools
-- Handle parallel tool execution display gracefully
+No high priority tasks at the moment.
 
 ---
 

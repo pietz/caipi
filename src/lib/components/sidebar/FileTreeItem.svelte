@@ -3,7 +3,8 @@
 </script>
 
 <script lang="ts">
-  import { FolderIcon, FileIcon, ChevronIcon } from '$lib/components/icons';
+  import { invoke } from '@tauri-apps/api/core';
+  import { FileIcon, ChevronIcon } from '$lib/components/icons';
   import { filesStore } from '$lib/stores';
   import { cn } from '$lib/utils';
   import FileTreeItem from './FileTreeItem.svelte';
@@ -17,6 +18,8 @@
 
   let expanded = $state(false);
   let selectedPath = $state<string | null>(null);
+  let loadingChildren = $state(false);
+  let childrenLoaded = $state(false);
 
   filesStore.subscribe((state) => {
     expanded = state.expandedPaths.has(item.path);
@@ -25,9 +28,29 @@
 
   const isFolder = $derived(item.type === 'folder');
   const isSelected = $derived(selectedPath === item.path);
+  const hasChildren = $derived(item.children && item.children.length > 0);
 
-  function handleClick() {
+  async function loadChildren() {
+    if (childrenLoaded || loadingChildren) return;
+
+    loadingChildren = true;
+    try {
+      const entries = await invoke<FileEntry[]>('list_directory', { path: item.path });
+      filesStore.updateChildren(item.path, entries);
+      childrenLoaded = true;
+    } catch (e) {
+      console.error('Failed to load directory:', e);
+    } finally {
+      loadingChildren = false;
+    }
+  }
+
+  async function handleClick() {
     if (isFolder) {
+      // Load children if expanding and not yet loaded
+      if (!expanded && !childrenLoaded) {
+        await loadChildren();
+      }
       filesStore.toggleExpanded(item.path);
     } else {
       filesStore.setSelectedPath(item.path);
@@ -40,37 +63,37 @@
     type="button"
     onclick={handleClick}
     class={cn(
-      'flex items-center gap-1 text-left transition-colors duration-100 rounded mx-1 my-px py-[3px] pr-2 text-[13px]',
+      'w-full flex items-center gap-1.5 text-left transition-colors duration-100 rounded-sm my-px py-[3px] pr-2 text-[13px]',
       isSelected ? 'bg-selected text-accent' : 'text-file hover:bg-hover'
     )}
-    style="padding-left: {8 + depth * 12}px;"
+    style="padding-left: {8 + depth * 12}px; width: 100%;"
   >
-    {#if isFolder}
-      <span class="w-3 flex items-center text-[#666]">
-        <ChevronIcon {expanded} size={12} />
-      </span>
-    {:else}
-      <span class="w-3"></span>
-    {/if}
-
-    <span class={cn('flex items-center', isFolder ? 'text-folder' : 'text-file')}>
+    <!-- Icon slot: chevron for folders, file icon for files -->
+    <span class={cn('w-4 h-4 flex items-center justify-center flex-shrink-0', isFolder ? 'text-muted' : 'text-file')}>
       {#if isFolder}
-        <FolderIcon size={14} />
+        <ChevronIcon {expanded} size={12} />
       {:else}
         <FileIcon size={14} />
       {/if}
     </span>
 
-    <span class={isSelected ? 'text-accent' : 'text-selected'}>
+    <!-- Name with truncation -->
+    <span class={cn('truncate min-w-0', isSelected ? 'text-accent' : isFolder ? 'text-folder' : 'text-selected')}>
       {item.name}
     </span>
   </button>
 
-  {#if isFolder && expanded && item.children}
+  {#if isFolder && expanded}
     <div>
-      {#each item.children as child (child.path)}
-        <FileTreeItem item={child} depth={depth + 1} />
-      {/each}
+      {#if loadingChildren}
+        <div class="text-xs text-muted py-1" style="padding-left: {20 + depth * 12}px;">
+          Loading...
+        </div>
+      {:else if hasChildren}
+        {#each item.children as child (child.path)}
+          <FileTreeItem item={child} depth={depth + 1} />
+        {/each}
+      {/if}
     </div>
   {/if}
 </div>

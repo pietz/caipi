@@ -27,37 +27,39 @@ pub struct CliAuthStatus {
 
 #[tauri::command]
 pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
-    // Check if claude is installed
-    let which_result = Command::new("which").arg("claude").output();
+    // Use a login shell to get the user's full PATH
+    // This works in production app bundles where PATH is limited
+    let shell_result = Command::new("/bin/zsh")
+        .args(["-l", "-c", "which claude"])
+        .output();
 
-    let (installed, path) = match which_result {
+    let path = match shell_result {
         Ok(output) if output.status.success() => {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            (true, Some(path))
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        _ => (false, None),
+        _ => None,
     };
 
-    if !installed {
+    let Some(claude_path) = path else {
         return Ok(CliInstallStatus {
             installed: false,
             version: None,
             path: None,
         });
-    }
+    };
 
-    // Check version
-    let version = Command::new("claude")
-        .arg("--version")
+    // Check version using a login shell as well
+    let version = Command::new("/bin/zsh")
+        .args(["-l", "-c", "claude --version"])
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
     Ok(CliInstallStatus {
-        installed,
+        installed: true,
         version,
-        path,
+        path: Some(claude_path),
     })
 }
 

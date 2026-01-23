@@ -4,11 +4,14 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     FolderIcon,
-    BackIcon,
+    HomeIcon,
     SidebarLeftIcon,
     SidebarRightIcon,
     CaipiIcon,
+    SunIcon,
+    MoonIcon,
   } from '$lib/components/icons';
+  import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
@@ -43,6 +46,12 @@
   let leftSidebarOpen = $state(false);
   let rightSidebarOpen = $state(false);
   let authType = $state<string | null>(null);
+  let currentTheme = $state<'light' | 'dark'>('dark');
+
+  // Subscribe to resolved theme
+  resolvedTheme.subscribe((theme) => {
+    currentTheme = theme;
+  });
 
   // Subscribe to app store
   appStore.subscribe((state) => {
@@ -292,6 +301,10 @@
     appStore.setScreen('folder');
   }
 
+  function toggleTheme() {
+    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
+  }
+
   async function abortSession() {
     if (!sessionId) return;
 
@@ -313,16 +326,6 @@
     data-tauri-drag-region
   >
     <div class="flex items-center gap-2 pl-[70px]">
-      <!-- Back button -->
-      <button
-        type="button"
-        onclick={goBack}
-        class="p-1 rounded transition-all duration-100 text-muted hover:bg-hover hover:text-secondary"
-        title="Back to projects"
-      >
-        <BackIcon size={16} />
-      </button>
-
       <!-- Left sidebar toggle -->
       <button
         type="button"
@@ -335,6 +338,16 @@
         title="Toggle file explorer"
       >
         <SidebarLeftIcon size={16} />
+      </button>
+
+      <!-- Home button -->
+      <button
+        type="button"
+        onclick={goBack}
+        class="p-1 rounded transition-all duration-100 text-muted hover:bg-hover hover:text-secondary"
+        title="Back to projects"
+      >
+        <HomeIcon size={16} />
       </button>
 
       <!-- Separator -->
@@ -357,6 +370,20 @@
           {authType}
         </span>
       {/if}
+
+      <!-- Theme toggle -->
+      <button
+        type="button"
+        onclick={toggleTheme}
+        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+        title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        {#if currentTheme === 'dark'}
+          <SunIcon size={16} />
+        {:else}
+          <MoonIcon size={16} />
+        {/if}
+      </button>
 
       <!-- Right sidebar toggle -->
       <button
@@ -399,7 +426,7 @@
         {#if messages.length === 0 && !isStreaming}
           <!-- Empty State -->
           <div class="flex flex-col items-center justify-center h-full text-dim">
-            <div class="mb-3 opacity-15">
+            <div class="mb-3 opacity-50">
               <CaipiIcon size={64} />
             </div>
             <p class="text-sm mb-1 text-muted">

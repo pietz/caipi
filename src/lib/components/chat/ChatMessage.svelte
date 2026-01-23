@@ -49,7 +49,7 @@
     <!-- Message content -->
     {#if message.content}
       <div
-        class="text-sm leading-relaxed whitespace-pre-wrap"
+        class="message-content text-sm leading-relaxed"
         class:error-message={isError}
         style:color={isError ? '#ef4444' : isUser ? 'var(--text-secondary)' : 'var(--text-primary)'}
       >
@@ -77,5 +77,63 @@
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  /* Tighten markdown spacing */
+  :global(.message-content p) {
+    margin: 0.5em 0;
+  }
+
+  :global(.message-content p:first-child) {
+    margin-top: 0;
+  }
+
+  :global(.message-content p:last-child) {
+    margin-bottom: 0;
+  }
+
+  :global(.message-content ul),
+  :global(.message-content ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  :global(.message-content li) {
+    margin: 0.25em 0;
+  }
+
+  :global(.message-content pre) {
+    margin: 0.5em 0;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  :global(.message-content code:not(pre code)) {
+    background: var(--muted);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  :global(.message-content blockquote) {
+    margin: 0.5em 0;
+    padding-left: 1em;
+    border-left: 3px solid var(--border);
+    color: var(--text-secondary);
+  }
+
+  :global(.message-content h1),
+  :global(.message-content h2),
+  :global(.message-content h3),
+  :global(.message-content h4) {
+    margin: 0.75em 0 0.5em 0;
+    font-weight: 600;
+  }
+
+  :global(.message-content h1:first-child),
+  :global(.message-content h2:first-child),
+  :global(.message-content h3:first-child),
+  :global(.message-content h4:first-child) {
+    margin-top: 0;
   }
 </style>
