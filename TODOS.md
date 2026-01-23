@@ -8,19 +8,6 @@
 
 These issues are blocking scalability and should be addressed before adding new features.
 
-### Fix Session Store Lock Held Across Await (BLOCKING)
-In `send_message` (`chat.rs:70-99`), the global session lock is held while `session.send_message(...).await` runs (streaming + tool calls). This blocks ALL other session operations.
-
-**Impact:**
-- `abort_session` cannot acquire lock during a long turn → stop button doesn't work
-- `set_permission_mode` blocked → can't change mode mid-conversation
-- `set_model` blocked → can't switch models mid-conversation
-
-**Fix:**
-- Clone session data needed for the async work
-- Release lock before the `.await`
-- Or restructure to not need mutable borrow during streaming
-
 ### Unify Event Schema Between Rust and Frontend
 Two different "protocols" on the same `claude:event` channel:
 
@@ -262,6 +249,8 @@ Agent responses have too much vertical spacing between paragraphs.
 - ~~Send Button Styling~~ (white icon, square shape)
 - ~~Remove "Shift+Enter for New Line" Hint~~
 - ~~Parallel permissions bug~~ (multiple pending permissions support)
+- ~~Fix Session Store Lock Held Across Await~~ (clone session, release lock before async work)
+- ~~Stop Button Context Preservation~~ (drain stream after interrupt instead of breaking immediately)
 
 ---
 

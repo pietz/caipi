@@ -14,6 +14,7 @@
     MessageCircle,
     ListTodo,
     BookOpen,
+    Square,
   } from 'lucide-svelte';
   import type { ToolActivity, PermissionRequest } from '$lib/stores';
 
@@ -72,6 +73,8 @@
       <Check class="w-4 h-4 text-green-500" />
     {:else if !isAwaitingPermission && activity.status === 'error'}
       <CircleAlert class="w-4 h-4 text-destructive" />
+    {:else if !isAwaitingPermission && activity.status === 'aborted'}
+      <Square class="w-4 h-4 text-orange-500" />
     {/if}
   </div>
 

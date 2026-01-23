@@ -8,9 +8,10 @@ use claude_agent_sdk_rs::{
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
-use tokio::sync::{Mutex, oneshot, RwLock};
+use tokio::sync::{Mutex, oneshot, RwLock, watch};
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -45,11 +46,33 @@ pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<Permissi
 pub struct AgentSession {
     pub id: String,
     pub folder_path: String,
-    pub messages: Vec<ChatMessage>,
-    client: Option<ClaudeClient>,
+    messages: Arc<Mutex<Vec<ChatMessage>>>,
+    client: Arc<Mutex<Option<ClaudeClient>>>,
     app_handle: AppHandle,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
+    /// Flag to signal abort - can be set without holding any locks
+    abort_flag: Arc<AtomicBool>,
+    /// Watch channel for abort signaling - allows select! to wake up immediately
+    abort_sender: watch::Sender<bool>,
+    abort_receiver: watch::Receiver<bool>,
+}
+
+impl Clone for AgentSession {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            folder_path: self.folder_path.clone(),
+            messages: self.messages.clone(),
+            client: self.client.clone(),
+            app_handle: self.app_handle.clone(),
+            permission_mode: self.permission_mode.clone(),
+            model: self.model.clone(),
+            abort_flag: self.abort_flag.clone(),
+            abort_sender: self.abort_sender.clone(),
+            abort_receiver: self.abort_receiver.clone(),
+        }
+    }
 }
 
 fn string_to_permission_mode(mode: &str) -> PermissionMode {
@@ -63,29 +86,39 @@ fn string_to_permission_mode(mode: &str) -> PermissionMode {
 
 fn string_to_model_id(model: &str) -> &'static str {
     match model {
-        "opus" => "claude-opus-4-5-20251101",
-        "sonnet" => "claude-sonnet-4-5-20250514",
-        "haiku" => "claude-haiku-3-5-20241022",
-        _ => "claude-opus-4-5-20251101",
+        "opus" => "claude-opus-4-5",
+        "sonnet" => "claude-sonnet-4-5",
+        "haiku" => "claude-haiku-4-5",
+        _ => "claude-opus-4-5",
     }
 }
 
 impl AgentSession {
     pub async fn new(folder_path: String, permission_mode: String, model: String, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
+        let (abort_sender, abort_receiver) = watch::channel(false);
 
         Ok(Self {
             id,
             folder_path,
-            messages: Vec::new(),
-            client: None,
+            messages: Arc::new(Mutex::new(Vec::new())),
+            client: Arc::new(Mutex::new(None)),
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
+            abort_flag: Arc::new(AtomicBool::new(false)),
+            abort_sender,
+            abort_receiver,
         })
     }
 
-    pub async fn set_permission_mode(&mut self, mode: String) -> Result<(), AgentError> {
+    /// Get a clone of the messages for external access
+    pub async fn get_messages(&self) -> Vec<ChatMessage> {
+        let messages = self.messages.lock().await;
+        messages.clone()
+    }
+
+    pub async fn set_permission_mode(&self, mode: String) -> Result<(), AgentError> {
         // Update stored mode
         {
             let mut current_mode = self.permission_mode.write().await;
@@ -93,7 +126,8 @@ impl AgentSession {
         }
 
         // If client exists, update it via the SDK
-        if let Some(client) = &self.client {
+        let client_guard = self.client.lock().await;
+        if let Some(client) = client_guard.as_ref() {
             let sdk_mode = string_to_permission_mode(&mode);
             client.set_permission_mode(sdk_mode).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
         }
@@ -101,7 +135,7 @@ impl AgentSession {
         Ok(())
     }
 
-    pub async fn set_model(&mut self, model: String) -> Result<(), AgentError> {
+    pub async fn set_model(&self, model: String) -> Result<(), AgentError> {
         // Update stored model
         {
             let mut current_model = self.model.write().await;
@@ -113,17 +147,24 @@ impl AgentSession {
         Ok(())
     }
 
-    pub async fn send_message<F>(&mut self, message: &str, on_event: F) -> Result<(), AgentError>
+    pub async fn send_message<F>(&self, message: &str, on_event: F) -> Result<(), AgentError>
     where
         F: Fn(AgentEvent) + Send + Sync + 'static,
     {
+        // Clear abort signals at start of new message
+        self.abort_flag.store(false, Ordering::SeqCst);
+        let _ = self.abort_sender.send(false);
+
         // Store user message
-        self.messages.push(ChatMessage {
-            id: Uuid::new_v4().to_string(),
-            role: "user".to_string(),
-            content: message.to_string(),
-            timestamp: chrono::Utc::now().timestamp(),
-        });
+        {
+            let mut messages = self.messages.lock().await;
+            messages.push(ChatMessage {
+                id: Uuid::new_v4().to_string(),
+                role: "user".to_string(),
+                content: message.to_string(),
+                timestamp: chrono::Utc::now().timestamp(),
+            });
+        }
 
         // Get the permission channels from Tauri state
         let permission_channels: tauri::State<'_, PermissionChannels> = self.app_handle.state();
@@ -131,6 +172,7 @@ impl AgentSession {
         let app_handle = self.app_handle.clone();
         let session_id = self.id.clone();
         let permission_mode_arc = self.permission_mode.clone();
+        let abort_flag = self.abort_flag.clone();
 
         let pre_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
             let permission_channels = permission_channels.clone();
@@ -138,8 +180,23 @@ impl AgentSession {
             let session_id = session_id.clone();
             let permission_mode_arc = permission_mode_arc.clone();
             let tool_use_id = tool_use_id.clone();
+            let abort_flag = abort_flag.clone();
 
             Box::pin(async move {
+                // Check if abort was requested - deny all tools if so
+                if abort_flag.load(Ordering::SeqCst) {
+                    return HookJsonOutput::Sync(SyncHookJsonOutput {
+                        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
+                            PreToolUseHookSpecificOutput {
+                                permission_decision: Some("deny".to_string()),
+                                permission_decision_reason: Some("Session aborted".to_string()),
+                                updated_input: None,
+                            }
+                        )),
+                        ..Default::default()
+                    });
+                }
+
                 // Only handle PreToolUse events
                 let (tool_name, tool_input) = match &input {
                     HookInput::PreToolUse(pre_tool) => {
@@ -358,15 +415,15 @@ impl AgentSession {
             .model(model_id)
             .build();
 
-        // Create client if needed
-        let client = match &mut self.client {
-            Some(c) => c,
-            None => {
-                let new_client = ClaudeClient::new(options);
-                self.client = Some(new_client);
-                self.client.as_mut().unwrap()
-            }
-        };
+        // Create client if needed and perform all client operations while holding the lock
+        let mut client_guard = self.client.lock().await;
+
+        // Initialize client if needed
+        if client_guard.is_none() {
+            *client_guard = Some(ClaudeClient::new(options));
+        }
+
+        let client = client_guard.as_mut().unwrap();
 
         // Connect if not connected
         client.connect().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
@@ -375,78 +432,150 @@ impl AgentSession {
         client.query(message).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         let mut assistant_content = String::new();
+        let mut abort_receiver = self.abort_receiver.clone();
+        let mut was_aborted = false;
 
-        // Receive responses
-        {
-            let mut stream = client.receive_response();
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(msg) => {
-                        match msg {
-                            Message::Assistant(assistant_msg) => {
-                                for block in assistant_msg.message.content.iter() {
-                                    match block {
-                                        ContentBlock::Text(text_block) => {
-                                            assistant_content.push_str(&text_block.text);
-                                            on_event(AgentEvent::Text(text_block.text.clone()));
+        // Receive responses - use select! to race between stream and abort signal
+        let mut stream = client.receive_response();
+        let mut interrupt_sent = false;
+
+        loop {
+            // If abort requested and we haven't sent interrupt yet, send it now
+            // but continue draining the stream to properly conclude the turn
+            if !interrupt_sent && self.abort_flag.load(Ordering::SeqCst) {
+                let _ = client.interrupt().await;
+                interrupt_sent = true;
+                was_aborted = true;
+            }
+
+            // Use a timeout when draining after interrupt to avoid hanging
+            let stream_timeout = if interrupt_sent {
+                tokio::time::Duration::from_secs(5)
+            } else {
+                tokio::time::Duration::from_secs(300) // 5 min for normal operation
+            };
+
+            tokio::select! {
+                // Check for abort signal (only if we haven't sent interrupt yet)
+                _ = abort_receiver.changed(), if !interrupt_sent => {
+                    if *abort_receiver.borrow() {
+                        // Abort was requested - interrupt the client
+                        let _ = client.interrupt().await;
+                        interrupt_sent = true;
+                        was_aborted = true;
+                        // Don't break - continue draining the stream
+                    }
+                }
+                // Process next stream item with timeout
+                result = tokio::time::timeout(stream_timeout, stream.next()) => {
+                    match result {
+                        Ok(Some(msg_result)) => {
+                            match msg_result {
+                                Ok(msg) => {
+                                    match msg {
+                                        Message::Assistant(assistant_msg) => {
+                                            // Skip processing assistant messages if we're aborting
+                                            if interrupt_sent {
+                                                continue;
+                                            }
+                                            for block in assistant_msg.message.content.iter() {
+                                                match block {
+                                                    ContentBlock::Text(text_block) => {
+                                                        assistant_content.push_str(&text_block.text);
+                                                        on_event(AgentEvent::Text(text_block.text.clone()));
+                                                    }
+                                                    ContentBlock::ToolUse(tool) => {
+                                                        let target = extract_tool_target(tool);
+                                                        on_event(AgentEvent::ToolStart {
+                                                            id: tool.id.clone(),
+                                                            tool_type: tool.name.clone(),
+                                                            target,
+                                                        });
+                                                    }
+                                                    _ => {
+                                                        // ToolResult should come via Message::User, not here
+                                                        eprintln!("[agent] Unexpected content block in Assistant message: {:?}", block);
+                                                    }
+                                                }
+                                            }
                                         }
-                                        ContentBlock::ToolUse(tool) => {
-                                            let target = extract_tool_target(tool);
-                                            on_event(AgentEvent::ToolStart {
-                                                id: tool.id.clone(),
-                                                tool_type: tool.name.clone(),
-                                                target,
-                                            });
+                                        Message::Result(_) => {
+                                            // Turn properly concluded
+                                            if !was_aborted {
+                                                on_event(AgentEvent::Complete);
+                                            }
+                                            break;
                                         }
-                                        _ => {
-                                            // ToolResult should come via Message::User, not here
-                                            eprintln!("[agent] Unexpected content block in Assistant message: {:?}", block);
+                                        Message::System(sys) => {
+                                            // Extract auth type from init message
+                                            if sys.subtype == "init" {
+                                                let api_key_source = sys.data
+                                                    .get("apiKeySource")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("unknown");
+
+                                                let auth_type = match api_key_source {
+                                                    "none" => "Claude AI Subscription",
+                                                    "environment" | "settings" => "Anthropic API Key",
+                                                    _ => "Unknown",
+                                                };
+
+                                                on_event(AgentEvent::SessionInit {
+                                                    auth_type: auth_type.to_string(),
+                                                });
+                                            }
                                         }
+                                        Message::User(_user_msg) => {
+                                            // Tool results are now handled by the PostToolUse hook
+                                            // which fires immediately when a tool completes, ensuring
+                                            // proper ordering (ToolEnd before subsequent Text events)
+                                        }
+                                        _ => {}
                                     }
                                 }
-                            }
-                            Message::Result(_) => {
-                                on_event(AgentEvent::Complete);
-                                break;
-                            }
-                            Message::System(sys) => {
-                                // Extract auth type from init message
-                                if sys.subtype == "init" {
-                                    let api_key_source = sys.data
-                                        .get("apiKeySource")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unknown");
-
-                                    let auth_type = match api_key_source {
-                                        "none" => "Claude AI Subscription",
-                                        "environment" | "settings" => "Anthropic API Key",
-                                        _ => "Unknown",
-                                    };
-
-                                    on_event(AgentEvent::SessionInit {
-                                        auth_type: auth_type.to_string(),
-                                    });
+                                Err(e) => {
+                                    if !was_aborted {
+                                        on_event(AgentEvent::Error(e.to_string()));
+                                    }
+                                    break;
                                 }
                             }
-                            Message::User(_user_msg) => {
-                                // Tool results are now handled by the PostToolUse hook
-                                // which fires immediately when a tool completes, ensuring
-                                // proper ordering (ToolEnd before subsequent Text events)
-                            }
-                            _ => {}
                         }
-                    }
-                    Err(e) => {
-                        on_event(AgentEvent::Error(e.to_string()));
-                        break;
+                        Ok(None) => {
+                            // Stream ended
+                            break;
+                        }
+                        Err(_timeout) => {
+                            // Timeout while draining after interrupt - force cleanup
+                            eprintln!("[agent] Timeout waiting for stream to drain after interrupt");
+                            break;
+                        }
                     }
                 }
             }
         }
 
+        // Drop the stream first (it borrows from client)
+        drop(stream);
+
+        // Emit appropriate completion event
+        if was_aborted {
+            // Emit AbortComplete after stream is fully drained
+            // This signals the frontend that the abort is complete and it can finalize
+            let _ = self.app_handle.emit("claude:event", serde_json::json!({
+                "type": "AbortComplete",
+                "sessionId": self.id
+            }));
+        }
+        // Note: Normal completion emits Complete via on_event in the Result branch
+
+        // Client should still be usable with context preserved after a clean abort
+        // The stream was properly drained before we get here
+
         // Store assistant message
         if !assistant_content.is_empty() {
-            self.messages.push(ChatMessage {
+            let mut messages = self.messages.lock().await;
+            messages.push(ChatMessage {
                 id: Uuid::new_v4().to_string(),
                 role: "assistant".to_string(),
                 content: assistant_content,
@@ -457,10 +586,18 @@ impl AgentSession {
         Ok(())
     }
 
-    pub async fn abort(&mut self) -> Result<(), AgentError> {
-        if let Some(client) = &mut self.client {
-            client.interrupt().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
-        }
+    pub async fn abort(&self) -> Result<(), AgentError> {
+        // Set abort flag - this is lock-free and immediate
+        self.abort_flag.store(true, Ordering::SeqCst);
+
+        // Signal the watch channel - this will wake up any select! waiting on it
+        let _ = self.abort_sender.send(true);
+
+        // Note: The actual client.interrupt() is now called inside the streaming loop
+        // when the abort signal is received via select!, because that's where we have
+        // the lock. The AbortComplete event is emitted after the stream is drained
+        // in send_message(), not here.
+
         Ok(())
     }
 }

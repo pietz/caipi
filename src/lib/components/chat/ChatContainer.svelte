@@ -212,6 +212,14 @@
         processQueuedMessages();
         break;
 
+      case 'AbortComplete':
+        // Backend has confirmed abort - finalize frontend state
+        chatStore.finalizeStream();
+        chatStore.setStreaming(false);
+        chatStore.clearMessageQueue();
+        chatStore.clearPermissionRequests();
+        break;
+
       case 'SessionInit':
         if (event.authType) {
           appStore.setAuthType(event.authType);
@@ -341,12 +349,19 @@
   async function abortSession() {
     if (!sessionId) return;
 
+    // Clear queue and permissions immediately - user wants to stop
+    // This ensures they're cleared even if Complete arrives before AbortComplete
+    chatStore.clearMessageQueue();
+    chatStore.clearPermissionRequests();
+
     try {
       await invoke('abort_session', { sessionId });
-      chatStore.setStreaming(false);
-      chatStore.clearMessageQueue();  // Clear any queued messages on abort
+      // AbortComplete event from backend will handle stream finalization.
     } catch (e) {
       console.error('Failed to abort session:', e);
+      // Fallback: finalize locally if the command failed
+      chatStore.finalizeStream();
+      chatStore.setStreaming(false);
     }
   }
 </script>

@@ -12,7 +12,7 @@ export interface ToolActivity {
   id: string;
   toolType: string;
   target: string;
-  status: 'running' | 'completed' | 'error';
+  status: 'running' | 'completed' | 'error' | 'aborted';
   timestamp: number;
 }
 
@@ -287,9 +287,9 @@ function createChatStore() {
           }
           currentText += item.content;
         } else if (item.type === 'tool' && item.activity) {
-          // Ensure completed status if still running (timing safeguard)
+          // Mark running tools as 'aborted' since they were interrupted
           const activity = item.activity.status === 'running'
-            ? { ...item.activity, status: 'completed' as const }
+            ? { ...item.activity, status: 'aborted' as const }
             : item.activity;
           currentActivities.push(activity);
         }

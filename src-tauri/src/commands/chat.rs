@@ -66,9 +66,12 @@ pub async fn send_message(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Get the session
-    let mut store = sessions.lock().await;
-    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
+    // Lock is now released!
 
     // Clone what we need for the async task
     let app_handle = app.clone();
@@ -135,10 +138,14 @@ pub async fn get_session_messages(
     app: AppHandle,
 ) -> Result<Vec<Message>, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let store = sessions.lock().await;
-    let session = store.get(&session_id).ok_or("Session not found")?;
 
-    Ok(session.messages.clone())
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
+
+    Ok(session.get_messages().await)
 }
 
 #[tauri::command]
@@ -147,8 +154,12 @@ pub async fn abort_session(
     app: AppHandle,
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let mut store = sessions.lock().await;
-    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
 
     session.abort().await.map_err(|e| e.to_string())
 }
@@ -160,8 +171,12 @@ pub async fn set_permission_mode(
     app: AppHandle,
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let mut store = sessions.lock().await;
-    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
 
     session.set_permission_mode(mode).await.map_err(|e| e.to_string())
 }
@@ -173,8 +188,12 @@ pub async fn set_model(
     app: AppHandle,
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let mut store = sessions.lock().await;
-    let session = store.get_mut(&session_id).ok_or("Session not found")?;
+
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
 
     session.set_model(model).await.map_err(|e| e.to_string())
 }
