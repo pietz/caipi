@@ -19,32 +19,14 @@
   import {
     appStore,
     chatStore,
-    type Message,
-    type ToolActivity,
-    type PermissionRequest,
-    type StreamItem,
-    type PermissionMode,
-    type ModelType,
+    createStreamCoordinator,
+    createPermissionCoordinator,
+    type ChatEvent,
   } from '$lib/stores';
-
-  interface ChatEvent {
-    type: string;
-    content?: string;
-    activity?: ToolActivity;
-    id?: string;
-    status?: string;
-    tool?: string;
-    toolUseId?: string;  // The tool_use_id for matching to activity
-    description?: string;
-    message?: string;
-    authType?: string;
-    planContent?: string;
-    permissionMode?: string;
-    model?: string;
-  }
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
+  let cleanupKeyboardShortcuts: (() => void) | null = null;
 
   // Theme
   const currentTheme = $derived($resolvedTheme);
@@ -59,177 +41,37 @@
 
   // Chat store values
   const messages = $derived($chatStore.messages);
-  const activities = $derived($chatStore.activities);
   const streamItems = $derived($chatStore.streamItems);
   const isStreaming = $derived($chatStore.isStreaming);
-  const streamingContent = $derived($chatStore.streamingContent);
   const pendingPermissions = $derived($chatStore.pendingPermissions);
 
+  // Stream coordinator handles all Claude events
+  const streamCoordinator = createStreamCoordinator({
+    onComplete: processQueuedMessages,
+  });
+
+  // Permission coordinator handles permission interactions
+  const permissionCoordinator = createPermissionCoordinator({
+    getSessionId: () => sessionId,
+    getStreamItems: () => chatStore.getStreamItems(),
+    getPendingPermissions: () => chatStore.getPendingPermissions(),
+  });
+
   onMount(async () => {
-    // Listen for Claude events
+    // Listen for Claude events and delegate to stream coordinator
     unlisten = await listen<ChatEvent>('claude:event', (event) => {
-      handleClaudeEvent(event.payload);
+      streamCoordinator.handleEvent(event.payload);
+      scrollToBottom();
     });
 
-    // Global keyboard listener for permission shortcuts
-    window.addEventListener('keydown', handleGlobalKeydown);
+    // Set up keyboard shortcuts for permission handling
+    cleanupKeyboardShortcuts = permissionCoordinator.setupKeyboardShortcuts();
   });
 
   onDestroy(() => {
     unlisten?.();
-    window.removeEventListener('keydown', handleGlobalKeydown);
+    cleanupKeyboardShortcuts?.();
   });
-
-  function handleGlobalKeydown(e: KeyboardEvent) {
-    // Handle permission shortcuts - approve/deny first pending permission in UI order
-    const permissionKeys = Object.keys(pendingPermissions);
-    if (permissionKeys.length === 0) return;
-
-    if (e.key === 'Enter' || e.key === 'Escape') {
-      const activeElement = document.activeElement as HTMLTextAreaElement | null;
-      const isTextareaWithContent = activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
-
-      if (isTextareaWithContent) return;
-
-      e.preventDefault();
-
-      // Find the first pending permission by activity order in streamItems
-      const sortedItems = [...streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex);
-      const firstPendingActivity = sortedItems.find(
-        item => item.type === 'tool' && item.activity && pendingPermissions[item.activity.id]
-      );
-
-      if (firstPendingActivity?.activity) {
-        const permission = pendingPermissions[firstPendingActivity.activity.id];
-        if (permission) {
-          if (e.key === 'Enter') {
-            handlePermissionResponseForRequest(permission, true);  // Allow
-          } else if (e.key === 'Escape') {
-            handlePermissionResponseForRequest(permission, false); // Deny
-          }
-        }
-      }
-    }
-  }
-
-  function handleClaudeEvent(event: ChatEvent) {
-    switch (event.type) {
-      case 'Text':
-        if (event.content) {
-          chatStore.appendStreamingContent(event.content);
-        }
-        break;
-
-      case 'ToolStart':
-        if (event.activity) {
-          const newActivity = {
-            ...event.activity,
-            toolType: event.activity.toolType,
-            status: 'running' as const,
-          };
-          chatStore.addActivity(newActivity);
-
-          // If there's a pending permission request with matching tool type but no activityId,
-          // link it to this activity (handles case where permission request arrives before ToolStart)
-          // Find by request id (since we don't have activityId yet)
-          for (const [key, permission] of Object.entries(pendingPermissions) as [string, PermissionRequest][]) {
-            if (permission.activityId === null && permission.tool === newActivity.toolType) {
-              // Remove the old entry and add with the new activityId
-              chatStore.removePermissionRequest(key);
-              chatStore.addPermissionRequest({
-                ...permission,
-                activityId: newActivity.id,
-              });
-              break; // Only update one permission per ToolStart
-            }
-          }
-        }
-        break;
-
-      case 'ToolEnd':
-        if (event.id && event.status) {
-          chatStore.updateActivityStatus(
-            event.id,
-            event.status as ToolActivity['status']
-          );
-        }
-        break;
-
-      case 'PermissionRequest':
-        if (event.id && event.tool && event.description) {
-          // Use toolUseId for exact matching when available (handles parallel tools)
-          // Fall back to finding by tool type for backwards compatibility
-          let matchingActivityId: string | null = null;
-
-          if (event.toolUseId) {
-            // Exact match by tool_use_id
-            const exactMatch = activities.find((a: ToolActivity) => a.id === event.toolUseId);
-            matchingActivityId = exactMatch?.id || null;
-          }
-
-          if (!matchingActivityId) {
-            // Fallback: find by tool type that doesn't already have a pending permission
-            const matchingActivity = activities.find(
-              (a: ToolActivity) => a.status === 'running' && a.toolType === event.tool && !pendingPermissions[a.id]
-            );
-            matchingActivityId = matchingActivity?.id || null;
-          }
-
-          chatStore.addPermissionRequest({
-            id: event.id,
-            activityId: matchingActivityId,
-            tool: event.tool,
-            description: event.description,
-            timestamp: Date.now() / 1000,
-          });
-        }
-        break;
-
-      case 'Complete':
-        // Convert streamItems to a message with embedded activities
-        chatStore.finalizeStream();
-        // Process any queued messages
-        processQueuedMessages();
-        break;
-
-      case 'AbortComplete':
-        // Backend has confirmed abort - finalize frontend state
-        chatStore.finalizeStream();
-        chatStore.setStreaming(false);
-        chatStore.clearMessageQueue();
-        chatStore.clearPermissionRequests();
-        break;
-
-      case 'SessionInit':
-        if (event.authType) {
-          appStore.setAuthType(event.authType);
-        }
-        break;
-
-      case 'StateChanged':
-        if (event.permissionMode && event.model) {
-          appStore.syncState(
-            event.permissionMode as PermissionMode,
-            event.model as ModelType
-          );
-        }
-        break;
-
-      case 'Error':
-        console.error('Claude error:', event.message);
-        // Add error as a visible message in the chat
-        chatStore.addMessage({
-          id: crypto.randomUUID(),
-          role: 'error',
-          content: event.message || 'An unknown error occurred',
-          timestamp: Date.now() / 1000,
-        });
-        chatStore.setStreaming(false);
-        break;
-    }
-
-    scrollToBottom();
-  }
 
   async function sendMessage(message: string) {
     if (!sessionId) return;
@@ -289,32 +131,6 @@
     } catch (e) {
       console.error('Failed to send queued message:', e);
       chatStore.setStreaming(false);
-    }
-  }
-
-  async function handlePermissionResponseForRequest(permission: PermissionRequest, allowed: boolean) {
-    if (!sessionId) return;
-
-    try {
-      await invoke('respond_permission', {
-        sessionId,
-        requestId: permission.id,
-        allowed,
-      });
-    } catch (e) {
-      console.error('Failed to respond to permission:', e);
-    }
-
-    // Remove this specific permission request
-    const key = permission.activityId || permission.id;
-    chatStore.removePermissionRequest(key);
-  }
-
-  // Convenience wrapper for ActivityCard callbacks
-  function handlePermissionResponse(activityId: string, allowed: boolean) {
-    const permission = pendingPermissions[activityId];
-    if (permission) {
-      handlePermissionResponseForRequest(permission, allowed);
     }
   }
 
@@ -500,7 +316,7 @@
                     <ActivityCard
                       activity={item.activity}
                       {pendingPermissions}
-                      onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
+                      onPermissionResponse={(allowed) => permissionCoordinator.respondToPermissionByActivityId(item.activity!.id, allowed)}
                     />
                   </div>
                 {/if}

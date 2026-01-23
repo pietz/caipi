@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { messageStore, type Message } from './messageStore';
 import { activityStore, type ToolActivity } from './activityStore';
 import { permissionStore, type PermissionRequest } from './permissionStore';
@@ -122,6 +122,11 @@ export const chatStore = {
   addPermissionRequest: permissionStore.addPermissionRequest,
   removePermissionRequest: permissionStore.removePermissionRequest,
   clearPermissionRequests: permissionStore.clearPermissionRequests,
+
+  // Getter methods for accessing current state without subscribing
+  getActivities: () => get(activityStore).activities,
+  getPendingPermissions: () => get(permissionStore).pendingPermissions,
+  getStreamItems: () => get(messageStore).streamItems,
 
   // Finalize stream (coordinated across stores)
   finalizeStream: () => {

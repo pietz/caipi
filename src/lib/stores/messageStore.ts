@@ -168,8 +168,9 @@ function createMessageStore() {
 
       for (const item of s.streamItems) {
         if (item.type === 'text' && item.content) {
-          // If we have pending activities, finalize previous message first
-          if (currentActivities.length > 0 && currentText) {
+          // If we have pending activities, flush them first as their own message
+          // This ensures tools that ran BEFORE text appear ABOVE the text
+          if (currentActivities.length > 0) {
             newMessages.push({
               id: crypto.randomUUID(),
               role: 'assistant',

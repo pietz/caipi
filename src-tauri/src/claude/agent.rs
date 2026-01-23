@@ -1,18 +1,21 @@
 use crate::commands::chat::{Message as ChatMessage, ChatEvent};
 use claude_agent_sdk_rs::{
-    ClaudeClient, ClaudeAgentOptions, Message, ContentBlock, ToolUseBlock,
-    HookEvent, HookMatcher, HookCallback, HookInput, HookContext, HookJsonOutput,
-    SyncHookJsonOutput, HookSpecificOutput, PreToolUseHookSpecificOutput,
-    PostToolUseHookInput, PermissionMode,
+    ClaudeClient, ClaudeAgentOptions, Message, ContentBlock,
+    PermissionMode,
 };
 use futures::StreamExt;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
-use tokio::sync::{Mutex, oneshot, RwLock, watch};
+use tokio::sync::{Mutex, RwLock, watch};
 use uuid::Uuid;
+
+use super::hooks::build_hooks;
+use super::tool_utils::extract_tool_target;
+
+// Re-export from hooks for external use
+pub use super::hooks::PermissionChannels;
 
 #[derive(Error, Debug)]
 pub enum AgentError {
@@ -39,9 +42,6 @@ pub enum AgentEvent {
 pub struct PermissionResponse {
     pub allowed: bool,
 }
-
-/// Global permission channels - separate from session store to avoid deadlock
-pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
 
 pub struct AgentSession {
     pub id: String,
@@ -90,133 +90,6 @@ fn string_to_model_id(model: &str) -> &'static str {
         "sonnet" => "claude-sonnet-4-5",
         "haiku" => "claude-haiku-4-5",
         _ => "claude-opus-4-5",
-    }
-}
-
-// ============================================================================
-// Permission Hook Helpers
-// ============================================================================
-
-/// Create an "allow" response for the pre-tool-use hook
-fn allow_response(reason: &str) -> HookJsonOutput {
-    HookJsonOutput::Sync(SyncHookJsonOutput {
-        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-            PreToolUseHookSpecificOutput {
-                permission_decision: Some("allow".to_string()),
-                permission_decision_reason: Some(reason.to_string()),
-                updated_input: None,
-            }
-        )),
-        ..Default::default()
-    })
-}
-
-/// Create a "deny" response for the pre-tool-use hook
-fn deny_response(reason: &str) -> HookJsonOutput {
-    HookJsonOutput::Sync(SyncHookJsonOutput {
-        hook_specific_output: Some(HookSpecificOutput::PreToolUse(
-            PreToolUseHookSpecificOutput {
-                permission_decision: Some("deny".to_string()),
-                permission_decision_reason: Some(reason.to_string()),
-                updated_input: None,
-            }
-        )),
-        ..Default::default()
-    })
-}
-
-/// Check if the session has been aborted
-fn check_abort_decision(abort_flag: &Arc<AtomicBool>) -> Option<HookJsonOutput> {
-    if abort_flag.load(Ordering::SeqCst) {
-        Some(deny_response("Session aborted"))
-    } else {
-        None
-    }
-}
-
-/// Extract tool name and input from hook input
-fn extract_tool_info(input: &HookInput) -> Option<(String, serde_json::Value)> {
-    match input {
-        HookInput::PreToolUse(pre_tool) => {
-            Some((pre_tool.tool_name.clone(), pre_tool.tool_input.clone()))
-        }
-        _ => None,
-    }
-}
-
-/// Check if the permission mode allows the tool without prompting
-fn check_mode_decision(mode: &str, tool_name: &str) -> Option<HookJsonOutput> {
-    match mode {
-        "bypassPermissions" => Some(allow_response("Bypass mode - all tools allowed")),
-        "acceptEdits" if tool_name != "Bash" => {
-            Some(allow_response("AcceptEdits mode - file operations allowed"))
-        }
-        _ => None,
-    }
-}
-
-/// Check if the tool requires permission prompting
-fn requires_permission(tool_name: &str) -> bool {
-    matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit")
-}
-
-/// Build a human-readable description for the permission prompt
-fn build_permission_description(tool_name: &str, tool_input: &serde_json::Value) -> String {
-    match tool_name {
-        "Write" | "Edit" => {
-            tool_input.get("file_path")
-                .and_then(|v| v.as_str())
-                .map(|p| format!("Modify file: {}", p))
-                .unwrap_or_else(|| format!("Use tool: {}", tool_name))
-        }
-        "Bash" => {
-            tool_input.get("command")
-                .and_then(|v| v.as_str())
-                .map(|cmd| {
-                    if cmd.len() > 80 {
-                        format!("Run command: {}...", &cmd[..77])
-                    } else {
-                        format!("Run command: {}", cmd)
-                    }
-                })
-                .unwrap_or_else(|| "Run bash command".to_string())
-        }
-        _ => format!("Use tool: {}", tool_name),
-    }
-}
-
-/// Prompt the user for permission and await their response
-async fn prompt_user_permission(
-    permission_channels: PermissionChannels,
-    app_handle: AppHandle,
-    session_id: String,
-    tool_name: String,
-    tool_use_id: Option<String>,
-    description: String,
-) -> HookJsonOutput {
-    let (tx, rx) = oneshot::channel();
-    let request_id = Uuid::new_v4().to_string();
-
-    // Store sender in the global permission channels
-    {
-        let mut channels = permission_channels.lock().await;
-        channels.insert(request_id.clone(), tx);
-    }
-
-    // Emit permission request event to frontend
-    let _ = app_handle.emit("claude:event", &ChatEvent::PermissionRequest {
-        id: request_id,
-        session_id,
-        tool: tool_name,
-        tool_use_id,
-        description,
-    });
-
-    // Await user response
-    match rx.await {
-        Ok(response) if response.allowed => allow_response("User approved"),
-        Ok(_) => deny_response("User denied"),
-        Err(_) => deny_response("Permission request cancelled"),
     }
 }
 
@@ -301,99 +174,14 @@ impl AgentSession {
             });
         }
 
-        // Get the permission channels from Tauri state
+        // Get the permission channels from Tauri state and build hooks
         let permission_channels: tauri::State<'_, PermissionChannels> = self.app_handle.state();
-        let permission_channels = permission_channels.inner().clone();
-        let app_handle = self.app_handle.clone();
-        let session_id = self.id.clone();
-        let permission_mode_arc = self.permission_mode.clone();
-        let abort_flag = self.abort_flag.clone();
-
-        let pre_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
-            let permission_channels = permission_channels.clone();
-            let app_handle = app_handle.clone();
-            let session_id = session_id.clone();
-            let permission_mode_arc = permission_mode_arc.clone();
-            let abort_flag = abort_flag.clone();
-
-            Box::pin(async move {
-                // 1. Check if abort was requested
-                if let Some(deny) = check_abort_decision(&abort_flag) {
-                    return deny;
-                }
-
-                // 2. Extract tool info (only handle PreToolUse events)
-                let (tool_name, tool_input) = match extract_tool_info(&input) {
-                    Some(info) => info,
-                    None => return HookJsonOutput::Sync(SyncHookJsonOutput::default()),
-                };
-
-                // 3. Check permission mode for auto-decisions
-                let current_mode = permission_mode_arc.read().await.clone();
-                if let Some(decision) = check_mode_decision(&current_mode, &tool_name) {
-                    return decision;
-                }
-
-                // 4. Check if this tool requires permission prompting
-                if !requires_permission(&tool_name) {
-                    return allow_response("Read-only operation");
-                }
-
-                // 5. Build description and prompt user
-                let description = build_permission_description(&tool_name, &tool_input);
-                prompt_user_permission(
-                    permission_channels,
-                    app_handle,
-                    session_id,
-                    tool_name,
-                    tool_use_id,
-                    description,
-                ).await
-            })
-        });
-
-        // Create PostToolUse hook to emit ToolEnd immediately when a tool finishes
-        let app_handle_post = self.app_handle.clone();
-        let post_tool_use_hook: HookCallback = Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
-            let app_handle = app_handle_post.clone();
-            let tool_use_id = tool_use_id.clone();
-
-            Box::pin(async move {
-                if let HookInput::PostToolUse(PostToolUseHookInput { tool_response, .. }) = &input {
-                    // Determine if the tool errored by checking the response
-                    let is_error = tool_response.get("is_error")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-
-                    let status = if is_error { "error" } else { "completed" };
-
-                    // Emit ToolEnd event immediately
-                    if let Some(id) = tool_use_id {
-                        let _ = app_handle.emit("claude:event", &ChatEvent::ToolEnd {
-                            id: id,
-                            status: status.to_string(),
-                        });
-                    }
-                }
-
-                // Don't modify anything, just return default
-                HookJsonOutput::Sync(SyncHookJsonOutput::default())
-            })
-        });
-
-        // Create hooks map
-        let mut hooks: HashMap<HookEvent, Vec<HookMatcher>> = HashMap::new();
-        hooks.insert(
-            HookEvent::PreToolUse,
-            vec![HookMatcher::builder()
-                .hooks(vec![pre_tool_use_hook])
-                .build()]
-        );
-        hooks.insert(
-            HookEvent::PostToolUse,
-            vec![HookMatcher::builder()
-                .hooks(vec![post_tool_use_hook])
-                .build()]
+        let hooks = build_hooks(
+            permission_channels.inner().clone(),
+            self.app_handle.clone(),
+            self.id.clone(),
+            self.permission_mode.clone(),
+            self.abort_flag.clone(),
         );
 
         // Get the current settings for the SDK options
@@ -592,91 +380,5 @@ impl AgentSession {
         // in send_message(), not here.
 
         Ok(())
-    }
-}
-
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count > max_chars {
-        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    } else {
-        s.to_string()
-    }
-}
-
-fn extract_tool_target(tool: &ToolUseBlock) -> String {
-    // Extract the target (file path, pattern, etc.) from tool input
-    match tool.name.as_str() {
-        "Read" | "Write" | "Edit" => {
-            tool.input.get("file_path")
-                .or_else(|| tool.input.get("path"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        }
-        "Glob" => {
-            tool.input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("*")
-                .to_string()
-        }
-        "Grep" => {
-            tool.input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("...")
-                .to_string()
-        }
-        "Bash" => {
-            tool.input.get("command")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or("command".to_string())
-        }
-        "WebSearch" => {
-            tool.input.get("query")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or("searching...".to_string())
-        }
-        "WebFetch" => {
-            tool.input.get("url")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or("fetching...".to_string())
-        }
-        "Skill" => {
-            tool.input.get("skill")
-                .and_then(|v| v.as_str())
-                .unwrap_or("skill")
-                .to_string()
-        }
-        "Task" => {
-            tool.input.get("description")
-                .or_else(|| tool.input.get("prompt"))
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or("task".to_string())
-        }
-        "AskUserQuestion" => "asking question...".to_string(),
-        "NotebookEdit" => {
-            tool.input.get("notebook_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("notebook")
-                .to_string()
-        }
-        _ => {
-            // Try common field names for unknown tools
-            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
-            for field in fields {
-                if let Some(val) = tool.input.get(field).and_then(|v| v.as_str()) {
-                    // Prefix with tool name for context
-                    let detail = truncate_str(val, 40);
-                    return format!("{}: {}", tool.name, detail);
-                }
-            }
-            // Fallback: show tool name only
-            tool.name.clone()
-        }
     }
 }

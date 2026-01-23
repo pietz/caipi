@@ -1,2 +1,3 @@
 pub mod agent;
-pub mod permissions;
+pub mod hooks;
+pub mod tool_utils;
