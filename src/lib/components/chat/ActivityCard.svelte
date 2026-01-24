@@ -54,7 +54,7 @@
 
 <div
   class="flex items-center gap-2 p-2 rounded-md text-sm transition-colors"
-  style:background-color={isAwaitingPermission ? 'rgba(234, 179, 8, 0.1)' : 'var(--muted)'}
+  style:background-color={isAwaitingPermission ? 'rgba(234, 179, 8, 0.1)' : 'hsl(var(--muted))'}
   style:border="1px solid {isAwaitingPermission ? 'rgba(234, 179, 8, 0.4)' : 'var(--border-hover)'}"
 >
   <!-- Tool Icon -->

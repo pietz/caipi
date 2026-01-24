@@ -180,8 +180,7 @@
 <div class="flex flex-col h-full relative">
   <!-- Header - Full width at top -->
   <div
-    class="py-2 px-3 flex items-center justify-between shrink-0"
-    style="border-bottom: 1px solid var(--border); background-color: var(--header-bg);"
+    class="py-2 px-3 flex items-center justify-between shrink-0 border-b border-border bg-header"
     data-tauri-drag-region
   >
     <div class="flex items-center gap-2 pl-[70px]">
@@ -203,7 +202,7 @@
       <button
         type="button"
         onclick={goBack}
-        class="p-1 rounded transition-all duration-100 text-muted hover:bg-hover hover:text-secondary"
+        class="p-1 rounded transition-all duration-100 text-muted-foreground hover:bg-hover hover:text-foreground"
         title="Open project"
       >
         <MenuIcon size={16} />
@@ -219,13 +218,13 @@
       <span class="text-folder flex items-center">
         <FolderIcon size={14} />
       </span>
-      <span class="text-sm font-medium text-primary">{app.folderName}</span>
+      <span class="text-sm font-medium text-foreground">{app.folderName}</span>
     </div>
 
     <div class="flex items-center gap-2">
       <!-- Auth type indicator -->
       {#if app.authType}
-        <span class="text-xs text-dim px-2 py-0.5 rounded" style="background-color: var(--card);">
+        <span class="text-xs text-dim px-2 py-0.5 rounded bg-card">
           {app.authType}
         </span>
       {/if}
@@ -234,7 +233,7 @@
       <button
         type="button"
         onclick={toggleTheme}
-        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
         title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {#if currentTheme === 'dark'}
@@ -267,7 +266,7 @@
       class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
       style="
         width: {app.leftSidebar ? '200px' : '0px'};
-        border-right: {app.leftSidebar ? '1px solid var(--border)' : 'none'};
+        border-right: {app.leftSidebar ? '1px solid hsl(var(--border))' : 'none'};
       "
     >
       {#if app.folder}
@@ -288,7 +287,7 @@
             <div class="mb-3 opacity-50">
               <CaipiIcon size={64} />
             </div>
-            <p class="text-sm mb-1 text-muted">
+            <p class="text-sm mb-1 text-muted-foreground">
               Start a conversation
             </p>
             <p class="text-xs">
@@ -345,7 +344,7 @@
       class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
       style="
         width: {app.rightSidebar ? '220px' : '0px'};
-        border-left: {app.rightSidebar ? '1px solid var(--border)' : 'none'};
+        border-left: {app.rightSidebar ? '1px solid hsl(var(--border))' : 'none'};
       "
     >
       <ContextPanel />

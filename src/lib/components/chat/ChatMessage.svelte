@@ -1,5 +1,6 @@
 <script lang="ts">
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import hljs from 'highlight.js';
   import type { Message } from '$lib/stores';
   import ActivityCard from './ActivityCard.svelte';
@@ -27,7 +28,7 @@
   const isUser = $derived(message.role === 'user');
   const isError = $derived(message.role === 'error');
   const htmlContent = $derived(
-    message.content ? marked.parse(message.content) as string : ''
+    message.content ? DOMPurify.sanitize(marked.parse(message.content) as string) : ''
   );
 </script>
 
@@ -109,7 +110,7 @@
   }
 
   :global(.message-content code:not(pre code)) {
-    background: var(--muted);
+    background: hsl(var(--muted));
     padding: 0.15em 0.4em;
     border-radius: 4px;
     font-size: 0.9em;
@@ -118,7 +119,7 @@
   :global(.message-content blockquote) {
     margin: 0.5em 0;
     padding-left: 1em;
-    border-left: 3px solid var(--border);
+    border-left: 3px solid hsl(var(--border));
     color: var(--text-secondary);
   }
 

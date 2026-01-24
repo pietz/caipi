@@ -21,42 +21,37 @@
   <!-- Logo and Title -->
   <div class="flex flex-col items-center text-center">
     <CaipiIcon size={64} />
-    <h1 class="text-lg font-semibold mt-4 text-primary">
+    <h1 class="text-lg font-semibold mt-4 text-foreground">
       Caipi
     </h1>
-    <p class="text-xs text-muted mt-1">
+    <p class="text-xs text-muted-foreground mt-1">
       A friendly UI for Claude Code
     </p>
   </div>
 
   <!-- Install Instructions Card -->
   <div
-    class="w-[340px] rounded-lg p-5"
-    style="background: var(--card); border: 1px solid var(--border);"
+    class="w-[340px] rounded-lg border bg-card p-5"
   >
-    <div class="text-sm font-medium text-primary mb-3">
+    <div class="text-sm font-medium text-foreground mb-3">
       Claude Code CLI Required
     </div>
 
-    <p class="text-xs text-secondary mb-4">
+    <p class="text-xs text-muted-foreground mb-4">
       Caipi requires the Claude Code CLI. Run this in your terminal:
     </p>
 
     <div class="flex items-center gap-2">
       <code
-        class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto"
-        style="background: var(--bg); border: 1px solid var(--border); color: var(--text-secondary);"
+        class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground"
       >
         {installCommand}
       </code>
       <button
         type="button"
         onclick={copyToClipboard}
-        class="shrink-0 p-2 rounded transition-all duration-150"
-        style="
-          background: var(--hover);
-          color: {copied ? 'var(--accent)' : 'var(--text-muted)'};
-        "
+        class="shrink-0 p-2 rounded transition-all duration-150 bg-accent text-muted-foreground hover:bg-accent/80"
+        class:text-primary={copied}
         title="Copy to clipboard"
       >
         {#if copied}
@@ -70,7 +65,7 @@
       </button>
     </div>
 
-    <p class="text-xs text-muted mt-4">
+    <p class="text-xs text-muted-foreground mt-4">
       After installing, restart Caipi to continue.
     </p>
   </div>

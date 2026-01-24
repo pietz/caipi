@@ -100,8 +100,8 @@
   <!-- Input wrapper -->
   <div
     class={cn(
-      'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-input border',
-      focused ? 'border-[var(--ring)]' : 'border-input'
+      'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-background border',
+      focused ? 'border-ring' : 'border-input'
     )}
   >
     <textarea
@@ -113,7 +113,7 @@
       onblur={() => focused = false}
       {placeholder}
       rows={1}
-      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-primary leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
+      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-foreground leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
     ></textarea>
 
     {#if isStreaming && !hasContent}
@@ -166,7 +166,7 @@
       <button
         type="button"
         onclick={handleModelClick}
-        class="flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover text-secondary"
+        class="flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover text-muted-foreground hover:text-foreground"
         title="Click to cycle model"
       >
         <span class="w-[10px] h-[10px] flex items-center justify-center">

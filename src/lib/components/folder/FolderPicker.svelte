@@ -135,7 +135,7 @@
     <button
       type="button"
       onclick={toggleTheme}
-      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
       title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {#if currentTheme === 'dark'}
@@ -148,7 +148,7 @@
       <button
         type="button"
         onclick={goBackToChat}
-        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
         title="Back to chat"
       >
         <CloseIcon size={16} />
@@ -161,10 +161,10 @@
   <div class="w-full max-w-lg">
   <!-- Header -->
   <div class="mb-6">
-    <h2 class="text-sm font-semibold text-primary mb-1">
+    <h2 class="text-sm font-semibold text-foreground mb-1">
       Open a Project
     </h2>
-    <p class="text-xs text-muted">
+    <p class="text-xs text-muted-foreground">
       Select a folder to start working with Claude
     </p>
   </div>
@@ -189,12 +189,12 @@
       <div class="text-dim mb-2">
         <SpinnerIcon size={32} />
       </div>
-      <p class="text-xs text-secondary">Validating folder...</p>
+      <p class="text-xs text-muted-foreground">Validating folder...</p>
     {:else}
       <div class="text-dim mb-2">
         <FolderIcon size={32} />
       </div>
-      <p class="text-xs text-secondary mb-1">
+      <p class="text-xs text-muted-foreground mb-1">
         Drop a folder here or click to browse
       </p>
       <p class="text-xs text-dim">
@@ -229,7 +229,7 @@
                 <FolderIcon size={16} />
               </span>
               <div>
-                <div class="text-sm text-primary">{folder.name}</div>
+                <div class="text-sm text-foreground">{folder.name}</div>
                 <div class="text-xs text-dim">{folder.path}</div>
               </div>
             </div>

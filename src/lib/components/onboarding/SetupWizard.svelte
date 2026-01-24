@@ -118,7 +118,7 @@
     <button
       type="button"
       onclick={toggleTheme}
-      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-secondary"
+      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
       title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {#if currentTheme === 'dark'}
@@ -132,23 +132,22 @@
   <!-- Logo and Title -->
   <div class="flex flex-col items-center text-center">
     <CaipiIcon size={64} />
-    <h1 class="text-lg font-semibold mt-4 text-primary">
+    <h1 class="text-lg font-semibold mt-4 text-foreground">
       Welcome to Caipi
     </h1>
-    <p class="text-xs text-muted mt-1">
+    <p class="text-xs text-muted-foreground mt-1">
       A friendly UI for Claude Code
     </p>
   </div>
 
   <!-- Setup Card -->
   <div
-    class="w-[380px] rounded-lg p-5"
-    style="background: var(--card); border: 1px solid var(--border);"
+    class="w-[380px] rounded-lg border bg-card p-5"
   >
     <!-- CLI Status -->
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-sm font-medium text-primary">Claude Code CLI</span>
+        <span class="text-sm font-medium text-foreground">Claude Code CLI</span>
         {#if checkingCli}
           <SpinnerIcon size={14} />
         {:else if cliStatus?.installed}
@@ -159,30 +158,26 @@
       </div>
 
       {#if checkingCli}
-        <p class="text-xs text-muted">Checking installation...</p>
+        <p class="text-xs text-muted-foreground">Checking installation...</p>
       {:else if cliStatus?.installed}
-        <p class="text-xs text-secondary">
+        <p class="text-xs text-muted-foreground">
           Installed {cliStatus.version ? `(${cliStatus.version})` : ''}
         </p>
       {:else}
-        <p class="text-xs text-secondary mb-3">
+        <p class="text-xs text-muted-foreground mb-3">
           Required to use Caipi. Run this in your terminal:
         </p>
         <div class="flex items-center gap-2">
           <code
-            class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto"
-            style="background: var(--bg); border: 1px solid var(--border); color: var(--text-secondary);"
+            class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground"
           >
             {installCommand}
           </code>
           <button
             type="button"
             onclick={copyToClipboard}
-            class="shrink-0 p-2 rounded transition-all duration-150"
-            style="
-              background: var(--hover);
-              color: {copied ? 'var(--accent)' : 'var(--text-muted)'};
-            "
+            class="shrink-0 p-2 rounded transition-all duration-150 bg-accent text-muted-foreground hover:bg-accent/80"
+            class:text-primary={copied}
             title="Copy to clipboard"
           >
             {#if copied}
@@ -198,7 +193,7 @@
         <button
           type="button"
           onclick={checkCliStatus}
-          class="text-xs text-accent mt-3 hover:underline"
+          class="text-xs text-primary mt-3 hover:underline"
         >
           Recheck installation
         </button>
@@ -206,12 +201,12 @@
     </div>
 
     <!-- Divider -->
-    <div class="w-full h-px mb-5" style="background: var(--border);"></div>
+    <div class="w-full h-px mb-5 bg-border"></div>
 
     <!-- Default Folder Selection -->
     <div>
-      <div class="text-sm font-medium text-primary mb-2">Default Project Folder</div>
-      <p class="text-xs text-muted mb-3">
+      <div class="text-sm font-medium text-foreground mb-2">Default Project Folder</div>
+      <p class="text-xs text-muted-foreground mb-3">
         Choose where you usually work. You can always open other projects later.
       </p>
 
@@ -219,17 +214,17 @@
         <button
           type="button"
           onclick={selectFolder}
-          class="w-full flex items-center gap-2.5 py-2.5 px-3 rounded-md cursor-pointer transition-colors duration-100 text-left"
-          style="background: var(--hover); border: 1px solid var(--border);"
+          class="w-full flex items-center gap-2.5 py-2.5 px-3 rounded-md cursor-pointer transition-colors duration-100 text-left border border-border"
+          style="background: var(--hover);"
         >
           <span class="text-folder">
             <FolderIcon size={16} />
           </span>
           <div class="flex-1 min-w-0">
-            <div class="text-sm text-primary truncate">{folderName}</div>
+            <div class="text-sm text-foreground truncate">{folderName}</div>
             <div class="text-xs text-dim truncate">{selectedFolder}</div>
           </div>
-          <span class="text-xs text-muted">Change</span>
+          <span class="text-xs text-muted-foreground">Change</span>
         </button>
       {:else}
         <button
@@ -242,7 +237,7 @@
           "
         >
           <FolderIcon size={16} />
-          <span class="text-sm text-secondary">Select a folder</span>
+          <span class="text-sm text-muted-foreground">Select a folder</span>
         </button>
       {/if}
     </div>
@@ -259,7 +254,7 @@
     disabled={!canProceed}
     class="px-6 py-2.5 rounded-md text-sm font-medium transition-all duration-150"
     style="
-      background: {canProceed ? 'var(--accent-blue)' : 'var(--card)'};
+      background: {canProceed ? 'var(--accent-blue)' : 'hsl(var(--card))'};
       color: {canProceed ? 'white' : 'var(--text-dim)'};
       cursor: {canProceed ? 'pointer' : 'not-allowed'};
       opacity: {completing ? '0.7' : '1'};

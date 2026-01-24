@@ -35,6 +35,7 @@
   $effect(() => {
     if (!rootPath) return;
 
+    let cancelled = false;
     let stopWatcher: UnwatchFn | null = null;
 
     watchImmediate(
@@ -47,7 +48,12 @@
       { recursive: true }
     )
       .then((unwatch) => {
-        stopWatcher = unwatch;
+        if (cancelled) {
+          // Already unmounted, stop immediately
+          unwatch();
+        } else {
+          stopWatcher = unwatch;
+        }
       })
       .catch((err) => {
         console.error('Failed to start file watcher:', err);
@@ -55,6 +61,7 @@
 
     // Cleanup on rootPath change or unmount
     return () => {
+      cancelled = true;
       stopWatcher?.();
       if (refreshTimeout) clearTimeout(refreshTimeout);
     };
@@ -64,7 +71,7 @@
 <div class="flex flex-col h-full" style="background-color: var(--sidebar);">
   <!-- Header -->
   <div class="p-3 pb-0">
-    <div class="text-xs font-medium text-muted uppercase tracking-[0.5px]">
+    <div class="text-xs font-medium text-muted-foreground uppercase tracking-[0.5px]">
       Explorer
     </div>
   </div>
@@ -72,9 +79,9 @@
   <!-- Tree -->
   <div class="flex-1 overflow-auto pt-2">
     {#if files.loading}
-      <div class="p-3 text-xs text-muted">Loading...</div>
+      <div class="p-3 text-xs text-muted-foreground">Loading...</div>
     {:else if files.tree.length === 0}
-      <div class="p-3 text-xs text-muted">No files</div>
+      <div class="p-3 text-xs text-muted-foreground">No files</div>
     {:else}
       {#each files.tree as item (item.path)}
         <FileTreeItem {item} {rootPath} />
@@ -83,10 +90,7 @@
   </div>
 
   <!-- Footer -->
-  <div
-    class="py-2 px-3 text-xs text-dim"
-    style="border-top: 1px solid var(--border);"
-  >
+  <div class="py-2 px-3 text-xs text-dim border-t border-border">
     <span class="opacity-70">&#8984;&#8679;O</span> Quick open
   </div>
 </div>
