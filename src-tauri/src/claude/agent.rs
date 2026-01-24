@@ -389,4 +389,19 @@ impl AgentSession {
 
         Ok(())
     }
+
+    /// Cleanup the session - abort any running operations and disconnect the client.
+    /// Called when the app is closing to prevent orphaned processes.
+    pub async fn cleanup(&self) {
+        // First, abort any running operations
+        let _ = self.abort().await;
+
+        // Then disconnect the client
+        let mut client_guard = self.client.lock().await;
+        if let Some(mut client) = client_guard.take() {
+            if let Err(e) = client.disconnect().await {
+                eprintln!("[agent] Error disconnecting client during cleanup: {}", e);
+            }
+        }
+    }
 }

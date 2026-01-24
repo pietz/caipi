@@ -12,9 +12,37 @@ pub struct FileEntry {
     pub children: Option<Vec<FileEntry>>,
 }
 
+/// Validates that a path is within the allowed root directory.
+/// Returns the canonicalized path if valid, or an error if the path escapes the root.
+fn validate_path_within_root(path: &str, root_path: &str) -> Result<PathBuf, String> {
+    let requested = PathBuf::from(path);
+    let root = PathBuf::from(root_path);
+
+    // Canonicalize both paths to resolve symlinks and ../
+    let canonical_root = root.canonicalize()
+        .map_err(|e| format!("Failed to resolve root path: {}", e))?;
+    let canonical_requested = requested.canonicalize()
+        .map_err(|e| format!("Failed to resolve requested path: {}", e))?;
+
+    // Check that the requested path starts with the root path
+    if !canonical_requested.starts_with(&canonical_root) {
+        return Err(format!(
+            "Access denied: path '{}' is outside the project folder",
+            path
+        ));
+    }
+
+    Ok(canonical_requested)
+}
+
 #[tauri::command]
-pub async fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
-    let dir_path = PathBuf::from(&path);
+pub async fn list_directory(path: String, root_path: Option<String>) -> Result<Vec<FileEntry>, String> {
+    // If root_path is provided, validate that the requested path is within it
+    let dir_path = if let Some(root) = &root_path {
+        validate_path_within_root(&path, root)?
+    } else {
+        PathBuf::from(&path)
+    };
 
     if !dir_path.exists() {
         return Err("Directory does not exist".to_string());

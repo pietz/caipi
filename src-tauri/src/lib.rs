@@ -6,6 +6,7 @@ use commands::chat::SessionStore;
 use claude::agent::PermissionChannels;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,6 +20,27 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(session_store)
         .manage(permission_channels)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let app_handle = window.app_handle().clone();
+
+                // Spawn cleanup task - we can't block here, but we give it a moment
+                tauri::async_runtime::spawn(async move {
+                    let sessions: tauri::State<'_, SessionStore> = app_handle.state();
+                    let mut store = sessions.lock().await;
+
+                    // Cleanup all sessions
+                    for (id, session) in store.iter() {
+                        eprintln!("[cleanup] Cleaning up session: {}", id);
+                        session.cleanup().await;
+                    }
+
+                    // Clear the store
+                    store.clear();
+                    eprintln!("[cleanup] All sessions cleaned up");
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // Setup commands
             commands::check_cli_status,

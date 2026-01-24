@@ -1,10 +1,9 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { get } from 'svelte/store';
   import { open } from '@tauri-apps/plugin-dialog';
   import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon, CloseIcon } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
-  import { appStore } from '$lib/stores';
+  import { app } from '$lib/stores/app.svelte';
 
   interface Props {
     showClose?: boolean;
@@ -19,18 +18,13 @@
   }
 
   let recentFolders = $state<RecentFolder[]>([]);
-  let loading = $state(false);
   let validating = $state(false);
   let error = $state<string | null>(null);
   let dragOver = $state(false);
   let dropZoneHover = $state(false);
   let hoveredFolder = $state<string | null>(null);
-  let currentTheme = $state<'light' | 'dark'>('dark');
 
-  // Subscribe to resolved theme
-  resolvedTheme.subscribe((theme) => {
-    currentTheme = theme;
-  });
+  const currentTheme = $derived($resolvedTheme);
 
   function toggleTheme() {
     themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
@@ -75,24 +69,10 @@
       // Save to recent folders
       await invoke('save_recent_folder', { path });
 
-      // Update app state
-      appStore.setSelectedFolder(path);
-
-      // Get current settings
-      const { permissionMode, model } = get(appStore);
-
-      // Create a new session with permission mode and model
-      const sessionId = await invoke<string>('create_session', {
-        folderPath: path,
-        permissionMode,
-        model
-      });
-      appStore.setSessionId(sessionId);
-
-      // Navigate to chat
-      appStore.setScreen('chat');
+      // Start session
+      await app.startSession(path);
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to validate folder';
+      error = e instanceof Error ? e.message : 'Failed to start session';
     } finally {
       validating = false;
     }
@@ -140,7 +120,7 @@
   }
 
   function goBackToChat() {
-    appStore.setScreen('chat');
+    app.setScreen('chat');
   }
 
   // Load recent folders on mount
@@ -218,7 +198,7 @@
         Drop a folder here or click to browse
       </p>
       <p class="text-xs text-dim">
-        <span class="opacity-70">⌘O</span> to open folder
+        <span class="opacity-70">&#8984;O</span> to open folder
       </p>
     {/if}
   </button>

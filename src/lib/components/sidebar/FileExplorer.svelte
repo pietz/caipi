@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { watchImmediate, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import FileTreeItem from './FileTreeItem.svelte';
-  import { filesStore, type FileEntry } from '$lib/stores';
+  import { files, type FileEntry } from '$lib/stores/files.svelte';
 
   interface Props {
     rootPath: string;
@@ -12,18 +12,15 @@
 
   let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const tree = $derived($filesStore.tree);
-  const loading = $derived($filesStore.loading);
-
   async function loadDirectory(path: string) {
-    filesStore.setLoading(true);
+    files.setLoading(true);
     try {
-      const entries = await invoke<FileEntry[]>('list_directory', { path });
-      filesStore.setTree(entries);
-      filesStore.setRootPath(path);
+      const entries = await invoke<FileEntry[]>('list_directory', { path, rootPath });
+      files.setTree(entries);
+      files.setRootPath(path);
     } catch (e) {
       console.error('Failed to load directory:', e);
-      filesStore.setError(e instanceof Error ? e.message : 'Failed to load directory');
+      files.setError(e instanceof Error ? e.message : 'Failed to load directory');
     }
   }
 
@@ -74,13 +71,13 @@
 
   <!-- Tree -->
   <div class="flex-1 overflow-auto pt-2">
-    {#if loading}
+    {#if files.loading}
       <div class="p-3 text-xs text-muted">Loading...</div>
-    {:else if tree.length === 0}
+    {:else if files.tree.length === 0}
       <div class="p-3 text-xs text-muted">No files</div>
     {:else}
-      {#each tree as item (item.path)}
-        <FileTreeItem {item} />
+      {#each files.tree as item (item.path)}
+        <FileTreeItem {item} {rootPath} />
       {/each}
     {/if}
   </div>
@@ -90,6 +87,6 @@
     class="py-2 px-3 text-xs text-dim"
     style="border-top: 1px solid var(--border);"
   >
-    <span class="opacity-70">⌘⇧O</span> Quick open
+    <span class="opacity-70">&#8984;&#8679;O</span> Quick open
   </div>
 </div>

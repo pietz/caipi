@@ -4,8 +4,7 @@
   import { onMount } from 'svelte';
   import { CaipiIcon, CheckIcon, FolderIcon, SpinnerIcon, SunIcon, MoonIcon } from '$lib/components/icons';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
-  import { appStore } from '$lib/stores';
-  import { get } from 'svelte/store';
+  import { app } from '$lib/stores/app.svelte';
 
   interface CliInstallStatus {
     installed: boolean;
@@ -19,14 +18,11 @@
   let folderName = $state<string>('');
   let completing = $state(false);
   let error = $state<string | null>(null);
-  let currentTheme = $state<'light' | 'dark'>('dark');
+
+  const currentTheme = $derived($resolvedTheme);
 
   const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
   let copied = $state(false);
-
-  resolvedTheme.subscribe((theme) => {
-    currentTheme = theme;
-  });
 
   function toggleTheme() {
     themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
@@ -34,8 +30,6 @@
 
   onMount(async () => {
     await checkCliStatus();
-    // Suggest Desktop as default folder
-    suggestDesktopFolder();
   });
 
   async function checkCliStatus() {
@@ -48,12 +42,6 @@
     } finally {
       checkingCli = false;
     }
-  }
-
-  function suggestDesktopFolder() {
-    // Get home directory - we'll use a common path pattern
-    const homeDir = '/Users/' + (typeof window !== 'undefined' ? '' : '');
-    // For now, just leave it empty - user will select their preferred folder
   }
 
   async function selectFolder() {
@@ -105,27 +93,15 @@
       await invoke('save_recent_folder', { path: selectedFolder });
 
       // Update app state
-      appStore.setSelectedFolder(selectedFolder);
-      appStore.setCliStatus({
+      app.setCliStatus({
         installed: true,
         version: cliStatus.version,
         authenticated: true,
         path: cliStatus.path,
       });
 
-      // Get current settings
-      const { permissionMode, model } = get(appStore);
-
-      // Create session
-      const sessionId = await invoke<string>('create_session', {
-        folderPath: selectedFolder,
-        permissionMode,
-        model,
-      });
-      appStore.setSessionId(sessionId);
-
-      // Navigate to chat
-      appStore.setScreen('chat');
+      // Start session
+      await app.startSession(selectedFolder);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to complete setup';
     } finally {

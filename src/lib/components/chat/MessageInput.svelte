@@ -1,10 +1,9 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { get } from 'svelte/store';
   import { SendIcon, StopIcon, ShieldIcon, EditIcon, AlertTriangleIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
-  import { chatStore, appStore } from '$lib/stores';
-  import type { PermissionMode, ModelType } from '$lib/stores/app';
+  import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
+  import { chat } from '$lib/stores/chat.svelte';
   import { cn } from '$lib/utils';
 
   interface Props {
@@ -20,19 +19,13 @@
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
   let focused = $state(false);
 
-  const tokenCount = $derived($chatStore.tokenCount);
-  const sessionDuration = $derived($chatStore.sessionDuration);
-  const permissionMode = $derived($appStore.permissionMode);
-  const currentModel = $derived($appStore.model);
-  const sessionId = $derived($appStore.sessionId);
-
   const modeConfig: Record<PermissionMode, { label: string; color: string }> = {
     default: { label: 'Default', color: 'text-blue-400' },
     acceptEdits: { label: 'Edit', color: 'text-purple-400' },
     bypassPermissions: { label: 'Danger', color: 'text-red-400' },
   };
 
-  const modelConfig: Record<ModelType, { label: string }> = {
+  const modelConfig: Record<Model, { label: string }> = {
     opus: { label: 'Opus 4.5' },
     sonnet: { label: 'Sonnet 4.5' },
     haiku: { label: 'Haiku 4.5' },
@@ -40,19 +33,17 @@
 
   function handleModeClick() {
     // Optimistic update - backend will confirm via StateChanged event
-    appStore.cyclePermissionMode();
-    if (sessionId) {
-      const newMode = get(appStore).permissionMode;
-      invoke('set_permission_mode', { sessionId, mode: newMode });
+    app.cyclePermissionMode();
+    if (app.sessionId) {
+      invoke('set_permission_mode', { sessionId: app.sessionId, mode: app.permissionMode });
     }
   }
 
   function handleModelClick() {
     // Optimistic update - backend will confirm via StateChanged event
-    appStore.cycleModel();
-    if (sessionId) {
-      const newModel = get(appStore).model;
-      invoke('set_model', { sessionId, model: newModel });
+    app.cycleModel();
+    if (app.sessionId) {
+      invoke('set_model', { sessionId: app.sessionId, model: app.model });
     }
   }
 
@@ -159,18 +150,18 @@
         onclick={handleModeClick}
         class={cn(
           'flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover',
-          modeConfig[permissionMode].color
+          modeConfig[app.permissionMode].color
         )}
         title="Click to cycle permission mode"
       >
-        {#if permissionMode === 'bypassPermissions'}
+        {#if app.permissionMode === 'bypassPermissions'}
           <AlertTriangleIcon size={12} />
-        {:else if permissionMode === 'acceptEdits'}
+        {:else if app.permissionMode === 'acceptEdits'}
           <EditIcon size={12} />
         {:else}
           <ShieldIcon size={12} />
         {/if}
-        <span>{modeConfig[permissionMode].label}</span>
+        <span>{modeConfig[app.permissionMode].label}</span>
       </button>
       <button
         type="button"
@@ -181,15 +172,15 @@
         <span class="w-[10px] h-[10px] flex items-center justify-center">
           <span
             class="rounded-full bg-current"
-            style="width: {currentModel === 'opus' ? 10 : currentModel === 'sonnet' ? 7 : 5}px; height: {currentModel === 'opus' ? 10 : currentModel === 'sonnet' ? 7 : 5}px;"
+            style="width: {app.model === 'opus' ? 10 : app.model === 'sonnet' ? 7 : 5}px; height: {app.model === 'opus' ? 10 : app.model === 'sonnet' ? 7 : 5}px;"
           ></span>
         </span>
-        <span>{modelConfig[currentModel].label}</span>
+        <span>{modelConfig[app.model].label}</span>
       </button>
     </div>
     <div class="flex gap-4">
-      <span>{formatTokens(tokenCount)} / 200k tokens</span>
-      <span>{formatDuration(sessionDuration)}</span>
+      <span>{formatTokens(chat.tokenCount)} / 200k tokens</span>
+      <span>{formatDuration(chat.sessionDuration)}</span>
     </div>
   </div>
 </div>

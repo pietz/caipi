@@ -1,12 +1,6 @@
 <script lang="ts">
   import { ActivityIcon } from '$lib/components/icons';
-  import { chatStore } from '$lib/stores';
-
-  let activeSkills = $state<string[]>([]);
-
-  chatStore.subscribe((state) => {
-    activeSkills = state.activeSkills;
-  });
+  import { chat } from '$lib/stores/chat.svelte';
 </script>
 
 <div class="p-3">
@@ -14,11 +8,11 @@
     Skills
   </div>
 
-  {#if activeSkills.length === 0}
+  {#if chat.activeSkills.length === 0}
     <div class="text-sm text-dim">No active skills</div>
   {:else}
     <div class="flex flex-col gap-2">
-      {#each activeSkills as skill}
+      {#each chat.activeSkills as skill}
         <div class="skill-item">
           <ActivityIcon size={14} class="text-purple-400" />
           <span>{skill}</span>

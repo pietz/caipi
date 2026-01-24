@@ -1,38 +1,37 @@
 <script lang="ts" module>
-  import type { FileEntry } from '$lib/stores';
+  import type { FileEntry } from '$lib/stores/files.svelte';
 </script>
 
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { FileIcon, ChevronIcon } from '$lib/components/icons';
-  import { filesStore } from '$lib/stores';
+  import { files } from '$lib/stores/files.svelte';
   import { cn } from '$lib/utils';
   import FileTreeItem from './FileTreeItem.svelte';
 
   interface Props {
     item: FileEntry;
+    rootPath: string;
     depth?: number;
   }
 
-  let { item, depth = 0 }: Props = $props();
+  let { item, rootPath, depth = 0 }: Props = $props();
 
   let loadingChildren = $state(false);
   let childrenLoaded = $state(false);
 
-  const expanded = $derived($filesStore.expandedPaths.has(item.path));
-  const selectedPath = $derived($filesStore.selectedPath);
-
   const isFolder = $derived(item.type === 'folder');
-  const isSelected = $derived(selectedPath === item.path);
+  const isSelected = $derived(files.selected === item.path);
   const hasChildren = $derived(item.children && item.children.length > 0);
+  const expanded = $derived(files.expanded.has(item.path));
 
   async function loadChildren() {
     if (childrenLoaded || loadingChildren) return;
 
     loadingChildren = true;
     try {
-      const entries = await invoke<FileEntry[]>('list_directory', { path: item.path });
-      filesStore.updateChildren(item.path, entries);
+      const entries = await invoke<FileEntry[]>('list_directory', { path: item.path, rootPath });
+      files.updateChildren(item.path, entries);
       childrenLoaded = true;
     } catch (e) {
       console.error('Failed to load directory:', e);
@@ -47,9 +46,9 @@
       if (!expanded && !childrenLoaded) {
         await loadChildren();
       }
-      filesStore.toggleExpanded(item.path);
+      files.toggleExpanded(item.path);
     } else {
-      filesStore.setSelectedPath(item.path);
+      files.setSelected(item.path);
     }
   }
 </script>
@@ -87,7 +86,7 @@
         </div>
       {:else if hasChildren}
         {#each item.children as child (child.path)}
-          <FileTreeItem item={child} depth={depth + 1} />
+          <FileTreeItem item={child} {rootPath} depth={depth + 1} />
         {/each}
       {/if}
     </div>

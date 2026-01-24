@@ -16,13 +16,9 @@
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
-  import {
-    appStore,
-    chatStore,
-    createStreamCoordinator,
-    createPermissionCoordinator,
-    type ChatEvent,
-  } from '$lib/stores';
+  import { app } from '$lib/stores/app.svelte';
+  import { chat, type StreamItem } from '$lib/stores/chat.svelte';
+  import { handleClaudeEvent, respondToPermission, resetEventState, type ChatEvent } from '$lib/utils/events';
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
@@ -31,106 +27,105 @@
   // Theme
   const currentTheme = $derived($resolvedTheme);
 
-  // App store values
-  const sessionId = $derived($appStore.sessionId);
-  const folderPath = $derived($appStore.selectedFolder);
-  const leftSidebarOpen = $derived($appStore.leftSidebarOpen);
-  const rightSidebarOpen = $derived($appStore.rightSidebarOpen);
-  const authType = $derived($appStore.authType);
-  const folderName = $derived(folderPath ? folderPath.split('/').pop() || folderPath : '');
-
-  // Chat store values
-  const messages = $derived($chatStore.messages);
-  const streamItems = $derived($chatStore.streamItems);
-  const isStreaming = $derived($chatStore.isStreaming);
-  const pendingPermissions = $derived($chatStore.pendingPermissions);
-
-  // Stream coordinator handles all Claude events
-  const streamCoordinator = createStreamCoordinator({
-    onComplete: processQueuedMessages,
-  });
-
-  // Permission coordinator handles permission interactions
-  const permissionCoordinator = createPermissionCoordinator({
-    getSessionId: () => sessionId,
-    getStreamItems: () => chatStore.getStreamItems(),
-    getPendingPermissions: () => chatStore.getPendingPermissions(),
-  });
-
   onMount(async () => {
-    // Listen for Claude events and delegate to stream coordinator
+    // Listen for Claude events
     unlisten = await listen<ChatEvent>('claude:event', (event) => {
-      streamCoordinator.handleEvent(event.payload);
+      handleClaudeEvent(event.payload, { onComplete: processQueuedMessages });
       scrollToBottom();
     });
 
     // Set up keyboard shortcuts for permission handling
-    cleanupKeyboardShortcuts = permissionCoordinator.setupKeyboardShortcuts();
+    cleanupKeyboardShortcuts = setupKeyboardShortcuts();
   });
 
   onDestroy(() => {
     unlisten?.();
     cleanupKeyboardShortcuts?.();
+    resetEventState();
   });
 
+  function setupKeyboardShortcuts(): () => void {
+    function handleKeydown(e: KeyboardEvent) {
+      const permissionKeys = Object.keys(chat.pendingPermissions);
+      if (permissionKeys.length === 0) return;
+
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        const activeElement = document.activeElement as HTMLTextAreaElement | null;
+        const isTextareaWithContent =
+          activeElement?.tagName === 'TEXTAREA' && activeElement.value.trim().length > 0;
+
+        if (isTextareaWithContent) return;
+
+        e.preventDefault();
+
+        // Find the first pending permission by activity order in streamItems
+        const sortedItems = [...chat.streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex);
+        const firstPendingActivity = sortedItems.find(
+          (item) => item.type === 'tool' && item.activity && chat.pendingPermissions[item.activity.id]
+        );
+
+        if (firstPendingActivity?.activity && app.sessionId) {
+          const permission = chat.pendingPermissions[firstPendingActivity.activity.id];
+          if (permission) {
+            const allowed = e.key === 'Enter';
+            respondToPermission(app.sessionId, permission, allowed);
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }
+
   async function sendMessage(message: string) {
-    if (!sessionId) return;
+    if (!app.sessionId) return;
 
     // Add user message
-    chatStore.addMessage({
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: message,
-      timestamp: Date.now() / 1000,
-    });
+    chat.addUserMessage(message);
 
     // Start streaming
-    chatStore.setStreaming(true);
+    chat.setStreaming(true);
 
     // Scroll to bottom
     scrollToBottom();
 
     try {
       await invoke('send_message', {
-        sessionId,
+        sessionId: app.sessionId,
         message,
       });
     } catch (e) {
       console.error('Failed to send message:', e);
-      chatStore.setStreaming(false);
+      chat.setStreaming(false);
     }
   }
 
   function queueMessage(message: string) {
     // Add to queue
-    chatStore.enqueueMessage(message);
+    chat.enqueueMessage(message);
 
     // Show in UI immediately as user message
-    chatStore.addMessage({
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: message,
-      timestamp: Date.now() / 1000,
-    });
+    chat.addUserMessage(message);
 
     scrollToBottom();
   }
 
   async function processQueuedMessages() {
-    const nextMessage = chatStore.dequeueMessage();
-    if (!nextMessage || !sessionId) return;
+    const nextMessage = chat.dequeueMessage();
+    if (!nextMessage || !app.sessionId) return;
 
     // Keep streaming state active
-    chatStore.setStreaming(true);
+    chat.setStreaming(true);
 
     try {
       await invoke('send_message', {
-        sessionId,
+        sessionId: app.sessionId,
         message: nextMessage,
       });
     } catch (e) {
       console.error('Failed to send queued message:', e);
-      chatStore.setStreaming(false);
+      chat.setStreaming(false);
     }
   }
 
@@ -143,8 +138,9 @@
   }
 
   function goBack() {
-    chatStore.reset();
-    appStore.setScreen('folder');
+    resetEventState();
+    chat.reset();
+    app.setScreen('folder');
   }
 
   function toggleTheme() {
@@ -152,23 +148,33 @@
   }
 
   async function abortSession() {
-    if (!sessionId) return;
+    if (!app.sessionId) return;
 
-    // Clear queue and permissions immediately - user wants to stop
-    // This ensures they're cleared even if Complete arrives before AbortComplete
-    chatStore.clearMessageQueue();
-    chatStore.clearPermissionRequests();
+    // Clear queue and permissions immediately
+    chat.clearMessageQueue();
+    chat.clearPermissionRequests();
 
     try {
-      await invoke('abort_session', { sessionId });
-      // AbortComplete event from backend will handle stream finalization.
+      await invoke('abort_session', { sessionId: app.sessionId });
     } catch (e) {
       console.error('Failed to abort session:', e);
-      // Fallback: finalize locally if the command failed
-      chatStore.finalizeStream();
-      chatStore.setStreaming(false);
+      chat.finalize();
+      chat.setStreaming(false);
     }
   }
+
+  function handlePermissionResponse(activityId: string, allowed: boolean) {
+    if (!app.sessionId) return;
+    const permission = chat.pendingPermissions[activityId];
+    if (permission) {
+      respondToPermission(app.sessionId, permission, allowed);
+    }
+  }
+
+  // Derived values for template
+  const sortedStreamItems = $derived(
+    [...chat.streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex)
+  );
 </script>
 
 <div class="flex flex-col h-full relative">
@@ -182,11 +188,11 @@
       <!-- Left sidebar toggle -->
       <button
         type="button"
-        onclick={() => appStore.toggleLeftSidebar()}
+        onclick={() => app.toggleLeftSidebar()}
         class="p-1 rounded transition-all duration-100"
         style="
-          background-color: {leftSidebarOpen ? 'var(--hover)' : 'transparent'};
-          color: {leftSidebarOpen ? 'var(--text-secondary)' : 'var(--text-dim)'};
+          background-color: {app.leftSidebar ? 'var(--hover)' : 'transparent'};
+          color: {app.leftSidebar ? 'var(--text-secondary)' : 'var(--text-dim)'};
         "
         title="Toggle file explorer"
       >
@@ -213,14 +219,14 @@
       <span class="text-folder flex items-center">
         <FolderIcon size={14} />
       </span>
-      <span class="text-sm font-medium text-primary">{folderName}</span>
+      <span class="text-sm font-medium text-primary">{app.folderName}</span>
     </div>
 
     <div class="flex items-center gap-2">
       <!-- Auth type indicator -->
-      {#if authType}
+      {#if app.authType}
         <span class="text-xs text-dim px-2 py-0.5 rounded" style="background-color: var(--card);">
-          {authType}
+          {app.authType}
         </span>
       {/if}
 
@@ -241,11 +247,11 @@
       <!-- Right sidebar toggle -->
       <button
         type="button"
-        onclick={() => appStore.toggleRightSidebar()}
+        onclick={() => app.toggleRightSidebar()}
         class="p-1 rounded transition-all duration-100"
         style="
-          background-color: {rightSidebarOpen ? 'var(--hover)' : 'transparent'};
-          color: {rightSidebarOpen ? 'var(--text-secondary)' : 'var(--text-dim)'};
+          background-color: {app.rightSidebar ? 'var(--hover)' : 'transparent'};
+          color: {app.rightSidebar ? 'var(--text-secondary)' : 'var(--text-dim)'};
         "
         title="Toggle context panel"
       >
@@ -260,12 +266,12 @@
     <div
       class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
       style="
-        width: {leftSidebarOpen ? '200px' : '0px'};
-        border-right: {leftSidebarOpen ? '1px solid var(--border)' : 'none'};
+        width: {app.leftSidebar ? '200px' : '0px'};
+        border-right: {app.leftSidebar ? '1px solid var(--border)' : 'none'};
       "
     >
-      {#if folderPath}
-        <FileExplorer rootPath={folderPath} />
+      {#if app.folder}
+        <FileExplorer rootPath={app.folder} />
       {/if}
     </div>
 
@@ -276,7 +282,7 @@
         bind:this={messagesContainer}
         class="flex-1 overflow-y-auto p-6"
       >
-        {#if messages.length === 0 && !isStreaming}
+        {#if chat.messages.length === 0 && !chat.isStreaming}
           <!-- Empty State -->
           <div class="flex flex-col items-center justify-center h-full text-dim">
             <div class="mb-3 opacity-50">
@@ -292,14 +298,13 @@
         {:else}
           <!-- Message List -->
           <div class="flex flex-col">
-            {#each messages as message, index (message.id)}
+            {#each chat.messages as message, index (message.id)}
               <ChatMessage {message} showDivider={index > 0} />
             {/each}
 
-            <!-- Stream Items (during streaming) - sorted by insertionIndex for stable ordering -->
-            {#if isStreaming && streamItems.length > 0}
-              {@const sortedItems = [...streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex)}
-              {#each sortedItems as item, index (item.insertionIndex)}
+            <!-- Stream Items (during streaming) -->
+            {#if chat.isStreaming && sortedStreamItems.length > 0}
+              {#each sortedStreamItems as item, index (item.insertionIndex)}
                 {#if item.type === 'text' && item.content}
                   <ChatMessage
                     message={{
@@ -308,15 +313,15 @@
                       content: item.content,
                       timestamp: item.timestamp,
                     }}
-                    streaming={index === sortedItems.length - 1 && item.type === 'text'}
-                    showDivider={messages.length > 0 || index > 0}
+                    streaming={index === sortedStreamItems.length - 1 && item.type === 'text'}
+                    showDivider={chat.messages.length > 0 || index > 0}
                   />
                 {:else if item.type === 'tool' && item.activity}
                   <div class="mt-1">
                     <ActivityCard
                       activity={item.activity}
-                      {pendingPermissions}
-                      onPermissionResponse={(allowed) => permissionCoordinator.respondToPermissionByActivityId(item.activity!.id, allowed)}
+                      pendingPermissions={chat.pendingPermissions}
+                      onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
                     />
                   </div>
                 {/if}
@@ -331,7 +336,7 @@
         onSend={sendMessage}
         onQueue={queueMessage}
         onAbort={abortSession}
-        {isStreaming}
+        isStreaming={chat.isStreaming}
       />
     </div>
 
@@ -339,8 +344,8 @@
     <div
       class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
       style="
-        width: {rightSidebarOpen ? '220px' : '0px'};
-        border-left: {rightSidebarOpen ? '1px solid var(--border)' : 'none'};
+        width: {app.rightSidebar ? '220px' : '0px'};
+        border-left: {app.rightSidebar ? '1px solid var(--border)' : 'none'};
       "
     >
       <ContextPanel />

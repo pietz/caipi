@@ -1,12 +1,11 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { get } from 'svelte/store';
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
   import FolderPicker from '$lib/components/folder/FolderPicker.svelte';
   import ChatContainer from '$lib/components/chat/ChatContainer.svelte';
   import SpinnerIcon from '$lib/components/icons/SpinnerIcon.svelte';
-  import { appStore, currentScreen } from '$lib/stores';
+  import { app } from '$lib/stores/app.svelte';
 
   interface StartupInfo {
     onboarding_completed: boolean;
@@ -20,13 +19,6 @@
     default_folder: string | null;
   }
 
-  let screen = $state<string>('loading');
-
-  // Subscribe to screen changes
-  currentScreen.subscribe((value) => {
-    screen = value;
-  });
-
   onMount(async () => {
     try {
       const startupInfo = await invoke<StartupInfo>('get_startup_info');
@@ -39,50 +31,44 @@
         if (valid) {
           // Set CLI status if available
           if (startupInfo.cli_status) {
-            appStore.setCliStatus(startupInfo.cli_status);
+            app.setCliStatus(startupInfo.cli_status);
           }
 
-          // Set folder and create session
-          appStore.setSelectedFolder(startupInfo.default_folder);
-
-          // Get current settings
-          const { permissionMode, model } = get(appStore);
-
-          // Create session
-          const sessionId = await invoke<string>('create_session', {
-            folderPath: startupInfo.default_folder,
-            permissionMode,
-            model,
-          });
-          appStore.setSessionId(sessionId);
-
-          // Go directly to chat
-          appStore.setScreen('chat');
-          appStore.setLoading(false);
-          return;
+          // Start session directly
+          try {
+            await app.startSession(startupInfo.default_folder);
+            app.setLoading(false);
+            return;
+          } catch (e) {
+            console.error('Failed to start session:', e);
+            // Fall through to folder picker so user can try again
+            app.setScreen('folder');
+            app.setLoading(false);
+            return;
+          }
         }
       }
 
       // Otherwise show onboarding (for first-time users or if CLI isn't installed)
-      appStore.setScreen('onboarding');
-      appStore.setLoading(false);
+      app.setScreen('onboarding');
+      app.setLoading(false);
     } catch (e) {
       console.error('Failed to get startup info:', e);
       // Fallback to onboarding on error
-      appStore.setScreen('onboarding');
-      appStore.setLoading(false);
+      app.setScreen('onboarding');
+      app.setLoading(false);
     }
   });
 </script>
 
-{#if screen === 'loading'}
+{#if app.screen === 'loading'}
   <div class="flex items-center justify-center h-full" data-tauri-drag-region>
     <SpinnerIcon size={24} />
   </div>
-{:else if screen === 'onboarding'}
+{:else if app.screen === 'onboarding'}
   <SetupWizard />
-{:else if screen === 'folder'}
+{:else if app.screen === 'folder'}
   <FolderPicker showClose={true} />
-{:else if screen === 'chat'}
+{:else if app.screen === 'chat'}
   <ChatContainer />
 {/if}

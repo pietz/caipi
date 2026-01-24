@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { chatStore, type TodoItem } from '$lib/stores';
-
-  const todos = $derived($chatStore.todos);
+  import { chat } from '$lib/stores/chat.svelte';
 </script>
 
 <div class="p-3">
@@ -9,11 +7,11 @@
     To-Dos
   </div>
 
-  {#if todos.length === 0}
+  {#if chat.todos.length === 0}
     <div class="text-sm text-dim">No active to-dos</div>
   {:else}
     <div class="todo-list">
-      {#each todos as todo (todo.id)}
+      {#each chat.todos as todo (todo.id)}
         <div class="todo-item" class:done={todo.done}>
           <!-- Checkbox indicator -->
           {#if todo.done}
