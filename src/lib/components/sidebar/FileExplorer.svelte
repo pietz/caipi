@@ -68,16 +68,16 @@
   });
 </script>
 
-<div class="flex flex-col h-full" style="background-color: var(--sidebar);">
+<div class="flex flex-col h-full">
   <!-- Header -->
   <div class="p-3 pb-0">
-    <div class="text-xs font-medium text-muted-foreground uppercase tracking-[0.5px]">
-      Explorer
+    <div class="text-xs uppercase tracking-widest font-semibold mb-3 text-muted-foreground/50">
+      Files
     </div>
   </div>
 
   <!-- Tree -->
-  <div class="flex-1 overflow-auto pt-2">
+  <div class="flex-1 overflow-auto">
     {#if files.loading}
       <div class="p-3 text-xs text-muted-foreground">Loading...</div>
     {:else if files.tree.length === 0}
@@ -87,10 +87,5 @@
         <FileTreeItem {item} {rootPath} />
       {/each}
     {/if}
-  </div>
-
-  <!-- Footer -->
-  <div class="py-2 px-3 text-xs text-dim border-t border-border">
-    <span class="opacity-70">&#8984;&#8679;O</span> Quick open
   </div>
 </div>

@@ -4,9 +4,8 @@
 
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { FileIcon, ChevronIcon } from '$lib/components/icons';
+  import { ChevronDown, ChevronRight, Folder, File } from 'lucide-svelte';
   import { files } from '$lib/stores/files.svelte';
-  import { cn } from '$lib/utils';
   import FileTreeItem from './FileTreeItem.svelte';
 
   interface Props {
@@ -21,7 +20,6 @@
   let childrenLoaded = $state(false);
 
   const isFolder = $derived(item.type === 'folder');
-  const isSelected = $derived(files.selected === item.path);
   const hasChildren = $derived(item.children && item.children.length > 0);
   const expanded = $derived(files.expanded.has(item.path));
 
@@ -57,31 +55,34 @@
   <button
     type="button"
     onclick={handleClick}
-    class={cn(
-      'w-full flex items-center gap-1.5 text-left transition-colors duration-100 rounded-sm my-px py-[3px] pr-2 text-[13px]',
-      isSelected ? 'bg-selected text-primary' : 'text-file hover:bg-hover'
-    )}
-    style="padding-left: {8 + depth * 12}px; width: 100%;"
+    class="flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted/50 transition-colors w-full text-left"
+    style="padding-left: {depth * 12 + 8}px;"
   >
-    <!-- Icon slot: chevron for folders, file icon for files -->
-    <span class={cn('w-4 h-4 flex items-center justify-center flex-shrink-0', isFolder ? 'text-muted-foreground' : 'text-file')}>
+    {#if isFolder}
+      <span class="text-muted-foreground">
+        {#if expanded}
+          <ChevronDown size={12} />
+        {:else}
+          <ChevronRight size={12} />
+        {/if}
+      </span>
+    {:else}
+      <span class="w-3"></span>
+    {/if}
+    <span class="text-muted-foreground">
       {#if isFolder}
-        <ChevronIcon {expanded} size={12} />
+        <Folder size={14} />
       {:else}
-        <FileIcon size={14} />
+        <File size={14} />
       {/if}
     </span>
-
-    <!-- Name with truncation -->
-    <span class={cn('truncate min-w-0', isSelected ? 'text-primary' : isFolder ? 'text-folder' : 'text-selected')}>
-      {item.name}
-    </span>
+    <span class="text-xs text-foreground/80">{item.name}</span>
   </button>
 
   {#if isFolder && expanded}
     <div>
       {#if loadingChildren}
-        <div class="text-xs text-muted-foreground py-1" style="padding-left: {20 + depth * 12}px;">
+        <div class="text-xs text-muted-foreground py-1" style="padding-left: {depth * 12 + 20}px;">
           Loading...
         </div>
       {:else if hasChildren}

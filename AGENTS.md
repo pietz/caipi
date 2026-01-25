@@ -40,15 +40,14 @@ caipi/
 │   ├── lib/
 │   │   ├── assets/               # Static assets (caipi-logo.png)
 │   │   ├── components/
-│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Titlebar, etc.)
-│   │   │   ├── icons/            # SVG icon components (FolderIcon, SendIcon, CaipiIcon, etc.)
-│   │   │   ├── sidebar/          # Sidebars (FileExplorer, ContextPanel, TaskList, SkillsList)
-│   │   │   ├── onboarding/       # Welcome screen with CLI detection
+│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Spinner, Input, Textarea, ContextIndicator, ModelCircle)
+│   │   │   ├── icons/            # Only CaipiIcon.svelte - all other icons use lucide-svelte
+│   │   │   ├── sidebar/          # Sidebars (FileExplorer, FileTreeItem, ContextPanel, TodoList, SkillsList)
+│   │   │   ├── onboarding/       # Welcome screen and SetupWizard with CLI detection
 │   │   │   ├── folder/           # Folder picker with drag-drop
-│   │   │   ├── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard)
-│   │   │   └── permission/       # Permission modal
-│   │   ├── stores/               # Svelte stores (app.ts, chat.ts, files.ts)
-│   │   └── utils/                # Utilities (cn function)
+│   │   │   └── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard, Divider)
+│   │   ├── stores/               # Svelte 5 rune stores (app.svelte.ts, chat.svelte.ts, files.svelte.ts, theme.ts)
+│   │   └── utils/                # Utilities (cn function, events)
 │   ├── routes/                   # SvelteKit routes (+page.svelte, +layout.svelte)
 │   └── app.css                   # Global styles + CSS variables
 ├── src-tauri/                    # Rust backend
@@ -59,7 +58,7 @@ caipi/
 │   │   │   ├── setup.rs          # CLI detection (check_cli_installed, check_cli_authenticated)
 │   │   │   ├── folder.rs         # Folder operations (get_recent_folders, save_recent_folder)
 │   │   │   ├── files.rs          # File operations (list_directory)
-│   │   │   └── chat.rs           # Chat/session management (create_session, send_message)
+│   │   │   └── chat.rs           # Chat/session management (create_session, send_message, set_permission_mode, set_model)
 │   │   ├── claude/               # SDK integration
 │   │   │   ├── agent.rs          # AgentSession wrapper, streaming events
 │   │   │   └── permissions.rs    # Permission translation helpers
@@ -128,9 +127,22 @@ Tiny:            12px  (labels, hints, timestamps, paths)
 - `claude:error` - Error occurred
 
 ### State Management
-- `app.ts` store: Current screen, selected folder, sidebar toggles, settings
-- `chat.ts` store: Messages, tool activities, streaming state, tasks, skills, token count
-- `files.ts` store: File tree state, expanded paths, selected file
+- `app.svelte.ts` store: Current screen, selected folder, sidebar toggles, permission mode, model selection
+- `chat.svelte.ts` store: Messages, tool activities, streaming state, tasks, skills, token count
+- `files.svelte.ts` store: File tree state, expanded paths, selected file
+- `theme.ts`: Theme preferences
+
+### Permission Modes
+Controlled via footer button in chat input. Affects how tool permissions are handled:
+- **Default**: Prompts for Write/Edit/Bash/NotebookEdit
+- **Edit** (acceptEdits): Auto-allows file edits, prompts only for Bash
+- **Danger** (bypassPermissions): Bypasses all permission checks
+
+### Model Selection
+Controlled via footer button in chat input. Available models:
+- **Opus 4.5** (large dot): `claude-opus-4-5-20251101`
+- **Sonnet 4.5** (medium dot): `claude-sonnet-4-5-20250514`
+- **Haiku 4.5** (small dot): `claude-haiku-3-5-20241022`
 
 ## Svelte 5 Runes
 
@@ -149,13 +161,12 @@ This project uses Svelte 5 runes syntax:
 ### Chat Interface
 - Role-based message labels (no avatars)
 - Dividers between messages
-- Input with focus outline feedback
-- Footer with keyboard hints and token/time stats
+- Floating send button inside textarea (icon-only, theme-aware colors)
+- Footer with model selector, permission mode selector, and context indicator
 
 ## Known Issues
 
 1. **Unused Rust code**: `translate_permission`, `translate_bash_command` functions and `AgentError::Session` variant are defined but not yet used
-2. **svelte:self deprecation**: FileTreeItem uses deprecated `<svelte:self>` for recursion (still functional)
 
 ## Tauri Permissions
 

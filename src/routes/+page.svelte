@@ -1,10 +1,10 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { Loader2 } from 'lucide-svelte';
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
   import FolderPicker from '$lib/components/folder/FolderPicker.svelte';
   import ChatContainer from '$lib/components/chat/ChatContainer.svelte';
-  import SpinnerIcon from '$lib/components/icons/SpinnerIcon.svelte';
   import { app } from '$lib/stores/app.svelte';
 
   interface StartupInfo {
@@ -63,7 +63,7 @@
 
 {#if app.screen === 'loading'}
   <div class="flex items-center justify-center h-full" data-tauri-drag-region>
-    <SpinnerIcon size={24} />
+    <Loader2 size={24} class="animate-spin text-muted-foreground" />
   </div>
 {:else if app.screen === 'onboarding'}
   <SetupWizard />

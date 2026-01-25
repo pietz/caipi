@@ -40,15 +40,14 @@ caipi/
 │   ├── lib/
 │   │   ├── assets/               # Static assets (caipi-logo.png)
 │   │   ├── components/
-│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Titlebar, etc.)
-│   │   │   ├── icons/            # SVG icon components (FolderIcon, SendIcon, ShieldIcon, etc.)
-│   │   │   ├── sidebar/          # Sidebars (FileExplorer, ContextPanel, TaskList, SkillsList)
-│   │   │   ├── onboarding/       # Welcome screen with CLI detection
+│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Spinner, Input, Textarea, ContextIndicator, ModelCircle)
+│   │   │   ├── icons/            # Only CaipiIcon.svelte - all other icons use lucide-svelte
+│   │   │   ├── sidebar/          # Sidebars (FileExplorer, FileTreeItem, ContextPanel, TodoList, SkillsList)
+│   │   │   ├── onboarding/       # Welcome screen and SetupWizard with CLI detection
 │   │   │   ├── folder/           # Folder picker with drag-drop
-│   │   │   ├── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard)
-│   │   │   └── permission/       # Permission modal
-│   │   ├── stores/               # Svelte stores (app.ts, chat.ts, files.ts)
-│   │   └── utils/                # Utilities (cn function)
+│   │   │   └── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard, Divider)
+│   │   ├── stores/               # Svelte 5 rune stores (app.svelte.ts, chat.svelte.ts, files.svelte.ts, theme.ts)
+│   │   └── utils/                # Utilities (cn function, events)
 │   ├── routes/                   # SvelteKit routes (+page.svelte, +layout.svelte)
 │   └── app.css                   # Global styles + CSS variables
 ├── src-tauri/                    # Rust backend
@@ -77,38 +76,6 @@ Forest green:    #439c3a   (deeper green tones)
 Acid green:      #a9d80d   (bright lime highlights)
 ```
 
-### UI Colors
-```
-Background:      #0d0d0d
-Sidebar:         rgba(0, 0, 0, 0.2)
-Card:            rgba(255, 255, 255, 0.02)
-Border:          rgba(255, 255, 255, 0.06)
-Hover:           rgba(255, 255, 255, 0.04)
-Selected:        rgba(59, 130, 246, 0.15)
-
-Text primary:    #e5e5e5
-Text secondary:  #a3a3a3
-Text muted:      #737373
-Text dim:        #525252
-Text darkest:    #404040
-
-Accent blue:     #3b82f6
-Folder purple:   #a78bfa
-File gray:       #8b8b8b
-```
-
-### Typography
-```
-Base font:       -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif
-Base size:       14px
-
-Title large:     18px, weight 600  (main headings)
-Title medium:    14px (text-sm), weight 600  (section headers)
-Body:            14px  (message content, inputs, project names)
-Small:           13px  (file tree items, task items)
-Tiny:            12px  (labels, hints, timestamps, paths)
-```
-
 ## Architecture
 
 ### Data Flow
@@ -134,10 +101,9 @@ Tiny:            12px  (labels, hints, timestamps, paths)
 
 ### Permission Modes
 Controlled via footer button in chat input. Affects how tool permissions are handled:
-- **Default** (blue): Prompts for Write/Edit/Bash/NotebookEdit
-- **Edit** (purple): Auto-allows file edits, prompts only for Bash
-- **Plan** (green): Read-only, denies all write operations
-- **Danger** (red): Bypasses all permission checks
+- **Default**: Prompts for Write/Edit/Bash/NotebookEdit
+- **Edit** (acceptEdits): Auto-allows file edits, prompts only for Bash
+- **Danger** (bypassPermissions): Bypasses all permission checks
 
 ### Model Selection
 Controlled via footer button in chat input. Available models:
@@ -162,13 +128,12 @@ This project uses Svelte 5 runes syntax:
 ### Chat Interface
 - Role-based message labels (no avatars)
 - Dividers between messages
-- Input with focus outline feedback
-- Footer with permission mode selector, model selector, and token/time stats
+- Floating send button inside textarea (icon-only, theme-aware colors)
+- Footer with model selector, permission mode selector, and context indicator
 
 ## Known Issues
 
 1. **Unused Rust code**: `translate_permission`, `translate_bash_command` functions and `AgentError::Session` variant are defined but not yet used
-2. **svelte:self deprecation**: FileTreeItem uses deprecated `<svelte:self>` for recursion (still functional)
 
 ## Tauri Permissions
 

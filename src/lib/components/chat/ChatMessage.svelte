@@ -3,17 +3,20 @@
   import DOMPurify from 'dompurify';
   import hljs from 'highlight.js';
   import type { Message } from '$lib/stores';
+  import { HIDDEN_TOOL_TYPES } from './constants';
   import ActivityCard from './ActivityCard.svelte';
+  import Divider from './Divider.svelte';
 
   interface Props {
     message: Message;
-    streaming?: boolean;
-    showDivider?: boolean;
   }
 
-  let { message, streaming = false, showDivider = false }: Props = $props();
+  let { message }: Props = $props();
 
-  const hasActivities = $derived(message.activities && message.activities.length > 0);
+  const visibleActivities = $derived(
+    message.activities?.filter(a => !HIDDEN_TOOL_TYPES.includes(a.toolType)) ?? []
+  );
+  const hasActivities = $derived(visibleActivities.length > 0);
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -32,45 +35,28 @@
   );
 </script>
 
-<div>
-  <!-- Divider between messages -->
-  {#if showDivider}
-    <div class="h-px my-2" style:background-color="rgba(255, 255, 255, 0.04)"></div>
-  {/if}
+{#if isUser}<Divider />{/if}
 
-  <div class="flex flex-col gap-1">
-    <!-- Role label -->
-    <div
-      class="text-xs font-medium uppercase tracking-wide"
-      style:color={isError ? '#ef4444' : 'var(--text-muted)'}
-    >
-      {isUser ? 'You' : isError ? 'Error' : 'Claude'}
-    </div>
-
-    <!-- Message content -->
-    {#if message.content}
-      <div
-        class="message-content text-sm leading-relaxed"
-        class:error-message={isError}
-        style:color={isError ? '#ef4444' : isUser ? 'var(--text-secondary)' : 'var(--text-primary)'}
-      >
-        {#if streaming}
-          {@html htmlContent}
-          <span class="inline-block w-0.5 h-4 bg-foreground animate-pulse ml-0.5"></span>
-        {:else}
-          {@html htmlContent}
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Activities (for completed messages) -->
-    {#if hasActivities}
-      {#each message.activities as activity (activity.id)}
-        <ActivityCard {activity} />
-      {/each}
-    {/if}
+<!-- Message content -->
+{#if message.content}
+  <div
+    class="message-content text-sm leading-relaxed {isUser ? 'text-foreground/70 italic' : isError ? 'text-red-500' : 'text-foreground/90'}"
+    class:error-message={isError}
+  >
+    {@html htmlContent}
   </div>
-</div>
+{/if}
+
+<!-- Activities (for completed messages) -->
+{#if hasActivities}
+  <div class="mt-3">
+    {#each visibleActivities as activity (activity.id)}
+      <ActivityCard {activity} />
+    {/each}
+  </div>
+{/if}
+
+{#if isUser}<Divider />{/if}
 
 <style>
   .error-message {

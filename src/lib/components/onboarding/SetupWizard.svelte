@@ -2,7 +2,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { CaipiIcon, CheckIcon, FolderIcon, SpinnerIcon, SunIcon, MoonIcon } from '$lib/components/icons';
+  import { Check, Folder, Loader2, Sun, Moon, Copy } from 'lucide-svelte';
+  import { CaipiIcon } from '$lib/components/icons';
+  import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
@@ -114,19 +116,19 @@
 
 <div class="flex flex-col items-center justify-center h-full gap-6 pt-12 px-10 pb-10 relative" data-tauri-drag-region>
   <!-- Top right controls -->
-  <div class="absolute top-3 right-4 flex items-center gap-2">
-    <button
-      type="button"
+  <div class="absolute top-3 right-4 flex items-center gap-1">
+    <Button
+      variant="ghost"
+      size="icon"
+      class="h-8 w-8 text-muted-foreground"
       onclick={toggleTheme}
-      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
-      title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {#if currentTheme === 'dark'}
-        <SunIcon size={16} />
+        <Sun size={16} />
       {:else}
-        <MoonIcon size={16} />
+        <Moon size={16} />
       {/if}
-    </button>
+    </Button>
   </div>
 
   <!-- Logo and Title -->
@@ -141,17 +143,15 @@
   </div>
 
   <!-- Setup Card -->
-  <div
-    class="w-[380px] rounded-lg border bg-card p-5"
-  >
+  <div class="w-[380px] rounded-lg border border-border bg-card p-5">
     <!-- CLI Status -->
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-sm font-medium text-foreground">Claude Code CLI</span>
         {#if checkingCli}
-          <SpinnerIcon size={14} />
+          <Loader2 size={14} class="animate-spin text-muted-foreground" />
         {:else if cliStatus?.installed}
-          <span class="text-green-500"><CheckIcon size={14} /></span>
+          <Check size={14} class="text-green-500" />
         {:else}
           <span class="w-2 h-2 rounded-full bg-red-500"></span>
         {/if}
@@ -168,27 +168,22 @@
           Required to use Caipi. Run this in your terminal:
         </p>
         <div class="flex items-center gap-2">
-          <code
-            class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground"
-          >
+          <code class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground">
             {installCommand}
           </code>
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="icon"
+            class="shrink-0 h-8 w-8 {copied ? 'text-green-500' : ''}"
             onclick={copyToClipboard}
-            class="shrink-0 p-2 rounded transition-all duration-150 bg-accent text-muted-foreground hover:bg-accent/80"
-            class:text-primary={copied}
             title="Copy to clipboard"
           >
             {#if copied}
-              <CheckIcon size={14} />
+              <Check size={14} />
             {:else}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
+              <Copy size={14} />
             {/if}
-          </button>
+          </Button>
         </div>
         <button
           type="button"
@@ -214,15 +209,14 @@
         <button
           type="button"
           onclick={selectFolder}
-          class="w-full flex items-center gap-2.5 py-2.5 px-3 rounded-md cursor-pointer transition-colors duration-100 text-left border border-border"
-          style="background: var(--hover);"
+          class="w-full flex items-center gap-2.5 py-2.5 px-3 rounded-md cursor-pointer transition-colors text-left border border-border hover:bg-muted/50"
         >
-          <span class="text-folder">
-            <FolderIcon size={16} />
+          <span class="text-muted-foreground">
+            <Folder size={16} />
           </span>
           <div class="flex-1 min-w-0">
             <div class="text-sm text-foreground truncate">{folderName}</div>
-            <div class="text-xs text-dim truncate">{selectedFolder}</div>
+            <div class="text-xs text-muted-foreground/70 truncate">{selectedFolder}</div>
           </div>
           <span class="text-xs text-muted-foreground">Change</span>
         </button>
@@ -230,13 +224,9 @@
         <button
           type="button"
           onclick={selectFolder}
-          class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-md cursor-pointer transition-colors duration-100"
-          style="
-            border: 1px dashed var(--border-hover);
-            background: transparent;
-          "
+          class="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-md cursor-pointer transition-colors border border-dashed border-border hover:border-muted-foreground hover:bg-muted/50"
         >
-          <FolderIcon size={16} />
+          <Folder size={16} class="text-muted-foreground" />
           <span class="text-sm text-muted-foreground">Select a folder</span>
         </button>
       {/if}
@@ -248,34 +238,27 @@
   </div>
 
   <!-- Get Started Button -->
-  <button
-    type="button"
+  <Button
     onclick={completeSetup}
     disabled={!canProceed}
-    class="px-6 py-2.5 rounded-md text-sm font-medium transition-all duration-150"
-    style="
-      background: {canProceed ? 'var(--accent-blue)' : 'hsl(var(--card))'};
-      color: {canProceed ? 'white' : 'var(--text-dim)'};
-      cursor: {canProceed ? 'pointer' : 'not-allowed'};
-      opacity: {completing ? '0.7' : '1'};
-    "
+    class="px-6"
   >
     {#if completing}
       <span class="flex items-center gap-2">
-        <SpinnerIcon size={14} />
+        <Loader2 size={14} class="animate-spin" />
         Setting up...
       </span>
     {:else}
       Get Started
     {/if}
-  </button>
+  </Button>
 
   {#if !cliStatus?.installed && !checkingCli}
-    <p class="text-xs text-dim">
+    <p class="text-xs text-muted-foreground/50">
       Install Claude Code CLI to continue
     </p>
   {:else if !selectedFolder}
-    <p class="text-xs text-dim">
+    <p class="text-xs text-muted-foreground/50">
       Select a folder to continue
     </p>
   {/if}

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { FolderIcon, SpinnerIcon, SunIcon, MoonIcon, CloseIcon } from '$lib/components/icons';
+  import { Folder, Loader2, Sun, Moon, X } from 'lucide-svelte';
+  import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
@@ -131,113 +132,106 @@
 
 <div class="flex flex-col items-center justify-center h-full pt-12 px-8 pb-8 relative" data-tauri-drag-region>
   <!-- Top right controls -->
-  <div class="absolute top-3 right-4 flex items-center gap-2">
-    <button
-      type="button"
+  <div class="absolute top-3 right-4 flex items-center gap-1">
+    <Button
+      variant="ghost"
+      size="icon"
+      class="h-8 w-8 text-muted-foreground"
       onclick={toggleTheme}
-      class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
-      title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {#if currentTheme === 'dark'}
-        <SunIcon size={16} />
+        <Sun size={16} />
       {:else}
-        <MoonIcon size={16} />
+        <Moon size={16} />
       {/if}
-    </button>
+    </Button>
     {#if showClose}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 text-muted-foreground"
         onclick={goBackToChat}
-        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
-        title="Back to chat"
       >
-        <CloseIcon size={16} />
-      </button>
+        <X size={16} />
+      </Button>
     {:else}
-      <span class="text-xs text-darkest">v0.1.0</span>
+      <span class="text-xs text-muted-foreground/50 ml-2">v0.1.0</span>
     {/if}
   </div>
 
   <div class="w-full max-w-lg">
-  <!-- Header -->
-  <div class="mb-6">
-    <h2 class="text-sm font-semibold text-foreground mb-1">
-      Open a Project
-    </h2>
-    <p class="text-xs text-muted-foreground">
-      Select a folder to start working with Claude
-    </p>
-  </div>
-
-  <!-- Drop Zone -->
-  <button
-    type="button"
-    ondragover={handleDragOver}
-    ondragleave={handleDragLeave}
-    ondrop={handleDrop}
-    onclick={selectFolder}
-    onmouseenter={() => dropZoneHover = true}
-    onmouseleave={() => dropZoneHover = false}
-    class="w-full rounded-lg p-8 flex flex-col items-center cursor-pointer mb-6 transition-all duration-150"
-    style="
-      border: 1px dashed {dragOver ? 'var(--accent-blue)' : dropZoneHover ? 'var(--text-dim)' : 'var(--border-hover)'};
-      background-color: {dragOver ? 'rgba(59, 130, 246, 0.05)' : dropZoneHover ? 'var(--hover)' : 'transparent'};
-    "
-    disabled={validating}
-  >
-    {#if validating}
-      <div class="text-dim mb-2">
-        <SpinnerIcon size={32} />
-      </div>
-      <p class="text-xs text-muted-foreground">Validating folder...</p>
-    {:else}
-      <div class="text-dim mb-2">
-        <FolderIcon size={32} />
-      </div>
-      <p class="text-xs text-muted-foreground mb-1">
-        Drop a folder here or click to browse
+    <!-- Header -->
+    <div class="mb-6">
+      <h2 class="text-sm font-semibold text-foreground mb-1">
+        Open a Project
+      </h2>
+      <p class="text-xs text-muted-foreground">
+        Select a folder to start working with Claude
       </p>
-      <p class="text-xs text-dim">
-        <span class="opacity-70">&#8984;O</span> to open folder
-      </p>
-    {/if}
-  </button>
-
-  {#if error}
-    <div class="text-xs text-red-500 text-center mb-4">{error}</div>
-  {/if}
-
-  <!-- Recent Projects -->
-  {#if recentFolders.length > 0}
-    <div>
-      <div class="text-xs font-medium text-dim uppercase tracking-[0.5px] mb-2">
-        Recent Projects
-      </div>
-      <div class="flex flex-col gap-0.5">
-        {#each recentFolders as folder}
-          <button
-            type="button"
-            class="flex items-center justify-between py-2.5 px-3 rounded-md cursor-pointer transition-colors duration-100 text-left w-full"
-            style="background-color: {hoveredFolder === folder.path ? 'var(--hover)' : 'transparent'};"
-            onmouseenter={() => hoveredFolder = folder.path}
-            onmouseleave={() => hoveredFolder = null}
-            onclick={() => validateAndProceed(folder.path)}
-            disabled={validating}
-          >
-            <div class="flex items-center gap-2.5">
-              <span class="text-folder">
-                <FolderIcon size={16} />
-              </span>
-              <div>
-                <div class="text-sm text-foreground">{folder.name}</div>
-                <div class="text-xs text-dim">{folder.path}</div>
-              </div>
-            </div>
-            <span class="text-xs text-dim">{formatTime(folder.timestamp)}</span>
-          </button>
-        {/each}
-      </div>
     </div>
-  {/if}
+
+    <!-- Drop Zone -->
+    <button
+      type="button"
+      ondragover={handleDragOver}
+      ondragleave={handleDragLeave}
+      ondrop={handleDrop}
+      onclick={selectFolder}
+      onmouseenter={() => dropZoneHover = true}
+      onmouseleave={() => dropZoneHover = false}
+      class="w-full rounded-lg p-8 flex flex-col items-center cursor-pointer mb-6 transition-all duration-150 border border-dashed {dragOver ? 'border-primary bg-primary/5' : dropZoneHover ? 'border-muted-foreground bg-muted/50' : 'border-border'}"
+      disabled={validating}
+    >
+      {#if validating}
+        <div class="text-muted-foreground mb-2">
+          <Loader2 size={32} class="animate-spin" />
+        </div>
+        <p class="text-xs text-muted-foreground">Validating folder...</p>
+      {:else}
+        <div class="text-muted-foreground mb-2">
+          <Folder size={32} />
+        </div>
+        <p class="text-xs text-muted-foreground mb-1">
+          Drop a folder here or click to browse
+        </p>
+        <p class="text-xs text-muted-foreground/50">
+          <span class="opacity-70">&#8984;O</span> to open folder
+        </p>
+      {/if}
+    </button>
+
+    {#if error}
+      <div class="text-xs text-red-500 text-center mb-4">{error}</div>
+    {/if}
+
+    <!-- Recent Projects -->
+    {#if recentFolders.length > 0}
+      <div>
+        <div class="text-xs uppercase tracking-widest font-semibold mb-3 text-muted-foreground/50">
+          Recent Projects
+        </div>
+        <div class="flex flex-col gap-0.5">
+          {#each recentFolders as folder}
+            <button
+              type="button"
+              class="flex items-center justify-between py-2.5 px-3 rounded-md cursor-pointer transition-colors text-left w-full hover:bg-muted/50"
+              onclick={() => validateAndProceed(folder.path)}
+              disabled={validating}
+            >
+              <div class="flex items-center gap-2.5">
+                <span class="text-muted-foreground">
+                  <Folder size={16} />
+                </span>
+                <div>
+                  <div class="text-sm text-foreground">{folder.name}</div>
+                  <div class="text-xs text-muted-foreground/70">{folder.path}</div>
+                </div>
+              </div>
+              <span class="text-xs text-muted-foreground/50">{formatTime(folder.timestamp)}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
   </div>
 </div>

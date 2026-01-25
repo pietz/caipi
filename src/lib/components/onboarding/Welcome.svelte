@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { CaipiIcon, CheckIcon } from '$lib/components/icons';
+  import { Check, Copy } from 'lucide-svelte';
+  import { CaipiIcon } from '$lib/components/icons';
+  import { Button } from '$lib/components/ui';
 
   const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
   let copied = $state(false);
@@ -30,9 +32,7 @@
   </div>
 
   <!-- Install Instructions Card -->
-  <div
-    class="w-[340px] rounded-lg border bg-card p-5"
-  >
+  <div class="w-[340px] rounded-lg border border-border bg-card p-5">
     <div class="text-sm font-medium text-foreground mb-3">
       Claude Code CLI Required
     </div>
@@ -42,27 +42,22 @@
     </p>
 
     <div class="flex items-center gap-2">
-      <code
-        class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground"
-      >
+      <code class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground">
         {installCommand}
       </code>
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="icon"
+        class="shrink-0 h-8 w-8 {copied ? 'text-green-500' : ''}"
         onclick={copyToClipboard}
-        class="shrink-0 p-2 rounded transition-all duration-150 bg-accent text-muted-foreground hover:bg-accent/80"
-        class:text-primary={copied}
         title="Copy to clipboard"
       >
         {#if copied}
-          <CheckIcon size={14} />
+          <Check size={14} />
         {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
+          <Copy size={14} />
         {/if}
-      </button>
+      </Button>
     </div>
 
     <p class="text-xs text-muted-foreground mt-4">

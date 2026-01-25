@@ -50,6 +50,10 @@ pub enum ChatEvent {
         permission_mode: String,
         model: String,
     },
+    TokenUsage {
+        #[serde(rename = "totalTokens")]
+        total_tokens: u64,
+    },
     Complete,
     #[serde(rename = "AbortComplete")]
     AbortComplete {
@@ -115,6 +119,9 @@ pub async fn send_message(
             }
             AgentEvent::ToolEnd { id, status } => ChatEvent::ToolEnd { id, status },
             AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
+            AgentEvent::TokenUsage { total_tokens } => {
+                ChatEvent::TokenUsage { total_tokens }
+            }
             AgentEvent::Complete => ChatEvent::Complete,
             AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
         };

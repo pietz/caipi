@@ -33,6 +33,7 @@ pub enum AgentEvent {
     #[allow(dead_code)]  // Emitted directly from PostToolUse hook now
     ToolEnd { id: String, status: String },
     SessionInit { auth_type: String },
+    TokenUsage { total_tokens: u64 },
     Complete,
     Error(String),
 }
@@ -261,6 +262,14 @@ impl AgentSession {
                                             if interrupt_sent {
                                                 continue;
                                             }
+
+                                            // Extract token usage from assistant message (per API call, not cumulative)
+                                            if let Some(usage) = &assistant_msg.message.usage {
+                                                let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                on_event(AgentEvent::TokenUsage { total_tokens: input + cache_read });
+                                            }
+
                                             for block in assistant_msg.message.content.iter() {
                                                 match block {
                                                     ContentBlock::Text(text_block) => {
@@ -289,7 +298,10 @@ impl AgentSession {
                                                 }
                                             }
                                         }
-                                        Message::Result(_) => {
+                                        Message::Result(result) => {
+                                            // Note: Token usage is now extracted from Assistant messages
+                                            // (per API call) rather than Result (which is cumulative)
+                                            let _ = result; // silence unused warning
                                             // Turn properly concluded
                                             if !was_aborted {
                                                 on_event(AgentEvent::Complete);

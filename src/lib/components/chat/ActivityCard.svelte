@@ -1,12 +1,11 @@
 <script lang="ts">
   import {
-    FileText,
+    Eye,
     Pencil,
     Search,
     Terminal,
     Check,
-    CircleAlert,
-    Loader,
+    Loader2,
     X,
     Globe,
     Download,
@@ -14,7 +13,6 @@
     MessageCircle,
     ListTodo,
     BookOpen,
-    Square,
   } from 'lucide-svelte';
   import type { ToolActivity, PermissionRequest } from '$lib/stores';
 
@@ -34,69 +32,76 @@
     pendingPermissions[activity.id] !== undefined
   );
 
-  const toolIcons: Record<string, typeof FileText> = {
-    Read: FileText,
-    Write: Pencil,
-    Edit: Pencil,
-    Glob: Search,
-    Grep: Search,
-    Bash: Terminal,
-    WebSearch: Globe,
-    WebFetch: Download,
-    Skill: Sparkles,
-    Task: ListTodo,
-    AskUserQuestion: MessageCircle,
-    NotebookEdit: BookOpen,
+  // Tool configurations with icons and colors
+  type ToolConfig = {
+    icon: typeof Eye;
+    className: string;
+    label: string;
   };
 
-  const ToolIcon = $derived(toolIcons[activity.toolType] ?? Terminal);
+  const toolConfigs: Record<string, ToolConfig> = {
+    // Read operations - blue
+    Read: { icon: Eye, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'view' },
+    Glob: { icon: Search, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'glob' },
+    Grep: { icon: Search, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'grep' },
+    WebFetch: { icon: Download, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'fetch' },
+
+    // Write operations - amber
+    Write: { icon: Pencil, className: 'bg-amber-500/10 border-amber-500/20 text-amber-500', label: 'create' },
+    Edit: { icon: Pencil, className: 'bg-amber-500/10 border-amber-500/20 text-amber-500', label: 'edit' },
+    NotebookEdit: { icon: BookOpen, className: 'bg-amber-500/10 border-amber-500/20 text-amber-500', label: 'notebook' },
+
+    // Terminal operations - purple
+    Bash: { icon: Terminal, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'bash' },
+
+    // Search/web operations - emerald
+    WebSearch: { icon: Globe, className: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500', label: 'search' },
+
+    // Other operations
+    Skill: { icon: Sparkles, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'skill' },
+    Task: { icon: ListTodo, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'task' },
+    AskUserQuestion: { icon: MessageCircle, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'ask' },
+  };
+
+  const defaultConfig: ToolConfig = {
+    icon: Terminal,
+    className: 'bg-purple-500/10 border-purple-500/20 text-purple-500',
+    label: 'tool'
+  };
+
+  const config = $derived(toolConfigs[activity.toolType] ?? defaultConfig);
+  const ToolIcon = $derived(config.icon);
 </script>
 
-<div
-  class="flex items-center gap-2 p-2 rounded-md text-sm transition-colors"
-  style:background-color={isAwaitingPermission ? 'rgba(234, 179, 8, 0.1)' : 'hsl(var(--muted))'}
-  style:border="1px solid {isAwaitingPermission ? 'rgba(234, 179, 8, 0.4)' : 'var(--border-hover)'}"
->
-  <!-- Tool Icon -->
-  <ToolIcon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
-
-  <!-- Target -->
-  <span class="flex-1 min-w-0 truncate text-muted-foreground">
-    {activity.target}
-  </span>
-
-  <!-- Status Icon -->
-  <div class="w-4 h-4 flex-shrink-0">
-    {#if !isAwaitingPermission && activity.status === 'running'}
-      <Loader class="w-4 h-4 animate-spin text-muted-foreground" />
-    {:else if !isAwaitingPermission && activity.status === 'completed'}
-      <Check class="w-4 h-4 text-green-500" />
-    {:else if !isAwaitingPermission && activity.status === 'error'}
-      <CircleAlert class="w-4 h-4 text-destructive" />
-    {:else if !isAwaitingPermission && activity.status === 'aborted'}
-      <Square class="w-4 h-4 text-orange-500" />
-    {/if}
+<div class="flex items-center justify-between rounded-lg border px-3 h-10 my-2 {config.className}">
+  <div class="flex items-center gap-2 min-w-0">
+    <ToolIcon size={14} />
+    <span class="text-xs font-medium uppercase tracking-wide opacity-70">{config.label}</span>
+    <span class="text-xs text-muted-foreground truncate">{activity.target}</span>
   </div>
 
-  <!-- Permission Buttons -->
-  {#if isAwaitingPermission && onPermissionResponse}
-    <div class="flex items-center gap-1">
+  <div class="flex items-center gap-1.5 h-6">
+    {#if activity.status === 'completed' && !isAwaitingPermission}
+      <Check size={14} class="text-green-500" />
+    {:else if activity.status === 'running' && !isAwaitingPermission}
+      <Loader2 size={14} class="animate-spin" />
+    {:else if isAwaitingPermission && onPermissionResponse}
       <button
         type="button"
+        class="h-6 w-6 rounded-md flex items-center justify-center bg-green-500/15 hover:bg-green-500/25 text-green-500 transition-colors"
         onclick={() => onPermissionResponse(true)}
-        class="w-7 h-7 flex items-center justify-center rounded bg-green-500/20 hover:bg-green-500/30 text-green-500 transition-colors"
         title="Allow (Enter)"
       >
-        <Check class="w-4 h-4" />
+        <Check size={14} />
       </button>
       <button
         type="button"
+        class="h-6 w-6 rounded-md flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-500 transition-colors"
         onclick={() => onPermissionResponse(false)}
-        class="w-7 h-7 flex items-center justify-center rounded bg-red-500/20 hover:bg-red-500/30 text-red-500 transition-colors"
         title="Deny (Esc)"
       >
-        <X class="w-4 h-4" />
+        <X size={14} />
       </button>
-    </div>
-  {/if}
+    {/if}
+  </div>
 </div>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { SendIcon, StopIcon, ShieldIcon, EditIcon, AlertTriangleIcon } from '$lib/components/icons';
-  import { Button } from '$lib/components/ui';
+  import { Shield, Pencil, AlertTriangle, ArrowUp, Square } from 'lucide-svelte';
+  import { Button, ContextIndicator, ModelCircle } from '$lib/components/ui';
   import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { cn } from '$lib/utils';
@@ -14,22 +14,24 @@
     placeholder?: string;
   }
 
-  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude something...' }: Props = $props();
+  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude anything...' }: Props = $props();
   let value = $state('');
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
-  let focused = $state(false);
 
-  const modeConfig: Record<PermissionMode, { label: string; color: string }> = {
-    default: { label: 'Default', color: 'text-blue-400' },
-    acceptEdits: { label: 'Edit', color: 'text-purple-400' },
-    bypassPermissions: { label: 'Danger', color: 'text-red-400' },
+  const modeConfig: Record<PermissionMode, { label: string; icon: typeof Shield; danger?: boolean }> = {
+    default: { label: 'Default', icon: Shield },
+    acceptEdits: { label: 'Edit', icon: Pencil },
+    bypassPermissions: { label: 'Danger', icon: AlertTriangle, danger: true },
   };
 
-  const modelConfig: Record<Model, { label: string }> = {
-    opus: { label: 'Opus 4.5' },
-    sonnet: { label: 'Sonnet 4.5' },
-    haiku: { label: 'Haiku 4.5' },
+  const modelConfig: Record<Model, { label: string; size: 'large' | 'medium' | 'small' }> = {
+    opus: { label: 'Opus 4.5', size: 'large' },
+    sonnet: { label: 'Sonnet 4.5', size: 'medium' },
+    haiku: { label: 'Haiku 4.5', size: 'small' },
   };
+
+  // Calculate context percentage (200k token limit)
+  const contextPercentage = $derived(Math.round((chat.tokenCount / 200000) * 100));
 
   function handleModeClick() {
     // Optimistic update - backend will confirm via StateChanged event
@@ -80,107 +82,71 @@
     target.style.height = Math.min(target.scrollHeight, 200) + 'px';
   }
 
-  function formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}m ${secs}s`;
-  }
-
-  function formatTokens(count: number): string {
-    if (count >= 1000) {
-      return `${(count / 1000).toFixed(1)}k`;
-    }
-    return count.toString();
-  }
-
   const hasContent = $derived(value.trim().length > 0);
+  const currentMode = $derived(modeConfig[app.permissionMode]);
+  const currentModel = $derived(modelConfig[app.model]);
+  const ModeIcon = $derived(currentMode.icon);
 </script>
 
-<div class="p-2 border-t border-border bg-header">
-  <!-- Input wrapper -->
-  <div
-    class={cn(
-      'flex items-center gap-2 rounded-lg p-2 transition-colors duration-150 bg-background border',
-      focused ? 'border-ring' : 'border-input'
-    )}
-  >
-    <textarea
-      bind:this={textareaRef}
-      bind:value
-      onkeydown={handleKeydown}
-      oninput={handleInput}
-      onfocus={() => focused = true}
-      onblur={() => focused = false}
-      {placeholder}
-      rows={1}
-      class="flex-1 bg-transparent border-none outline-none resize-none text-sm text-foreground leading-normal p-0 m-0 align-middle max-h-[200px] overflow-y-auto"
-    ></textarea>
+<div class="border-t border-border p-4">
+  <div class="max-w-3xl mx-auto">
+    <div class="bg-card rounded-xl border border-border overflow-hidden shadow-lg">
+      <!-- Textarea with floating send button -->
+      <div class="relative">
+        <textarea
+          bind:this={textareaRef}
+          bind:value
+          onkeydown={handleKeydown}
+          oninput={handleInput}
+          {placeholder}
+          rows={2}
+          class="w-full p-4 pr-16 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground"
+        ></textarea>
 
-    {#if isStreaming && !hasContent}
-      <!-- Streaming with no content: show stop button -->
-      <Button
-        variant="destructive"
-        size="sm"
-        onclick={onAbort}
-        class="shrink-0 p-2"
-        title="Stop generation"
-      >
-        <StopIcon size={14} />
-      </Button>
-    {:else}
-      <!-- Not streaming, or streaming with content: show send button -->
-      <Button
-        variant={hasContent ? 'default' : 'secondary'}
-        size="sm"
-        onclick={handleSubmit}
-        disabled={!hasContent}
-        class="shrink-0 p-2"
-        title={isStreaming ? 'Queue message' : 'Send message'}
-      >
-        <SendIcon size={14} />
-      </Button>
-    {/if}
-  </div>
+        <!-- Floating Send/Stop Button -->
+        <Button
+          variant="ghost"
+          class="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 p-0 rounded-lg bg-foreground text-background hover:bg-foreground disabled:opacity-100 disabled:bg-foreground/50"
+          disabled={!hasContent && !isStreaming}
+          onclick={isStreaming && !hasContent ? onAbort : handleSubmit}
+        >
+          {#if isStreaming && !hasContent}
+            <Square class="w-5 h-5" />
+          {:else}
+            <ArrowUp class="w-5 h-5" />
+          {/if}
+        </Button>
+      </div>
 
-  <!-- Footer row with mode/model selectors and stats -->
-  <div class="flex justify-between items-center mt-2 text-xs text-darkest">
-    <div class="flex items-center gap-1">
-      <button
-        type="button"
-        onclick={handleModeClick}
-        class={cn(
-          'flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover',
-          modeConfig[app.permissionMode].color
-        )}
-        title="Click to cycle permission mode"
-      >
-        {#if app.permissionMode === 'bypassPermissions'}
-          <AlertTriangleIcon size={12} />
-        {:else if app.permissionMode === 'acceptEdits'}
-          <EditIcon size={12} />
-        {:else}
-          <ShieldIcon size={12} />
-        {/if}
-        <span>{modeConfig[app.permissionMode].label}</span>
-      </button>
-      <button
-        type="button"
-        onclick={handleModelClick}
-        class="flex items-center gap-1.5 px-2 py-1 rounded transition-colors duration-100 hover:bg-hover text-muted-foreground hover:text-foreground"
-        title="Click to cycle model"
-      >
-        <span class="w-[10px] h-[10px] flex items-center justify-center">
-          <span
-            class="rounded-full bg-current"
-            style="width: {app.model === 'opus' ? 10 : app.model === 'sonnet' ? 7 : 5}px; height: {app.model === 'opus' ? 10 : app.model === 'sonnet' ? 7 : 5}px;"
-          ></span>
-        </span>
-        <span>{modelConfig[app.model].label}</span>
-      </button>
-    </div>
-    <div class="flex gap-4">
-      <span>{formatTokens(chat.tokenCount)} / 200k tokens</span>
-      <span>{formatDuration(chat.sessionDuration)}</span>
+      <!-- Footer -->
+      <div class="flex items-center px-4 py-2 border-t border-border">
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            class="w-28 justify-start gap-2 h-8 text-xs"
+            onclick={handleModelClick}
+          >
+            <ModelCircle size={currentModel.size} />
+            {currentModel.label}
+          </Button>
+
+          <Button
+            variant={currentMode.danger ? 'destructive' : 'outline'}
+            size="sm"
+            class={cn(
+              'w-24 justify-start gap-2 h-8 text-xs',
+              currentMode.danger && 'bg-red-500/10 border-red-500/30 text-red-500 hover:bg-red-500/20 hover:text-red-500'
+            )}
+            onclick={handleModeClick}
+          >
+            <ModeIcon size={14} />
+            {currentMode.label}
+          </Button>
+
+          <ContextIndicator percentage={contextPercentage} />
+        </div>
+      </div>
     </div>
   </div>
 </div>

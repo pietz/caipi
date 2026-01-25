@@ -2,19 +2,16 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
-  import {
-    FolderIcon,
-    MenuIcon,
-    SidebarLeftIcon,
-    SidebarRightIcon,
-    CaipiIcon,
-    SunIcon,
-    MoonIcon,
-  } from '$lib/components/icons';
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
+  import { PanelLeft, PanelRight, Sun, Moon, Home } from 'lucide-svelte';
+  import { CaipiIcon } from '$lib/components/icons';
+  import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
   import MessageInput from './MessageInput.svelte';
+  import { HIDDEN_TOOL_TYPES } from './constants';
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import { app } from '$lib/stores/app.svelte';
   import { chat, type StreamItem } from '$lib/stores/chat.svelte';
@@ -173,89 +170,66 @@
 
   // Derived values for template
   const sortedStreamItems = $derived(
-    [...chat.streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex)
+    [...chat.streamItems]
+      .filter(item => !(item.type === 'tool' && item.activity && HIDDEN_TOOL_TYPES.includes(item.activity.toolType)))
+      .sort((a, b) => a.insertionIndex - b.insertionIndex)
   );
 </script>
 
 <div class="flex flex-col h-full relative">
-  <!-- Header - Full width at top -->
+  <!-- Titlebar -->
   <div
-    class="py-2 px-3 flex items-center justify-between shrink-0 border-b border-border bg-header"
+    class="h-9 flex items-center justify-between px-4 border-b border-border shrink-0"
     data-tauri-drag-region
   >
-    <div class="flex items-center gap-2 pl-[70px]">
-      <!-- Left sidebar toggle -->
-      <button
-        type="button"
+    <!-- Left - Window Controls Space + Sidebar Toggle + Home -->
+    <div class="flex items-center gap-1">
+      <div class="w-[52px]"></div>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 text-muted-foreground"
         onclick={() => app.toggleLeftSidebar()}
-        class="p-1 rounded transition-all duration-100"
-        style="
-          background-color: {app.leftSidebar ? 'var(--hover)' : 'transparent'};
-          color: {app.leftSidebar ? 'var(--text-secondary)' : 'var(--text-dim)'};
-        "
-        title="Toggle file explorer"
       >
-        <SidebarLeftIcon size={16} />
-      </button>
-
-      <!-- Open project button -->
-      <button
-        type="button"
+        <PanelLeft size={14} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 text-muted-foreground"
         onclick={goBack}
-        class="p-1 rounded transition-all duration-100 text-muted-foreground hover:bg-hover hover:text-foreground"
-        title="Open project"
       >
-        <MenuIcon size={16} />
-      </button>
-
-      <!-- Separator -->
-      <div
-        class="w-px h-4 mx-1"
-        style="background-color: var(--border-hover);"
-      ></div>
-
-      <!-- Project info -->
-      <span class="text-folder flex items-center">
-        <FolderIcon size={14} />
-      </span>
-      <span class="text-sm font-medium text-foreground">{app.folderName}</span>
+        <Home size={14} />
+      </Button>
     </div>
 
-    <div class="flex items-center gap-2">
-      <!-- Auth type indicator -->
-      {#if app.authType}
-        <span class="text-xs text-dim px-2 py-0.5 rounded bg-card">
-          {app.authType}
-        </span>
-      {/if}
+    <!-- Center - Project Name -->
+    <div class="flex items-center">
+      <span class="text-sm font-medium">{app.folderName}</span>
+    </div>
 
-      <!-- Theme toggle -->
-      <button
-        type="button"
+    <!-- Right - Controls -->
+    <div class="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 text-muted-foreground"
         onclick={toggleTheme}
-        class="p-1 rounded transition-all duration-100 text-dim hover:bg-hover hover:text-foreground"
-        title={currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {#if currentTheme === 'dark'}
-          <SunIcon size={16} />
+          <Sun size={14} />
         {:else}
-          <MoonIcon size={16} />
+          <Moon size={14} />
         {/if}
-      </button>
-
-      <!-- Right sidebar toggle -->
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 text-muted-foreground"
         onclick={() => app.toggleRightSidebar()}
-        class="p-1 rounded transition-all duration-100"
-        style="
-          background-color: {app.rightSidebar ? 'var(--hover)' : 'transparent'};
-          color: {app.rightSidebar ? 'var(--text-secondary)' : 'var(--text-dim)'};
-        "
-        title="Toggle context panel"
       >
-        <SidebarRightIcon size={16} />
-      </button>
+        <PanelRight size={14} />
+      </Button>
     </div>
   </div>
 
@@ -263,11 +237,8 @@
   <div class="flex flex-1 min-h-0">
     <!-- Left Sidebar - File Explorer -->
     <div
-      class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
-      style="
-        width: {app.leftSidebar ? '200px' : '0px'};
-        border-right: {app.leftSidebar ? '1px solid hsl(var(--border))' : 'none'};
-      "
+      class="shrink-0 overflow-hidden transition-all duration-200 border-r border-border bg-muted/50"
+      style="width: {app.leftSidebar ? '224px' : '0px'};"
     >
       {#if app.folder}
         <FileExplorer rootPath={app.folder} />
@@ -279,52 +250,49 @@
       <!-- Messages -->
       <div
         bind:this={messagesContainer}
-        class="flex-1 overflow-y-auto p-6"
+        class="flex-1 overflow-y-auto"
       >
         {#if chat.messages.length === 0 && !chat.isStreaming}
           <!-- Empty State -->
-          <div class="flex flex-col items-center justify-center h-full text-dim">
+          <div class="flex flex-col items-center justify-center h-full text-muted-foreground">
             <div class="mb-3 opacity-50">
               <CaipiIcon size={64} />
             </div>
-            <p class="text-sm mb-1 text-muted-foreground">
+            <p class="text-sm mb-1">
               Start a conversation
             </p>
-            <p class="text-xs">
+            <p class="text-xs text-muted-foreground/70">
               Ask Claude to help with your code
             </p>
           </div>
         {:else}
           <!-- Message List -->
-          <div class="flex flex-col">
-            {#each chat.messages as message, index (message.id)}
-              <ChatMessage {message} showDivider={index > 0} />
+          <div class="max-w-3xl mx-auto px-6 py-4">
+            {#each chat.messages as message (message.id)}
+              <ChatMessage {message} />
             {/each}
 
             <!-- Stream Items (during streaming) -->
             {#if chat.isStreaming && sortedStreamItems.length > 0}
-              {#each sortedStreamItems as item, index (item.insertionIndex)}
-                {#if item.type === 'text' && item.content}
-                  <ChatMessage
-                    message={{
-                      id: item.id,
-                      role: 'assistant',
-                      content: item.content,
-                      timestamp: item.timestamp,
-                    }}
-                    streaming={index === sortedStreamItems.length - 1 && item.type === 'text'}
-                    showDivider={chat.messages.length > 0 || index > 0}
-                  />
-                {:else if item.type === 'tool' && item.activity}
-                  <div class="mt-1">
-                    <ActivityCard
-                      activity={item.activity}
-                      pendingPermissions={chat.pendingPermissions}
-                      onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
-                    />
-                  </div>
-                {/if}
-              {/each}
+              <div>
+                {#each sortedStreamItems as item, index (item.insertionIndex)}
+                  {#if item.type === 'text' && item.content}
+                    <div
+                      class="message-content text-sm leading-relaxed text-foreground/90"
+                    >
+                      {@html item.content ? DOMPurify.sanitize(marked.parse(item.content) as string) : ''}
+                    </div>
+                  {:else if item.type === 'tool' && item.activity}
+                    <div class="mt-2">
+                      <ActivityCard
+                        activity={item.activity}
+                        pendingPermissions={chat.pendingPermissions}
+                        onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
+                      />
+                    </div>
+                  {/if}
+                {/each}
+              </div>
             {/if}
           </div>
         {/if}
@@ -341,14 +309,10 @@
 
     <!-- Right Sidebar - Context Panel -->
     <div
-      class="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
-      style="
-        width: {app.rightSidebar ? '220px' : '0px'};
-        border-left: {app.rightSidebar ? '1px solid hsl(var(--border))' : 'none'};
-      "
+      class="shrink-0 overflow-hidden transition-all duration-200 border-l border-border bg-muted/50"
+      style="width: {app.rightSidebar ? '224px' : '0px'};"
     >
       <ContextPanel />
     </div>
   </div>
-
 </div>

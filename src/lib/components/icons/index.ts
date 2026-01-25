@@ -1,24 +1,5 @@
-// Icon components matching mockup exactly
-export { default as ActivityIcon } from './ActivityIcon.svelte';
-export { default as FolderIcon } from './FolderIcon.svelte';
-export { default as FileIcon } from './FileIcon.svelte';
-export { default as ChevronIcon } from './ChevronIcon.svelte';
-export { default as CheckIcon } from './CheckIcon.svelte';
-export { default as SpinnerIcon } from './SpinnerIcon.svelte';
-export { default as SendIcon } from './SendIcon.svelte';
-export { default as SidebarLeftIcon } from './SidebarLeftIcon.svelte';
-export { default as SidebarRightIcon } from './SidebarRightIcon.svelte';
-export { default as BackIcon } from './BackIcon.svelte';
-export { default as HomeIcon } from './HomeIcon.svelte';
-export { default as MenuIcon } from './MenuIcon.svelte';
-export { default as CloseIcon } from './CloseIcon.svelte';
-export { default as TerminalIcon } from './TerminalIcon.svelte';
-export { default as SkillIcon } from './SkillIcon.svelte';
+// Brand icon (kept as custom component)
 export { default as CaipiIcon } from './CaipiIcon.svelte';
-export { default as StopIcon } from './StopIcon.svelte';
-export { default as SunIcon } from './SunIcon.svelte';
-export { default as MoonIcon } from './MoonIcon.svelte';
-export { default as ShieldIcon } from './ShieldIcon.svelte';
-export { default as AlertTriangleIcon } from './AlertTriangleIcon.svelte';
-export { default as EditIcon } from './EditIcon.svelte';
-export { default as ClipboardIcon } from './ClipboardIcon.svelte';
+
+// Note: All other icons have been replaced with lucide-svelte
+// Usage: import { IconName } from 'lucide-svelte';

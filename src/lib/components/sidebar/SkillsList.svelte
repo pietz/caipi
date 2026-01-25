@@ -1,33 +1,26 @@
 <script lang="ts">
-  import { ActivityIcon } from '$lib/components/icons';
+  import { BookOpen } from 'lucide-svelte';
   import { chat } from '$lib/stores/chat.svelte';
 </script>
 
-<div class="p-3">
-  <div class="text-xs font-medium text-muted-foreground uppercase tracking-[0.5px] mb-2.5">
-    Skills
+<div class="p-3 pb-0">
+  <div class="text-xs uppercase tracking-widest font-semibold mb-3 text-muted-foreground/50">
+    Active Skills
   </div>
-
+</div>
+<div class="flex-1 overflow-y-auto px-3 pb-3">
   {#if chat.activeSkills.length === 0}
-    <div class="text-sm text-dim">No active skills</div>
+    <div class="text-xs text-muted-foreground">No active skills</div>
   {:else}
-    <div class="flex flex-col gap-2">
+    <div class="space-y-2">
       {#each chat.activeSkills as skill}
-        <div class="skill-item">
-          <ActivityIcon size={14} class="text-purple-400" />
-          <span>{skill}</span>
+        <div class="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+          <BookOpen size={14} class="text-blue-500" />
+          <div class="min-w-0">
+            <div class="text-xs font-medium text-foreground/80">{skill}</div>
+          </div>
         </div>
       {/each}
     </div>
   {/if}
 </div>
-
-<style>
-  .skill-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-</style>

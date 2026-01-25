@@ -16,6 +16,7 @@ export interface ChatEvent {
   authType?: string;
   permissionMode?: string;
   model?: string;
+  totalTokens?: number;
 }
 
 export interface EventHandlerOptions {
@@ -62,6 +63,10 @@ export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions
 
     case 'StateChanged':
       handleStateChangedEvent(event);
+      break;
+
+    case 'TokenUsage':
+      handleTokenUsageEvent(event);
       break;
 
     case 'Error':
@@ -250,6 +255,12 @@ function handleStateChangedEvent(event: ChatEvent) {
       event.permissionMode as PermissionMode,
       event.model as Model
     );
+  }
+}
+
+function handleTokenUsageEvent(event: ChatEvent) {
+  if (event.totalTokens !== undefined) {
+    chat.tokenCount = event.totalTokens;
   }
 }
 
