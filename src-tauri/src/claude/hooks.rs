@@ -11,11 +11,13 @@ use claude_agent_sdk_rs::{
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use super::agent::PermissionResponse;
+use super::tool_utils::truncate_str;
 
 /// Type alias for permission channels - maps request ID to response sender
 pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
@@ -50,6 +52,103 @@ pub fn deny_response(reason: &str) -> HookJsonOutput {
         )),
         ..Default::default()
     })
+}
+
+// ============================================================================
+// Tool Target Extraction
+// ============================================================================
+
+/// Extract the target (file path, pattern, etc.) from tool name + input for display
+fn extract_tool_target(tool_name: &str, tool_input: &serde_json::Value) -> String {
+    match tool_name {
+        "Read" | "Write" | "Edit" => {
+            tool_input.get("file_path")
+                .or_else(|| tool_input.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        }
+        "Glob" => {
+            tool_input.get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("*")
+                .to_string()
+        }
+        "Grep" => {
+            tool_input.get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("...")
+                .to_string()
+        }
+        "Bash" => {
+            tool_input.get("command")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "command".to_string())
+        }
+        "WebSearch" => {
+            tool_input.get("query")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "searching...".to_string())
+        }
+        "WebFetch" => {
+            tool_input.get("url")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "fetching...".to_string())
+        }
+        "Skill" => {
+            tool_input.get("skill")
+                .and_then(|v| v.as_str())
+                .unwrap_or("skill")
+                .to_string()
+        }
+        "Task" => {
+            tool_input.get("description")
+                .or_else(|| tool_input.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "task".to_string())
+        }
+        "AskUserQuestion" => "asking question...".to_string(),
+        "NotebookEdit" => {
+            tool_input.get("notebook_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("notebook")
+                .to_string()
+        }
+        "TaskCreate" => {
+            tool_input.get("subject")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_str(s, 50))
+                .unwrap_or_else(|| "new task".to_string())
+        }
+        "TaskUpdate" => {
+            tool_input.get("taskId")
+                .and_then(|v| v.as_str())
+                .map(|id| format!("task {}", truncate_str(id, 20)))
+                .unwrap_or_else(|| "task".to_string())
+        }
+        "TaskList" | "TaskGet" => "tasks".to_string(),
+        "TodoWrite" => {
+            tool_input.get("todos")
+                .and_then(|v| v.as_array())
+                .map(|arr| format!("{} todo(s)", arr.len()))
+                .unwrap_or_else(|| "todos".to_string())
+        }
+        "TodoRead" => "reading todos".to_string(),
+        _ => {
+            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
+            for field in fields {
+                if let Some(val) = tool_input.get(field).and_then(|v| v.as_str()) {
+                    let detail = truncate_str(val, 40);
+                    return format!("{}: {}", tool_name, detail);
+                }
+            }
+            tool_name.to_string()
+        }
+    }
 }
 
 // ============================================================================
@@ -91,52 +190,70 @@ pub fn requires_permission(tool_name: &str) -> bool {
     matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit" | "Skill")
 }
 
-/// Build a human-readable description for the permission prompt
-pub fn build_permission_description(tool_name: &str, tool_input: &serde_json::Value) -> String {
-    match tool_name {
-        "Write" | "Edit" => {
-            tool_input.get("file_path")
-                .and_then(|v| v.as_str())
-                .map(|p| format!("Modify file: {}", p))
-                .unwrap_or_else(|| format!("Use tool: {}", tool_name))
-        }
-        "Bash" => {
-            tool_input.get("command")
-                .and_then(|v| v.as_str())
-                .map(|cmd| {
-                    if cmd.len() > 80 {
-                        format!("Run command: {}...", &cmd[..77])
-                    } else {
-                        format!("Run command: {}", cmd)
-                    }
-                })
-                .unwrap_or_else(|| "Run bash command".to_string())
-        }
-        "Skill" => {
-            tool_input.get("skill")
-                .and_then(|v| v.as_str())
-                .map(|s| format!("Load skill: {}", s))
-                .unwrap_or_else(|| "Load skill".to_string())
-        }
-        _ => format!("Use tool: {}", tool_name),
-    }
-}
-
 // ============================================================================
 // Permission Prompting
 // ============================================================================
+
+/// Outcome of waiting for permission
+enum PermissionOutcome {
+    Allowed,
+    Denied,
+    Cancelled,
+    Timeout,
+    Aborted,
+}
+
+/// Wait for permission response with abort and timeout support
+async fn wait_for_permission(
+    rx: oneshot::Receiver<PermissionResponse>,
+    abort_notify: Arc<Notify>,
+    abort_flag: Arc<AtomicBool>,
+) -> PermissionOutcome {
+    // Check abort flag before entering select! to avoid missing notifications
+    // (Notify doesn't buffer, so if abort happened just before we call notified(), we'd miss it)
+    if abort_flag.load(Ordering::SeqCst) {
+        return PermissionOutcome::Aborted;
+    }
+
+    let timeout = tokio::time::sleep(Duration::from_secs(60));
+    tokio::pin!(timeout);
+    tokio::pin!(rx);
+
+    tokio::select! {
+        response = &mut rx => {
+            match response {
+                Ok(r) if r.allowed => PermissionOutcome::Allowed,
+                Ok(_) => PermissionOutcome::Denied,
+                Err(_) => PermissionOutcome::Cancelled,
+            }
+        }
+        _ = &mut timeout => {
+            PermissionOutcome::Timeout
+        }
+        _ = abort_notify.notified() => {
+            // Double-check the flag in case of spurious wake
+            if abort_flag.load(Ordering::SeqCst) {
+                PermissionOutcome::Aborted
+            } else {
+                // Spurious wake, but we can't easily retry in select!
+                // This is unlikely with Notify, so just treat as abort
+                PermissionOutcome::Aborted
+            }
+        }
+    }
+}
 
 /// Prompt the user for permission and await their response
 pub async fn prompt_user_permission(
     permission_channels: PermissionChannels,
     app_handle: AppHandle,
-    session_id: String,
-    tool_name: String,
-    tool_use_id: Option<String>,
-    description: String,
+    _session_id: String,
+    tool_use_id: String,
+    request_id: String,
+    abort_notify: Arc<Notify>,
+    abort_flag: Arc<AtomicBool>,
 ) -> HookJsonOutput {
     let (tx, rx) = oneshot::channel();
-    let request_id = Uuid::new_v4().to_string();
 
     // Store sender in the global permission channels
     {
@@ -144,21 +261,38 @@ pub async fn prompt_user_permission(
         channels.insert(request_id.clone(), tx);
     }
 
-    // Emit permission request event to frontend
-    let _ = app_handle.emit("claude:event", &ChatEvent::PermissionRequest {
-        id: request_id,
-        session_id,
-        tool: tool_name,
-        tool_use_id,
-        description,
+    // Emit status update: awaiting_permission
+    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+        tool_use_id: tool_use_id.clone(),
+        status: "awaiting_permission".to_string(),
+        permission_request_id: Some(request_id.clone()),
     });
 
-    // Await user response
-    match rx.await {
-        Ok(response) if response.allowed => allow_response("User approved"),
-        Ok(_) => deny_response("User denied"),
-        Err(_) => deny_response("Permission request cancelled"),
+    // Wait for permission response
+    let outcome = wait_for_permission(rx, abort_notify, abort_flag).await;
+
+    // Cleanup channel entry
+    {
+        let mut channels = permission_channels.lock().await;
+        channels.remove(&request_id);
     }
+
+    // Emit status update based on outcome
+    let (status, result) = match outcome {
+        PermissionOutcome::Allowed => ("running", allow_response("User approved")),
+        PermissionOutcome::Denied => ("denied", deny_response("User denied")),
+        PermissionOutcome::Cancelled => ("denied", deny_response("Permission request cancelled")),
+        PermissionOutcome::Timeout => ("denied", deny_response("Permission request timed out")),
+        PermissionOutcome::Aborted => ("denied", deny_response("Session aborted")),
+    };
+
+    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+        tool_use_id,
+        status: status.to_string(),
+        permission_request_id: None,
+    });
+
+    result
 }
 
 // ============================================================================
@@ -172,6 +306,7 @@ pub fn build_pre_tool_use_hook(
     session_id: String,
     permission_mode_arc: Arc<RwLock<String>>,
     abort_flag: Arc<AtomicBool>,
+    abort_notify: Arc<Notify>,
 ) -> HookCallback {
     Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
         let permission_channels = permission_channels.clone();
@@ -179,6 +314,7 @@ pub fn build_pre_tool_use_hook(
         let session_id = session_id.clone();
         let permission_mode_arc = permission_mode_arc.clone();
         let abort_flag = abort_flag.clone();
+        let abort_notify = abort_notify.clone();
 
         Box::pin(async move {
             // 1. Check if abort was requested
@@ -192,26 +328,59 @@ pub fn build_pre_tool_use_hook(
                 None => return HookJsonOutput::Sync(SyncHookJsonOutput::default()),
             };
 
-            // 3. Check permission mode for auto-decisions
+            // Get tool_use_id or generate a fallback (should always have one from SDK)
+            let tool_id = tool_use_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+            // 3. Emit ToolStart with pending status
+            // Include input for task/todo tools so frontend can update task list
+            let input_for_frontend = if tool_name.starts_with("Task") || tool_name.starts_with("Todo") {
+                Some(tool_input.clone())
+            } else {
+                None
+            };
+            let target = extract_tool_target(&tool_name, &tool_input);
+
+            let _ = app_handle.emit("claude:event", &ChatEvent::ToolStart {
+                tool_use_id: tool_id.clone(),
+                tool_type: tool_name.clone(),
+                target,
+                status: "pending".to_string(),
+                input: input_for_frontend,
+            });
+
+            // 4. Check permission mode for auto-decisions
             let current_mode = permission_mode_arc.read().await.clone();
             if let Some(decision) = check_mode_decision(&current_mode, &tool_name) {
+                // Emit status update: running (auto-approved)
+                let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_id,
+                    status: "running".to_string(),
+                    permission_request_id: None,
+                });
                 return decision;
             }
 
-            // 4. Check if this tool requires permission prompting
+            // 5. Check if this tool requires permission prompting
             if !requires_permission(&tool_name) {
+                // Emit status update: running (no permission needed)
+                let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_id,
+                    status: "running".to_string(),
+                    permission_request_id: None,
+                });
                 return allow_response("Read-only operation");
             }
 
-            // 5. Build description and prompt user
-            let description = build_permission_description(&tool_name, &tool_input);
+            // 6. Prompt user for permission
+            let request_id = Uuid::new_v4().to_string();
             prompt_user_permission(
                 permission_channels,
                 app_handle,
                 session_id,
-                tool_name,
-                tool_use_id,
-                description,
+                tool_id,
+                request_id,
+                abort_notify,
+                abort_flag,
             ).await
         })
     })
@@ -253,6 +422,7 @@ pub fn build_hooks(
     session_id: String,
     permission_mode_arc: Arc<RwLock<String>>,
     abort_flag: Arc<AtomicBool>,
+    abort_notify: Arc<Notify>,
 ) -> HashMap<HookEvent, Vec<HookMatcher>> {
     let pre_tool_use_hook = build_pre_tool_use_hook(
         permission_channels,
@@ -260,6 +430,7 @@ pub fn build_hooks(
         session_id,
         permission_mode_arc,
         abort_flag,
+        abort_notify,
     );
 
     let post_tool_use_hook = build_post_tool_use_hook(app_handle);
@@ -284,6 +455,7 @@ pub fn build_hooks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_requires_permission() {
@@ -296,24 +468,248 @@ mod tests {
         assert!(!requires_permission("Glob"));
     }
 
+    // ============================================================================
+    // check_mode_decision tests
+    // ============================================================================
+
     #[test]
-    fn test_build_permission_description() {
-        let file_input = serde_json::json!({"file_path": "/test/file.rs"});
-        assert_eq!(
-            build_permission_description("Edit", &file_input),
-            "Modify file: /test/file.rs"
-        );
+    fn test_check_mode_decision_bypass() {
+        // bypassPermissions mode returns allow for any tool
+        let result = check_mode_decision("bypassPermissions", "Write");
+        assert!(result.is_some());
 
-        let bash_input = serde_json::json!({"command": "ls -la"});
-        assert_eq!(
-            build_permission_description("Bash", &bash_input),
-            "Run command: ls -la"
-        );
+        let result = check_mode_decision("bypassPermissions", "Bash");
+        assert!(result.is_some());
 
-        let skill_input = serde_json::json!({"skill": "email"});
-        assert_eq!(
-            build_permission_description("Skill", &skill_input),
-            "Load skill: email"
-        );
+        let result = check_mode_decision("bypassPermissions", "Read");
+        assert!(result.is_some());
     }
+
+    #[test]
+    fn test_check_mode_decision_accept_edits_non_bash() {
+        // acceptEdits mode returns allow for Write/Edit/etc (not Bash)
+        let result = check_mode_decision("acceptEdits", "Write");
+        assert!(result.is_some());
+
+        let result = check_mode_decision("acceptEdits", "Edit");
+        assert!(result.is_some());
+
+        let result = check_mode_decision("acceptEdits", "NotebookEdit");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_check_mode_decision_accept_edits_bash() {
+        // acceptEdits mode returns None for Bash (requires prompt)
+        let result = check_mode_decision("acceptEdits", "Bash");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_check_mode_decision_default() {
+        // default mode returns None (always prompt)
+        let result = check_mode_decision("default", "Write");
+        assert!(result.is_none());
+
+        let result = check_mode_decision("default", "Bash");
+        assert!(result.is_none());
+
+        let result = check_mode_decision("default", "Read");
+        assert!(result.is_none());
+    }
+
+    // ============================================================================
+    // extract_tool_target tests
+    // ============================================================================
+
+    #[test]
+    fn test_extract_tool_target_read() {
+        // Read tool extracts file_path
+        let input = json!({
+            "file_path": "/path/to/file.rs"
+        });
+        let result = extract_tool_target("Read", &input);
+        assert_eq!(result, "/path/to/file.rs");
+    }
+
+    #[test]
+    fn test_extract_tool_target_bash() {
+        // Bash tool extracts and truncates command
+        let short_cmd = json!({
+            "command": "ls -la"
+        });
+        let result = extract_tool_target("Bash", &short_cmd);
+        assert_eq!(result, "ls -la");
+
+        // Test truncation (should truncate at 50 chars)
+        let long_cmd = json!({
+            "command": "this is a very long command that should be truncated because it exceeds the limit"
+        });
+        let result = extract_tool_target("Bash", &long_cmd);
+        assert!(result.len() <= 53); // 50 + "..."
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_extract_tool_target_glob() {
+        // Glob tool extracts pattern
+        let input = json!({
+            "pattern": "**/*.rs"
+        });
+        let result = extract_tool_target("Glob", &input);
+        assert_eq!(result, "**/*.rs");
+    }
+
+    #[test]
+    fn test_extract_tool_target_unknown() {
+        // Unknown tool tries common fields then falls back to name
+        let input_with_field = json!({
+            "file_path": "/some/path.txt"
+        });
+        let result = extract_tool_target("CustomTool", &input_with_field);
+        assert_eq!(result, "CustomTool: /some/path.txt");
+
+        // No common fields - falls back to tool name
+        let input_no_field = json!({
+            "custom_param": "value"
+        });
+        let result = extract_tool_target("CustomTool", &input_no_field);
+        assert_eq!(result, "CustomTool");
+    }
+
+    #[test]
+    fn test_extract_tool_target_write() {
+        // Write tool extracts file_path
+        let input = json!({
+            "file_path": "/output/data.json",
+            "content": "some content"
+        });
+        let result = extract_tool_target("Write", &input);
+        assert_eq!(result, "/output/data.json");
+    }
+
+    #[test]
+    fn test_extract_tool_target_edit() {
+        // Edit tool extracts file_path
+        let input = json!({
+            "file_path": "/src/main.rs",
+            "old_string": "old",
+            "new_string": "new"
+        });
+        let result = extract_tool_target("Edit", &input);
+        assert_eq!(result, "/src/main.rs");
+    }
+
+    #[test]
+    fn test_extract_tool_target_grep() {
+        // Grep tool extracts pattern
+        let input = json!({
+            "pattern": "fn main"
+        });
+        let result = extract_tool_target("Grep", &input);
+        assert_eq!(result, "fn main");
+    }
+
+    #[test]
+    fn test_extract_tool_target_web_search() {
+        // WebSearch tool extracts query
+        let input = json!({
+            "query": "rust async programming"
+        });
+        let result = extract_tool_target("WebSearch", &input);
+        assert_eq!(result, "rust async programming");
+    }
+
+    #[test]
+    fn test_extract_tool_target_skill() {
+        // Skill tool extracts skill name
+        let input = json!({
+            "skill": "commit",
+            "args": "-m 'message'"
+        });
+        let result = extract_tool_target("Skill", &input);
+        assert_eq!(result, "commit");
+    }
+
+    #[test]
+    fn test_extract_tool_target_notebook_edit() {
+        // NotebookEdit tool extracts notebook_path
+        let input = json!({
+            "notebook_path": "/notebooks/analysis.ipynb",
+            "new_source": "print('hello')"
+        });
+        let result = extract_tool_target("NotebookEdit", &input);
+        assert_eq!(result, "/notebooks/analysis.ipynb");
+    }
+
+    // ============================================================================
+    // check_abort_decision tests
+    // ============================================================================
+
+    #[test]
+    fn test_check_abort_decision_not_aborted() {
+        // Returns None when flag is false
+        let abort_flag = Arc::new(AtomicBool::new(false));
+        let result = check_abort_decision(&abort_flag);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_check_abort_decision_aborted() {
+        // Returns deny when flag is true
+        let abort_flag = Arc::new(AtomicBool::new(true));
+        let result = check_abort_decision(&abort_flag);
+        assert!(result.is_some());
+
+        // Verify it's a deny response by checking the structure
+        if let Some(HookJsonOutput::Sync(sync_output)) = result {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+                assert_eq!(pre_tool.permission_decision, Some("deny".to_string()));
+                assert!(pre_tool.permission_decision_reason.is_some());
+            } else {
+                panic!("Expected PreToolUse hook specific output");
+            }
+        } else {
+            panic!("Expected Sync hook output");
+        }
+    }
+
+    // ============================================================================
+    // Response builder tests
+    // ============================================================================
+
+    #[test]
+    fn test_allow_response() {
+        let result = allow_response("Test reason");
+
+        if let HookJsonOutput::Sync(sync_output) = result {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+                assert_eq!(pre_tool.permission_decision, Some("allow".to_string()));
+                assert_eq!(pre_tool.permission_decision_reason, Some("Test reason".to_string()));
+                assert!(pre_tool.updated_input.is_none());
+            } else {
+                panic!("Expected PreToolUse hook specific output");
+            }
+        } else {
+            panic!("Expected Sync hook output");
+        }
+    }
+
+    #[test]
+    fn test_deny_response() {
+        let result = deny_response("Test denial");
+
+        if let HookJsonOutput::Sync(sync_output) = result {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+                assert_eq!(pre_tool.permission_decision, Some("deny".to_string()));
+                assert_eq!(pre_tool.permission_decision_reason, Some("Test denial".to_string()));
+                assert!(pre_tool.updated_input.is_none());
+            } else {
+                panic!("Expected PreToolUse hook specific output");
+            }
+        } else {
+            panic!("Expected Sync hook output");
+        }
+    }
+
 }

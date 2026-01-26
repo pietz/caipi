@@ -1,12 +1,16 @@
 // Chat state store using Svelte 5 runes
 
-export interface ToolActivity {
-  id: string;
+export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted';
+
+export interface ToolState {
+  id: string;  // tool_use_id - the canonical identifier
   toolType: string;
   target: string;
-  status: 'running' | 'completed' | 'error' | 'aborted';
-  timestamp: number;
+  status: ToolStatus;
+  permissionRequestId?: string;
   input?: Record<string, unknown>;
+  timestamp: number;
+  insertionIndex: number;
 }
 
 export interface Message {
@@ -14,24 +18,16 @@ export interface Message {
   role: 'user' | 'assistant' | 'error';
   content: string;
   timestamp: number;
-  activities?: ToolActivity[];
+  tools?: ToolState[];
 }
 
 export interface StreamItem {
   id: string;
   type: 'text' | 'tool';
   content?: string;
-  activity?: ToolActivity;
+  toolId?: string;  // Reference to tool in tools Map
   timestamp: number;
   insertionIndex: number;
-}
-
-export interface PermissionRequest {
-  id: string;
-  activityId: string | null;
-  tool: string;
-  description: string;
-  timestamp: number;
 }
 
 export interface TodoItem {
@@ -50,8 +46,8 @@ class ChatState {
   streamItems = $state<StreamItem[]>([]);
   private streamItemCounter = $state(0);
 
-  // Permissions (keyed by activityId)
-  pendingPermissions = $state<Record<string, PermissionRequest>>({});
+  // Tools (keyed by tool_use_id)
+  tools = $state<Map<string, ToolState>>(new Map());
 
   // Message queue (for sending while streaming)
   messageQueue = $state<string[]>([]);
@@ -96,6 +92,7 @@ class ChatState {
       // Ending stream - clear streaming state
       this.streamItems = [];
       this.streamItemCounter = 0;
+      this.tools = new Map();
     }
   }
 
@@ -122,30 +119,69 @@ class ChatState {
     }
   }
 
-  addActivity(activity: ToolActivity) {
-    const streamItem: StreamItem = {
-      id: `stream-tool-${activity.id}`,
-      type: 'tool',
-      activity,
-      timestamp: activity.timestamp,
+  // --- Tool methods ---
+
+  addTool(tool: Omit<ToolState, 'insertionIndex'>) {
+    const toolState: ToolState = {
+      ...tool,
       insertionIndex: this.streamItemCounter,
     };
-    this.streamItems = [...this.streamItems, streamItem];
+
+    // Add to tools map
+    const newTools = new Map(this.tools);
+    newTools.set(tool.id, toolState);
+    this.tools = newTools;
+
+    // Add stream item reference
+    this.streamItems = [...this.streamItems, {
+      id: `stream-tool-${tool.id}`,
+      type: 'tool',
+      toolId: tool.id,
+      timestamp: tool.timestamp,
+      insertionIndex: this.streamItemCounter,
+    }];
     this.streamItemCounter++;
   }
 
-  updateActivityStatus(id: string, status: ToolActivity['status']) {
-    this.streamItems = this.streamItems.map(item =>
-      item.type === 'tool' && item.activity?.id === id
-        ? { ...item, activity: { ...item.activity!, status } }
-        : item
-    );
+  updateToolStatus(id: string, status: ToolStatus, extras?: { permissionRequestId?: string | null }) {
+    const tool = this.tools.get(id);
+    if (!tool) return;
+
+    const newTools = new Map(this.tools);
+    const updatedTool = { ...tool, status };
+
+    // Handle permissionRequestId: set if provided, clear if explicitly null, keep if undefined
+    if (extras?.permissionRequestId !== undefined) {
+      if (extras.permissionRequestId === null) {
+        delete updatedTool.permissionRequestId;
+      } else {
+        updatedTool.permissionRequestId = extras.permissionRequestId;
+      }
+    }
+
+    newTools.set(id, updatedTool);
+    this.tools = newTools;
   }
 
-  getActivities(): ToolActivity[] {
-    return this.streamItems
-      .filter(item => item.type === 'tool' && item.activity)
-      .map(item => item.activity!);
+  getTool(id: string): ToolState | undefined {
+    return this.tools.get(id);
+  }
+
+  getToolsAwaitingPermission(): ToolState[] {
+    return [...this.tools.values()]
+      .filter(t => t.status === 'awaiting_permission')
+      .sort((a, b) => a.insertionIndex - b.insertionIndex);
+  }
+
+  clearPendingPermissions() {
+    // Update all awaiting_permission tools to denied
+    const newTools = new Map(this.tools);
+    for (const [id, tool] of newTools) {
+      if (tool.status === 'awaiting_permission') {
+        newTools.set(id, { ...tool, status: 'denied', permissionRequestId: undefined });
+      }
+    }
+    this.tools = newTools;
   }
 
   // Finalize the current stream - convert streamItems to messages preserving order
@@ -153,40 +189,43 @@ class ChatState {
     const newMessages = [...this.messages];
 
     let currentText = '';
-    let currentActivities: ToolActivity[] = [];
+    let currentTools: ToolState[] = [];
 
     for (const item of this.streamItems) {
       if (item.type === 'text' && item.content) {
-        // Flush pending activities before text
-        if (currentActivities.length > 0) {
+        // Flush pending tools before text
+        if (currentTools.length > 0) {
           newMessages.push({
             id: crypto.randomUUID(),
             role: 'assistant',
             content: currentText,
             timestamp: Date.now() / 1000,
-            activities: currentActivities,
+            tools: currentTools,
           });
           currentText = '';
-          currentActivities = [];
+          currentTools = [];
         }
         currentText += item.content;
-      } else if (item.type === 'tool' && item.activity) {
-        // Mark running tools as 'aborted' since they were interrupted
-        const activity = item.activity.status === 'running'
-          ? { ...item.activity, status: 'aborted' as const }
-          : item.activity;
-        currentActivities.push(activity);
+      } else if (item.type === 'tool' && item.toolId) {
+        const tool = this.tools.get(item.toolId);
+        if (tool) {
+          // Mark running tools as 'aborted' since they were interrupted
+          const finalTool = tool.status === 'running' || tool.status === 'pending' || tool.status === 'awaiting_permission'
+            ? { ...tool, status: 'aborted' as const }
+            : tool;
+          currentTools.push(finalTool);
+        }
       }
     }
 
     // Finalize remaining content
-    if (currentText || currentActivities.length > 0) {
+    if (currentText || currentTools.length > 0) {
       newMessages.push({
         id: crypto.randomUUID(),
         role: 'assistant',
         content: currentText,
         timestamp: Date.now() / 1000,
-        activities: currentActivities.length > 0 ? currentActivities : undefined,
+        tools: currentTools.length > 0 ? currentTools : undefined,
       });
     }
 
@@ -194,22 +233,7 @@ class ChatState {
     this.isStreaming = false;
     this.streamItems = [];
     this.streamItemCounter = 0;
-  }
-
-  // --- Permission methods ---
-
-  addPermissionRequest(request: PermissionRequest) {
-    const key = request.activityId || request.id;
-    this.pendingPermissions = { ...this.pendingPermissions, [key]: request };
-  }
-
-  removePermissionRequest(key: string) {
-    const { [key]: _, ...rest } = this.pendingPermissions;
-    this.pendingPermissions = rest;
-  }
-
-  clearPermissionRequests() {
-    this.pendingPermissions = {};
+    this.tools = new Map();
   }
 
   // --- Queue methods ---
@@ -259,7 +283,7 @@ class ChatState {
     this.isStreaming = false;
     this.streamItems = [];
     this.streamItemCounter = 0;
-    this.pendingPermissions = {};
+    this.tools = new Map();
     this.messageQueue = [];
     this.todos = [];
     this.activeSkills = [];

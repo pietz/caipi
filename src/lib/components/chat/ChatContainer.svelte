@@ -43,8 +43,8 @@
 
   function setupKeyboardShortcuts(): () => void {
     function handleKeydown(e: KeyboardEvent) {
-      const permissionKeys = Object.keys(chat.pendingPermissions);
-      if (permissionKeys.length === 0) return;
+      const toolsAwaitingPermission = chat.getToolsAwaitingPermission();
+      if (toolsAwaitingPermission.length === 0) return;
 
       if (e.key === 'Enter' || e.key === 'Escape') {
         const activeElement = document.activeElement as HTMLTextAreaElement | null;
@@ -55,18 +55,11 @@
 
         e.preventDefault();
 
-        // Find the first pending permission by activity order in streamItems
-        const sortedItems = [...chat.streamItems].sort((a, b) => a.insertionIndex - b.insertionIndex);
-        const firstPendingActivity = sortedItems.find(
-          (item) => item.type === 'tool' && item.activity && chat.pendingPermissions[item.activity.id]
-        );
-
-        if (firstPendingActivity?.activity && app.sessionId) {
-          const permission = chat.pendingPermissions[firstPendingActivity.activity.id];
-          if (permission) {
-            const allowed = e.key === 'Enter';
-            respondToPermission(app.sessionId, permission, allowed);
-          }
+        // Get the first tool awaiting permission (already sorted by insertion order)
+        const firstTool = toolsAwaitingPermission[0];
+        if (firstTool && app.sessionId) {
+          const allowed = e.key === 'Enter';
+          respondToPermission(app.sessionId, firstTool, allowed);
         }
       }
     }
@@ -99,12 +92,8 @@
   }
 
   function queueMessage(message: string) {
-    // Add to queue
+    // Add to queue - message will be added to UI when processed
     chat.enqueueMessage(message);
-
-    // Show in UI immediately as user message
-    chat.addUserMessage(message);
-
     scrollToBottom();
   }
 
@@ -112,8 +101,13 @@
     const nextMessage = chat.dequeueMessage();
     if (!nextMessage || !app.sessionId) return;
 
+    // Add user message now, right before sending
+    chat.addUserMessage(nextMessage);
+
     // Keep streaming state active
     chat.setStreaming(true);
+
+    scrollToBottom();
 
     try {
       await invoke('send_message', {
@@ -149,7 +143,7 @@
 
     // Clear queue and permissions immediately
     chat.clearMessageQueue();
-    chat.clearPermissionRequests();
+    chat.clearPendingPermissions();
 
     try {
       await invoke('abort_session', { sessionId: app.sessionId });
@@ -160,18 +154,24 @@
     }
   }
 
-  function handlePermissionResponse(activityId: string, allowed: boolean) {
+  function handlePermissionResponse(toolId: string, allowed: boolean) {
     if (!app.sessionId) return;
-    const permission = chat.pendingPermissions[activityId];
-    if (permission) {
-      respondToPermission(app.sessionId, permission, allowed);
+    const tool = chat.getTool(toolId);
+    if (tool) {
+      respondToPermission(app.sessionId, tool, allowed);
     }
   }
 
   // Derived values for template
   const sortedStreamItems = $derived(
     [...chat.streamItems]
-      .filter(item => !(item.type === 'tool' && item.activity && HIDDEN_TOOL_TYPES.includes(item.activity.toolType)))
+      .filter(item => {
+        if (item.type === 'tool' && item.toolId) {
+          const tool = chat.getTool(item.toolId);
+          return tool && !HIDDEN_TOOL_TYPES.includes(tool.toolType);
+        }
+        return true;
+      })
       .sort((a, b) => a.insertionIndex - b.insertionIndex)
   );
 </script>
@@ -282,14 +282,16 @@
                     >
                       {@html item.content ? DOMPurify.sanitize(marked.parse(item.content) as string) : ''}
                     </div>
-                  {:else if item.type === 'tool' && item.activity}
-                    <div class="mt-2">
-                      <ActivityCard
-                        activity={item.activity}
-                        pendingPermissions={chat.pendingPermissions}
-                        onPermissionResponse={(allowed) => handlePermissionResponse(item.activity!.id, allowed)}
-                      />
-                    </div>
+                  {:else if item.type === 'tool' && item.toolId}
+                    {@const tool = chat.getTool(item.toolId)}
+                    {#if tool}
+                      <div class="mt-2">
+                        <ActivityCard
+                          {tool}
+                          onPermissionResponse={(allowed) => handlePermissionResponse(tool.id, allowed)}
+                        />
+                      </div>
+                    {/if}
                   {/if}
                 {/each}
               </div>

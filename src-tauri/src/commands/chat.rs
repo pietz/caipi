@@ -18,31 +18,32 @@ pub struct Message {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolActivity {
-    pub id: String,
-    pub tool_type: String,
-    pub target: String,
-    pub status: String, // "running", "completed", "error"
-    pub timestamp: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ChatEvent {
     Text { content: String },
-    ToolStart { activity: ToolActivity },
-    ToolEnd { id: String, status: String },
-    PermissionRequest {
-        id: String,
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        tool: String,
+    /// Emitted from PreToolUse hook when a tool starts
+    ToolStart {
         #[serde(rename = "toolUseId")]
-        tool_use_id: Option<String>,
-        description: String,
+        tool_use_id: String,
+        #[serde(rename = "toolType")]
+        tool_type: String,
+        target: String,
+        status: String,  // "pending"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input: Option<serde_json::Value>,
+    },
+    /// Emitted when tool status changes (permission granted/denied, running, etc.)
+    ToolStatusUpdate {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+        status: String,  // "awaiting_permission", "running", "denied"
+        #[serde(rename = "permissionRequestId", skip_serializing_if = "Option::is_none")]
+        permission_request_id: Option<String>,
+    },
+    /// Emitted from PostToolUse hook when a tool completes
+    ToolEnd {
+        id: String,
+        status: String,  // "completed", "error"
     },
     SessionInit { auth_type: String },
     StateChanged {
@@ -101,23 +102,10 @@ pub async fn send_message(
     let app_handle = app.clone();
 
     // Send message and stream events
-    // Note: PermissionRequest events are emitted directly from the can_use_tool callback
+    // Note: ToolStart/ToolEnd events are emitted directly from hooks
     match session.send_message(&message, move |event| {
         let chat_event = match event {
             AgentEvent::Text(content) => ChatEvent::Text { content },
-            AgentEvent::ToolStart { id, tool_type, target, input } => {
-                ChatEvent::ToolStart {
-                    activity: ToolActivity {
-                        id,
-                        tool_type,
-                        target,
-                        status: "running".to_string(),
-                        timestamp: chrono::Utc::now().timestamp(),
-                        input,
-                    },
-                }
-            }
-            AgentEvent::ToolEnd { id, status } => ChatEvent::ToolEnd { id, status },
             AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
             AgentEvent::TokenUsage { total_tokens } => {
                 ChatEvent::TokenUsage { total_tokens }

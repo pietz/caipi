@@ -8,11 +8,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock, watch};
+use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use super::hooks::build_hooks;
-use super::tool_utils::extract_tool_target;
 
 // Re-export from hooks for external use
 pub use super::hooks::PermissionChannels;
@@ -29,9 +28,7 @@ pub enum AgentError {
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     Text(String),
-    ToolStart { id: String, tool_type: String, target: String, input: Option<serde_json::Value> },
-    #[allow(dead_code)]  // Emitted directly from PostToolUse hook now
-    ToolEnd { id: String, status: String },
+    // ToolStart is now emitted from PreToolUse hook, not from stream parsing
     SessionInit { auth_type: String },
     TokenUsage { total_tokens: u64 },
     Complete,
@@ -52,11 +49,12 @@ pub struct AgentSession {
     app_handle: AppHandle,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
+    /// The model the current client was created with
+    client_model: Arc<RwLock<Option<String>>>,
     /// Flag to signal abort - can be set without holding any locks
     abort_flag: Arc<AtomicBool>,
-    /// Watch channel for abort signaling - allows select! to wake up immediately
-    abort_sender: watch::Sender<bool>,
-    abort_receiver: watch::Receiver<bool>,
+    /// Notify for abort signaling - only fires when explicitly triggered
+    abort_notify: Arc<Notify>,
 }
 
 impl Clone for AgentSession {
@@ -69,9 +67,9 @@ impl Clone for AgentSession {
             app_handle: self.app_handle.clone(),
             permission_mode: self.permission_mode.clone(),
             model: self.model.clone(),
+            client_model: self.client_model.clone(),
             abort_flag: self.abort_flag.clone(),
-            abort_sender: self.abort_sender.clone(),
-            abort_receiver: self.abort_receiver.clone(),
+            abort_notify: self.abort_notify.clone(),
         }
     }
 }
@@ -97,7 +95,6 @@ fn string_to_model_id(model: &str) -> &'static str {
 impl AgentSession {
     pub async fn new(folder_path: String, permission_mode: String, model: String, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
-        let (abort_sender, abort_receiver) = watch::channel(false);
 
         Ok(Self {
             id,
@@ -107,9 +104,9 @@ impl AgentSession {
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
+            client_model: Arc::new(RwLock::new(None)),
             abort_flag: Arc::new(AtomicBool::new(false)),
-            abort_sender,
-            abort_receiver,
+            abort_notify: Arc::new(Notify::new()),
         })
     }
 
@@ -160,9 +157,8 @@ impl AgentSession {
     where
         F: Fn(AgentEvent) + Send + Sync + 'static,
     {
-        // Clear abort signals at start of new message
+        // Clear abort flag at start of new message
         self.abort_flag.store(false, Ordering::SeqCst);
-        let _ = self.abort_sender.send(false);
 
         // Store user message
         {
@@ -183,6 +179,7 @@ impl AgentSession {
             self.id.clone(),
             self.permission_mode.clone(),
             self.abort_flag.clone(),
+            self.abort_notify.clone(),
         );
 
         // Get the current settings for the SDK options
@@ -201,10 +198,24 @@ impl AgentSession {
 
         // Create client if needed and perform all client operations while holding the lock
         let mut client_guard = self.client.lock().await;
+        let stored_client_model = self.client_model.read().await.clone();
 
-        // Initialize client if needed
-        if client_guard.is_none() {
+        // Check if we need a new client (none exists OR model changed)
+        let needs_new_client = client_guard.is_none()
+            || stored_client_model.as_ref() != Some(&current_model);
+
+        if needs_new_client {
+            // Disconnect old client if exists
+            if let Some(mut old_client) = client_guard.take() {
+                let _ = old_client.disconnect().await;
+            }
+
+            // Create new client with current options
             *client_guard = Some(ClaudeClient::new(options));
+
+            // Track what model this client uses
+            let mut client_model_guard = self.client_model.write().await;
+            *client_model_guard = Some(current_model);
         }
 
         let client = client_guard.as_mut().unwrap();
@@ -216,16 +227,14 @@ impl AgentSession {
         client.query(message).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         let mut assistant_content = String::new();
-        let mut abort_receiver = self.abort_receiver.clone();
         let mut was_aborted = false;
 
-        // Receive responses - use select! to race between stream and abort signal
+        // Receive responses
         let mut stream = client.receive_response();
         let mut interrupt_sent = false;
 
         loop {
-            // If abort requested and we haven't sent interrupt yet, send it now
-            // but continue draining the stream to properly conclude the turn
+            // Check abort flag at loop start (handles case where abort was set before loop)
             if !interrupt_sent && self.abort_flag.load(Ordering::SeqCst) {
                 let _ = client.interrupt().await;
                 interrupt_sent = true;
@@ -239,120 +248,118 @@ impl AgentSession {
                 tokio::time::Duration::from_secs(300) // 5 min for normal operation
             };
 
-            tokio::select! {
-                // Check for abort signal (only if we haven't sent interrupt yet)
-                _ = abort_receiver.changed(), if !interrupt_sent => {
-                    if *abort_receiver.borrow() {
-                        // Abort was requested - interrupt the client
-                        let _ = client.interrupt().await;
-                        interrupt_sent = true;
-                        was_aborted = true;
-                        // Don't break - continue draining the stream
-                    }
+            // Use select to race between stream and abort notification
+            // This ensures abort takes effect immediately, not after the next stream message
+            let result = tokio::select! {
+                biased;
+
+                // Wake up immediately when abort is signaled
+                _ = self.abort_notify.notified(), if !interrupt_sent => {
+                    let _ = client.interrupt().await;
+                    interrupt_sent = true;
+                    was_aborted = true;
+                    continue; // Re-enter loop to process remaining stream with short timeout
                 }
-                // Process next stream item with timeout
-                result = tokio::time::timeout(stream_timeout, stream.next()) => {
-                    match result {
-                        Ok(Some(msg_result)) => {
-                            match msg_result {
-                                Ok(msg) => {
-                                    match msg {
-                                        Message::Assistant(assistant_msg) => {
-                                            // Skip processing assistant messages if we're aborting
-                                            if interrupt_sent {
-                                                continue;
-                                            }
 
-                                            // Extract token usage from assistant message (per API call, not cumulative)
-                                            if let Some(usage) = &assistant_msg.message.usage {
-                                                let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                on_event(AgentEvent::TokenUsage { total_tokens: input + cache_read });
-                                            }
+                // Normal stream processing with timeout
+                result = tokio::time::timeout(stream_timeout, stream.next()) => result,
+            };
 
-                                            for block in assistant_msg.message.content.iter() {
-                                                match block {
-                                                    ContentBlock::Text(text_block) => {
-                                                        assistant_content.push_str(&text_block.text);
-                                                        on_event(AgentEvent::Text(text_block.text.clone()));
-                                                    }
-                                                    ContentBlock::ToolUse(tool) => {
-                                                        let target = extract_tool_target(tool);
-                                                        // Include input for task/todo tools so frontend can update task list
-                                                        let input = if tool.name.starts_with("Task") || tool.name.starts_with("Todo") {
-                                                            Some(tool.input.clone())
-                                                        } else {
-                                                            None
-                                                        };
-                                                        on_event(AgentEvent::ToolStart {
-                                                            id: tool.id.clone(),
-                                                            tool_type: tool.name.clone(),
-                                                            target,
-                                                            input,
-                                                        });
-                                                    }
-                                                    _ => {
-                                                        // ToolResult should come via Message::User, not here
-                                                        eprintln!("[agent] Unexpected content block in Assistant message: {:?}", block);
-                                                    }
-                                                }
+            match result {
+                Ok(Some(msg_result)) => {
+                    match msg_result {
+                        Ok(msg) => {
+                            match msg {
+                                Message::Assistant(assistant_msg) => {
+                                    // Skip processing assistant messages if we're aborting
+                                    if interrupt_sent {
+                                        continue;
+                                    }
+
+                                    // Extract token usage from assistant message (per API call, not cumulative)
+                                    if let Some(usage) = &assistant_msg.message.usage {
+                                        let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                        on_event(AgentEvent::TokenUsage { total_tokens: input + cache_read });
+                                    }
+
+                                    for block in assistant_msg.message.content.iter() {
+                                        match block {
+                                            ContentBlock::Text(text_block) => {
+                                                assistant_content.push_str(&text_block.text);
+                                                on_event(AgentEvent::Text(text_block.text.clone()));
+                                            }
+                                            ContentBlock::ToolUse(_tool) => {
+                                                // ToolStart is now emitted from PreToolUse hook
+                                                // with full context including permission status
+                                            }
+                                            _ => {
+                                                // ToolResult should come via Message::User, not here
+                                                eprintln!("[agent] Unexpected content block in Assistant message: {:?}", block);
                                             }
                                         }
-                                        Message::Result(result) => {
-                                            // Note: Token usage is now extracted from Assistant messages
-                                            // (per API call) rather than Result (which is cumulative)
-                                            let _ = result; // silence unused warning
-                                            // Turn properly concluded
-                                            if !was_aborted {
-                                                on_event(AgentEvent::Complete);
-                                            }
-                                            break;
-                                        }
-                                        Message::System(sys) => {
-                                            // Extract auth type from init message
-                                            if sys.subtype == "init" {
-                                                let api_key_source = sys.data
-                                                    .get("apiKeySource")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("unknown");
-
-                                                let auth_type = match api_key_source {
-                                                    "none" => "Claude AI Subscription",
-                                                    "environment" | "settings" => "Anthropic API Key",
-                                                    _ => "Unknown",
-                                                };
-
-                                                on_event(AgentEvent::SessionInit {
-                                                    auth_type: auth_type.to_string(),
-                                                });
-                                            }
-                                        }
-                                        Message::User(_user_msg) => {
-                                            // Tool results are now handled by the PostToolUse hook
-                                            // which fires immediately when a tool completes, ensuring
-                                            // proper ordering (ToolEnd before subsequent Text events)
-                                        }
-                                        _ => {}
                                     }
                                 }
-                                Err(e) => {
+                                Message::Result(result) => {
+                                    // Note: Token usage is now extracted from Assistant messages
+                                    // (per API call) rather than Result (which is cumulative)
+                                    let _ = result; // silence unused warning
+                                    // Turn properly concluded
                                     if !was_aborted {
-                                        on_event(AgentEvent::Error(e.to_string()));
+                                        on_event(AgentEvent::Complete);
                                     }
                                     break;
                                 }
+                                Message::System(sys) => {
+                                    // Extract auth type from init message
+                                    if sys.subtype == "init" {
+                                        let api_key_source = sys.data
+                                            .get("apiKeySource")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown");
+
+                                        let auth_type = match api_key_source {
+                                            "none" => "Claude AI Subscription",
+                                            "environment" | "settings" => "Anthropic API Key",
+                                            _ => "Unknown",
+                                        };
+
+                                        on_event(AgentEvent::SessionInit {
+                                            auth_type: auth_type.to_string(),
+                                        });
+                                    }
+                                }
+                                Message::User(_user_msg) => {
+                                    // Tool results are now handled by the PostToolUse hook
+                                    // which fires immediately when a tool completes, ensuring
+                                    // proper ordering (ToolEnd before subsequent Text events)
+                                }
+                                _ => {}
                             }
                         }
-                        Ok(None) => {
-                            // Stream ended
-                            break;
-                        }
-                        Err(_timeout) => {
-                            // Timeout while draining after interrupt - force cleanup
-                            eprintln!("[agent] Timeout waiting for stream to drain after interrupt");
+                        Err(e) => {
+                            if !was_aborted {
+                                on_event(AgentEvent::Error(e.to_string()));
+                            }
                             break;
                         }
                     }
+                }
+                Ok(None) => {
+                    // Stream ended
+                    break;
+                }
+                Err(_timeout) => {
+                    if interrupt_sent {
+                        // Timeout while draining after interrupt - this is expected, treat as abort
+                        eprintln!("[agent] Timeout waiting for stream to drain after interrupt");
+                        was_aborted = true;
+                    } else {
+                        // Unexpected timeout during normal operation - emit error
+                        eprintln!("[agent] Stream timeout during normal operation");
+                        on_event(AgentEvent::Error("Stream timeout - no response from Claude".to_string()));
+                    }
+                    break;
                 }
             }
         }
@@ -391,13 +398,12 @@ impl AgentSession {
         // Set abort flag - this is lock-free and immediate
         self.abort_flag.store(true, Ordering::SeqCst);
 
-        // Signal the watch channel - this will wake up any select! waiting on it
-        let _ = self.abort_sender.send(true);
+        // Signal any waiting permission prompts via Notify
+        self.abort_notify.notify_waiters();
 
-        // Note: The actual client.interrupt() is now called inside the streaming loop
-        // when the abort signal is received via select!, because that's where we have
-        // the lock. The AbortComplete event is emitted after the stream is drained
-        // in send_message(), not here.
+        // Note: The actual client.interrupt() is called inside the streaming loop
+        // when the abort flag is checked. The AbortComplete event is emitted after
+        // the stream is drained in send_message(), not here.
 
         Ok(())
     }

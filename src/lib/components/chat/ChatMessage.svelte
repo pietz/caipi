@@ -13,10 +13,10 @@
 
   let { message }: Props = $props();
 
-  const visibleActivities = $derived(
-    message.activities?.filter(a => !HIDDEN_TOOL_TYPES.includes(a.toolType)) ?? []
+  const visibleTools = $derived(
+    message.tools?.filter(t => !HIDDEN_TOOL_TYPES.includes(t.toolType)) ?? []
   );
-  const hasActivities = $derived(visibleActivities.length > 0);
+  const hasTools = $derived(visibleTools.length > 0);
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -47,11 +47,11 @@
   </div>
 {/if}
 
-<!-- Activities (for completed messages) -->
-{#if hasActivities}
+<!-- Tools (for completed messages) -->
+{#if hasTools}
   <div class="mt-3">
-    {#each visibleActivities as activity (activity.id)}
-      <ActivityCard {activity} />
+    {#each visibleTools as tool (tool.id)}
+      <ActivityCard {tool} />
     {/each}
   </div>
 {/if}

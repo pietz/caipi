@@ -13,24 +13,23 @@
     MessageCircle,
     ListTodo,
     BookOpen,
+    Ban,
+    AlertCircle,
+    Clock,
   } from 'lucide-svelte';
-  import type { ToolActivity, PermissionRequest } from '$lib/stores';
+  import type { ToolState } from '$lib/stores';
 
   interface Props {
-    activity: ToolActivity;
-    pendingPermissions?: Record<string, PermissionRequest>;
+    tool: ToolState;
     onPermissionResponse?: (allowed: boolean) => void;
   }
 
   let {
-    activity,
-    pendingPermissions = {},
+    tool,
     onPermissionResponse,
   }: Props = $props();
 
-  const isAwaitingPermission = $derived(
-    pendingPermissions[activity.id] !== undefined
-  );
+  const isAwaitingPermission = $derived(tool.status === 'awaiting_permission');
 
   // Tool configurations with icons and colors
   type ToolConfig = {
@@ -69,7 +68,7 @@
     label: 'tool'
   };
 
-  const config = $derived(toolConfigs[activity.toolType] ?? defaultConfig);
+  const config = $derived(toolConfigs[tool.toolType] ?? defaultConfig);
   const ToolIcon = $derived(config.icon);
 </script>
 
@@ -77,13 +76,21 @@
   <div class="flex items-center gap-2 min-w-0">
     <ToolIcon size={14} />
     <span class="text-xs font-medium uppercase tracking-wide opacity-70">{config.label}</span>
-    <span class="text-xs text-muted-foreground truncate">{activity.target}</span>
+    <span class="text-xs text-muted-foreground truncate">{tool.target}</span>
   </div>
 
   <div class="flex items-center gap-1.5 h-6">
-    {#if activity.status === 'completed' && !isAwaitingPermission}
+    {#if tool.status === 'completed'}
       <Check size={14} class="text-green-500" />
-    {:else if activity.status === 'running' && !isAwaitingPermission}
+    {:else if tool.status === 'error'}
+      <AlertCircle size={14} class="text-red-500" />
+    {:else if tool.status === 'aborted'}
+      <Ban size={14} class="text-muted-foreground" />
+    {:else if tool.status === 'denied'}
+      <X size={14} class="text-red-500" />
+    {:else if tool.status === 'pending'}
+      <Clock size={14} class="text-muted-foreground animate-pulse" />
+    {:else if tool.status === 'running'}
       <Loader2 size={14} class="animate-spin" />
     {:else if isAwaitingPermission && onPermissionResponse}
       <button

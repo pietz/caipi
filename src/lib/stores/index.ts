@@ -7,7 +7,7 @@ export { themeStore, resolvedTheme, applyTheme, type ThemePreference, type Resol
 
 // Type exports from new stores (types work fine with barrel exports)
 export type { Screen, PermissionMode, Model, CliStatus } from './app.svelte';
-export type { Message, ToolActivity, PermissionRequest, TodoItem, StreamItem } from './chat.svelte';
+export type { Message, ToolState, ToolStatus, TodoItem, StreamItem } from './chat.svelte';
 export type { FileEntry } from './files.svelte';
 
 // Event handling utilities

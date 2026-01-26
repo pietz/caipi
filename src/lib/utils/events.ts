@@ -1,22 +1,24 @@
 // Event handling utility for Claude events
 import { invoke } from '@tauri-apps/api/core';
-import { chat, type ToolActivity, type PermissionRequest } from '$lib/stores/chat.svelte';
+import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 
 export interface ChatEvent {
   type: string;
   content?: string;
-  activity?: ToolActivity;
-  id?: string;
-  status?: string;
-  tool?: string;
   toolUseId?: string;
-  description?: string;
+  toolType?: string;
+  target?: string;
+  status?: string;
+  input?: Record<string, unknown>;
+  permissionRequestId?: string;
+  id?: string;  // For ToolEnd (legacy field name)
   message?: string;
   authType?: string;
   permissionMode?: string;
   model?: string;
   totalTokens?: number;
+  sessionId?: string;
 }
 
 export interface EventHandlerOptions {
@@ -41,12 +43,12 @@ export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions
       handleToolStartEvent(event);
       break;
 
-    case 'ToolEnd':
-      handleToolEndEvent(event);
+    case 'ToolStatusUpdate':
+      handleToolStatusUpdateEvent(event);
       break;
 
-    case 'PermissionRequest':
-      handlePermissionRequestEvent(event);
+    case 'ToolEnd':
+      handleToolEndEvent(event);
       break;
 
     case 'Complete':
@@ -104,7 +106,7 @@ function handleTextEvent(event: ChatEvent) {
 }
 
 function handleToolStartEvent(event: ChatEvent) {
-  if (!event.activity) return;
+  if (!event.toolUseId || !event.toolType) return;
 
   // Flush buffered text before tool to preserve ordering
   if (lineBuffer) {
@@ -112,45 +114,46 @@ function handleToolStartEvent(event: ChatEvent) {
     lineBuffer = '';
   }
 
-  const newActivity: ToolActivity = {
-    ...event.activity,
-    status: 'running',
-  };
+  chat.addTool({
+    id: event.toolUseId,
+    toolType: event.toolType,
+    target: event.target || '',
+    status: (event.status as ToolStatus) || 'pending',
+    input: event.input,
+    timestamp: Date.now() / 1000,
+  });
+}
 
-  chat.addActivity(newActivity);
+function handleToolStatusUpdateEvent(event: ChatEvent) {
+  if (!event.toolUseId || !event.status) return;
 
-  // Link unmatched permission requests to this activity
-  const pendingPermissions = chat.pendingPermissions;
-  for (const [key, permission] of Object.entries(pendingPermissions)) {
-    if (permission.activityId === null && permission.tool === newActivity.toolType) {
-      chat.removePermissionRequest(key);
-      chat.addPermissionRequest({
-        ...permission,
-        activityId: newActivity.id,
-      });
-      break;
-    }
-  }
+  // Pass null to clear permissionRequestId when not provided (backend sent None)
+  chat.updateToolStatus(
+    event.toolUseId,
+    event.status as ToolStatus,
+    { permissionRequestId: event.permissionRequestId ?? null }
+  );
 }
 
 function handleToolEndEvent(event: ChatEvent) {
-  if (!event.id || !event.status) return;
+  // ToolEnd uses 'id' field (legacy from PostToolUse hook)
+  const toolId = event.id;
+  if (!toolId || !event.status) return;
 
-  chat.updateActivityStatus(event.id, event.status as ToolActivity['status']);
+  chat.updateToolStatus(toolId, event.status as ToolStatus);
 
   // Track skill activation and handle special tools
   if (event.status === 'completed') {
-    const activities = chat.getActivities();
-    const activity = activities.find(a => a.id === event.id);
+    const tool = chat.getTool(toolId);
 
-    if (activity?.toolType === 'Skill' && activity.target) {
-      chat.addActiveSkill(activity.target);
+    if (tool?.toolType === 'Skill' && tool.target) {
+      chat.addActiveSkill(tool.target);
     }
 
     // Handle TodoWrite - sync entire todo list
-    if (activity?.toolType === 'TodoWrite' && activity.input) {
+    if (tool?.toolType === 'TodoWrite' && tool.input) {
       try {
-        const input = activity.input;
+        const input = tool.input;
         const todosArray = input.todos ?? input.items ?? input.tasks ??
           (Array.isArray(input) ? input : null);
 
@@ -169,10 +172,10 @@ function handleToolEndEvent(event: ChatEvent) {
     }
 
     // Handle TaskCreate
-    if (activity?.toolType === 'TaskCreate' && activity.input) {
-      const input = activity.input as { subject?: string };
+    if (tool?.toolType === 'TaskCreate' && tool.input) {
+      const input = tool.input as { subject?: string };
       chat.addTodo({
-        id: activity.id,
+        id: tool.id,
         text: input.subject || 'New todo',
         done: false,
         active: true,
@@ -180,8 +183,8 @@ function handleToolEndEvent(event: ChatEvent) {
     }
 
     // Handle TaskUpdate
-    if (activity?.toolType === 'TaskUpdate' && activity.input) {
-      const input = activity.input as { taskId?: string; status?: string; subject?: string };
+    if (tool?.toolType === 'TaskUpdate' && tool.input) {
+      const input = tool.input as { taskId?: string; status?: string; subject?: string };
       if (input.taskId) {
         chat.updateTodo(input.taskId, {
           done: input.status === 'completed',
@@ -191,34 +194,6 @@ function handleToolEndEvent(event: ChatEvent) {
       }
     }
   }
-}
-
-function handlePermissionRequestEvent(event: ChatEvent) {
-  if (!event.id || !event.tool || !event.description) return;
-
-  let matchingActivityId: string | null = null;
-  const activities = chat.getActivities();
-  const pendingPermissions = chat.pendingPermissions;
-
-  if (event.toolUseId) {
-    const exactMatch = activities.find(a => a.id === event.toolUseId);
-    matchingActivityId = exactMatch?.id || null;
-  }
-
-  if (!matchingActivityId) {
-    const matchingActivity = activities.find(
-      a => a.status === 'running' && a.toolType === event.tool && !pendingPermissions[a.id]
-    );
-    matchingActivityId = matchingActivity?.id || null;
-  }
-
-  chat.addPermissionRequest({
-    id: event.id,
-    activityId: matchingActivityId,
-    tool: event.tool,
-    description: event.description,
-    timestamp: Date.now() / 1000,
-  });
 }
 
 function handleCompleteEvent(onComplete?: () => void) {
@@ -240,7 +215,7 @@ function handleAbortCompleteEvent() {
   chat.finalize();
   chat.setStreaming(false);
   chat.clearMessageQueue();
-  chat.clearPermissionRequests();
+  chat.clearPendingPermissions();
 }
 
 function handleSessionInitEvent(event: ChatEvent) {
@@ -274,22 +249,23 @@ function handleErrorEvent(event: ChatEvent, onError?: (message: string) => void)
 // Permission response helper
 export async function respondToPermission(
   sessionId: string,
-  permission: PermissionRequest,
+  tool: ToolState,
   allowed: boolean
 ): Promise<void> {
-  const key = permission.activityId || permission.id;
+  if (!tool.permissionRequestId) {
+    console.error('No permission request ID for tool:', tool.id);
+    return;
+  }
 
   try {
     await invoke('respond_permission', {
       sessionId,
-      requestId: permission.id,
+      requestId: tool.permissionRequestId,
       allowed,
     });
-    // Only remove permission request on success
-    chat.removePermissionRequest(key);
+    // Status will be updated via ToolStatusUpdate event from backend
   } catch (e) {
     console.error('Failed to respond to permission:', e);
-    // Keep the permission request pending so user can retry
   }
 }
 

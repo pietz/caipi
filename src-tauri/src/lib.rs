@@ -3,7 +3,7 @@ mod claude;
 mod storage;
 
 use commands::chat::SessionStore;
-use claude::agent::PermissionChannels;
+use claude::agent::{AgentSession, PermissionChannels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Manager;
@@ -27,16 +27,20 @@ pub fn run() {
                 // Spawn cleanup task - we can't block here, but we give it a moment
                 tauri::async_runtime::spawn(async move {
                     let sessions: tauri::State<'_, SessionStore> = app_handle.state();
-                    let mut store = sessions.lock().await;
 
-                    // Cleanup all sessions
-                    for (id, session) in store.iter() {
+                    // Drain sessions from store while holding lock briefly
+                    let sessions_to_cleanup: Vec<(String, AgentSession)> = {
+                        let mut store = sessions.lock().await;
+                        store.drain().collect()
+                    };
+                    // Lock is now dropped
+
+                    // Cleanup all sessions without holding the lock
+                    for (id, session) in sessions_to_cleanup {
                         eprintln!("[cleanup] Cleaning up session: {}", id);
                         session.cleanup().await;
                     }
 
-                    // Clear the store
-                    store.clear();
                     eprintln!("[cleanup] All sessions cleaned up");
                 });
             }

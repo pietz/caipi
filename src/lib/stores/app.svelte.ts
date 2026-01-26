@@ -1,5 +1,7 @@
 // App state store using Svelte 5 runes
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 
 export type Screen = 'loading' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
@@ -80,10 +82,20 @@ class AppState {
 
   toggleLeftSidebar() {
     this.leftSidebar = !this.leftSidebar;
+    this.updateMinWindowSize();
   }
 
   toggleRightSidebar() {
     this.rightSidebar = !this.rightSidebar;
+    this.updateMinWindowSize();
+  }
+
+  updateMinWindowSize() {
+    const baseWidth = 576;
+    const sidebarWidth = 224;
+    const sidebars = (this.leftSidebar ? 1 : 0) + (this.rightSidebar ? 1 : 0);
+    const minWidth = baseWidth + sidebars * sidebarWidth;
+    getCurrentWindow().setMinSize(new LogicalSize(minWidth, 512));
   }
 
   setModel(model: Model) {
@@ -134,6 +146,7 @@ class AppState {
     this.leftSidebar = false;
     this.rightSidebar = false;
     this.authType = null;
+    this.updateMinWindowSize();
   }
 }
 

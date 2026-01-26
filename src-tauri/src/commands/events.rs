@@ -2,10 +2,15 @@
 //!
 //! Centralizes all event emission to ensure consistent formatting
 //! and simplify the emission of various event types.
+//!
+//! Note: These are currently unused as events are emitted directly from hooks,
+//! but kept for potential future use.
+
+#![allow(dead_code)]
 
 use tauri::{AppHandle, Emitter};
 
-use super::chat::{ChatEvent, ToolActivity};
+use super::chat::ChatEvent;
 
 const EVENT_NAME: &str = "claude:event";
 
@@ -14,41 +19,41 @@ pub fn emit_text(app: &AppHandle, content: String) {
     let _ = app.emit(EVENT_NAME, &ChatEvent::Text { content });
 }
 
-/// Emit a tool start event
-pub fn emit_tool_start(app: &AppHandle, id: String, tool_type: String, target: String, input: Option<serde_json::Value>) {
+/// Emit a tool start event (emitted from PreToolUse hook)
+pub fn emit_tool_start(
+    app: &AppHandle,
+    tool_use_id: String,
+    tool_type: String,
+    target: String,
+    status: String,
+    input: Option<serde_json::Value>,
+) {
     let _ = app.emit(EVENT_NAME, &ChatEvent::ToolStart {
-        activity: ToolActivity {
-            id,
-            tool_type,
-            target,
-            status: "running".to_string(),
-            timestamp: chrono::Utc::now().timestamp(),
-            input,
-        },
+        tool_use_id,
+        tool_type,
+        target,
+        status,
+        input,
     });
 }
 
-/// Emit a tool end event
+/// Emit a tool status update event
+pub fn emit_tool_status_update(
+    app: &AppHandle,
+    tool_use_id: String,
+    status: String,
+    permission_request_id: Option<String>,
+) {
+    let _ = app.emit(EVENT_NAME, &ChatEvent::ToolStatusUpdate {
+        tool_use_id,
+        status,
+        permission_request_id,
+    });
+}
+
+/// Emit a tool end event (emitted from PostToolUse hook)
 pub fn emit_tool_end(app: &AppHandle, id: String, status: String) {
     let _ = app.emit(EVENT_NAME, &ChatEvent::ToolEnd { id, status });
-}
-
-/// Emit a permission request event
-pub fn emit_permission_request(
-    app: &AppHandle,
-    id: String,
-    session_id: String,
-    tool: String,
-    tool_use_id: Option<String>,
-    description: String,
-) {
-    let _ = app.emit(EVENT_NAME, &ChatEvent::PermissionRequest {
-        id,
-        session_id,
-        tool,
-        tool_use_id,
-        description,
-    });
 }
 
 /// Emit a session init event
