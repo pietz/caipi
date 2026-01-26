@@ -30,6 +30,14 @@ npm run tauri build
 cd src-tauri
 cargo check    # Check for errors
 cargo build    # Build the backend
+cargo test     # Run Rust tests
+```
+
+### Testing
+```bash
+npm test           # Run frontend tests (vitest)
+npm run test:watch # Run tests in watch mode
+npm run test:all   # Run both frontend and Rust tests
 ```
 
 ## Project Structure
@@ -58,10 +66,12 @@ caipi/
 │   │   │   ├── setup.rs          # CLI detection (check_cli_installed, check_cli_authenticated)
 │   │   │   ├── folder.rs         # Folder operations (get_recent_folders, save_recent_folder)
 │   │   │   ├── files.rs          # File operations (list_directory)
-│   │   │   └── chat.rs           # Chat/session management (create_session, send_message, set_permission_mode, set_model)
+│   │   │   ├── chat.rs           # Chat/session management (create_session, send_message, set_permission_mode, set_model)
+│   │   │   └── events.rs         # Event emission helpers
 │   │   ├── claude/               # SDK integration
 │   │   │   ├── agent.rs          # AgentSession wrapper, streaming events
-│   │   │   └── permissions.rs    # Permission translation helpers
+│   │   │   ├── hooks.rs          # Permission and tool hooks (pre/post tool use)
+│   │   │   └── tool_utils.rs     # Tool target extraction, string utilities
 │   │   └── storage/              # Local data persistence
 │   └── capabilities/default.json # Tauri permission capabilities
 └── package.json
@@ -133,7 +143,7 @@ This project uses Svelte 5 runes syntax:
 
 ## Known Issues
 
-1. **Unused Rust code**: `translate_permission`, `translate_bash_command` functions and `AgentError::Session` variant are defined but not yet used
+1. **Unused Rust code**: `extract_tool_target` function in `tool_utils.rs` and `AgentError::Session` variant are defined but not yet used
 
 ## Tauri Permissions
 
@@ -142,10 +152,20 @@ Permissions are configured in `src-tauri/capabilities/default.json`. The app req
 - `fs:default`, `fs:allow-read`, `fs:allow-write` - Filesystem access
 - `opener:default` - Opening external URLs
 
-## Testing Changes
+## Testing
 
-After making changes:
-1. Run `npm run tauri dev` to test
-2. Check browser console for frontend errors
-3. Check terminal for Rust backend logs/warnings
-4. The app flow is: Onboarding → Folder Picker → Chat
+### Test Files
+- `src/lib/stores/app.test.ts` - App store tests
+- `src/lib/stores/chat.test.ts` - Chat store tests
+- `src/lib/utils/events.test.ts` - Event handling tests
+- `src-tauri/src/commands/chat.rs` - Session creation tests (inline)
+- `src-tauri/src/claude/hooks.rs` - Rust hook tests (inline)
+- `src-tauri/src/claude/tool_utils.rs` - Rust utility tests (inline)
+- `src-tauri/src/storage/mod.rs` - Storage tests (inline)
+
+### After Making Changes
+1. Run `npm run test:all` to run all tests
+2. Run `npm run tauri dev` to test the app manually
+3. Check browser console for frontend errors
+4. Check terminal for Rust backend logs/warnings
+5. The app flow is: Onboarding → Folder Picker → Chat

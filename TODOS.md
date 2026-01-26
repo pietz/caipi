@@ -10,25 +10,19 @@
 
 ## Tool Use & Streaming Issues
 
-### P0: Tool spinner timing is broken
-The spinner for tool calls stays active too long and doesn't stop when the tool actually completes. Symptoms:
-- Text of following messages appears before spinner disappears
-- Check marks sometimes missing (especially on bash commands)
-- First tool call in a response wave behaves differently than subsequent ones
-- Multiple sequential tool calls show spinners appearing one after another but finishing together
-
-**Files to investigate**: `src/lib/stores/chat.svelte.ts`, `src/lib/utils/events.ts`, `src-tauri/src/claude/agent.rs`
-
-### P0: Queued message appears in wrong position
-When sending a message while the agent is still working:
-- Message appears directly after the initial user message (wrong)
-- Should stay at the very bottom until the current response finishes
-- The agent should write into a message that's not at the bottom of the list
-
-**Files to investigate**: `src/lib/stores/chat.svelte.ts`, `src/lib/components/chat/ChatContainer.svelte`
-
 ### P1: Small vertical UI jump when agent completes
 Tiny jump in chat history when the agent finishes responding and spinner disappears.
+
+### P1: Properly text stream the final result from the agent
+The final response from the agent should be streamed character-by-character instead of appearing all at once.
+
+### P2: Add thinking UI element when agent is reasoning
+Show a visual indicator when the agent is in its thinking/reasoning phase before responding.
+
+### P2: Bundle multiple tool uses into single UI element
+When many tool calls happen in sequence, bundle them into a single collapsible element instead of showing each one separately. Add a smooth vertical scroll animation that cycles through the tool call names.
+
+**File**: `src/lib/components/chat/ActivityCard.svelte`
 
 ---
 
@@ -95,3 +89,12 @@ Some tool calls get check marks, others don't. Need to investigate why bash comm
 
 ### P2: Email skill execution issues
 User encountered issues with email skill. May be skill-specific or related to general command execution. Needs investigation to determine if it's a Caipi issue or skill configuration issue.
+
+---
+
+## File Explorer
+
+### P2: Fix file alignment problem
+Files in the file explorer don't align horizontally. Need to investigate and fix the layout so file names line up properly.
+
+**File**: `src/lib/components/sidebar/FileExplorer.svelte` or `FileTreeItem.svelte`

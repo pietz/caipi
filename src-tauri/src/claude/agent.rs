@@ -49,8 +49,6 @@ pub struct AgentSession {
     app_handle: AppHandle,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
-    /// The model the current client was created with
-    client_model: Arc<RwLock<Option<String>>>,
     /// Flag to signal abort - can be set without holding any locks
     abort_flag: Arc<AtomicBool>,
     /// Notify for abort signaling - only fires when explicitly triggered
@@ -67,7 +65,6 @@ impl Clone for AgentSession {
             app_handle: self.app_handle.clone(),
             permission_mode: self.permission_mode.clone(),
             model: self.model.clone(),
-            client_model: self.client_model.clone(),
             abort_flag: self.abort_flag.clone(),
             abort_notify: self.abort_notify.clone(),
         }
@@ -104,7 +101,6 @@ impl AgentSession {
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
-            client_model: Arc::new(RwLock::new(None)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
         })
@@ -140,8 +136,13 @@ impl AgentSession {
             *current_model = model.clone();
         }
 
-        // Note: Model changes take effect on the next message, as the SDK doesn't support
-        // changing the model mid-session. The new model will be used when building options.
+        // If client exists, update it via the SDK control protocol
+        let client_guard = self.client.lock().await;
+        if let Some(client) = client_guard.as_ref() {
+            let model_id = string_to_model_id(&model);
+            client.set_model(Some(model_id)).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+        }
+
         Ok(())
     }
 
@@ -196,26 +197,11 @@ impl AgentSession {
             .setting_sources(vec![SettingSource::User, SettingSource::Project])
             .build();
 
-        // Create client if needed and perform all client operations while holding the lock
+        // Create client if needed (model changes are handled via set_model() control protocol)
         let mut client_guard = self.client.lock().await;
-        let stored_client_model = self.client_model.read().await.clone();
 
-        // Check if we need a new client (none exists OR model changed)
-        let needs_new_client = client_guard.is_none()
-            || stored_client_model.as_ref() != Some(&current_model);
-
-        if needs_new_client {
-            // Disconnect old client if exists
-            if let Some(mut old_client) = client_guard.take() {
-                let _ = old_client.disconnect().await;
-            }
-
-            // Create new client with current options
+        if client_guard.is_none() {
             *client_guard = Some(ClaudeClient::new(options));
-
-            // Track what model this client uses
-            let mut client_model_guard = self.client_model.write().await;
-            *client_model_guard = Some(current_model);
         }
 
         let client = client_guard.as_mut().unwrap();

@@ -240,9 +240,14 @@ function handleTokenUsageEvent(event: ChatEvent) {
 }
 
 function handleErrorEvent(event: ChatEvent, onError?: (message: string) => void) {
-  console.error('Claude error:', event.message);
+  // Flush buffered text and finalize before clearing
+  if (lineBuffer) {
+    chat.appendText(lineBuffer);
+    lineBuffer = '';
+  }
+  chat.finalize();
+
   chat.addErrorMessage(event.message || 'An unknown error occurred');
-  chat.setStreaming(false);
   onError?.(event.message || 'Unknown error');
 }
 
