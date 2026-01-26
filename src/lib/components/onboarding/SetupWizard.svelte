@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { api, type CliInstallStatus } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import { Check, Folder, Loader2, Sun, Moon, Copy } from 'lucide-svelte';
@@ -8,13 +8,7 @@
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
-  interface CliInstallStatus {
-    installed: boolean;
-    version: string | null;
-    path: string | null;
-  }
-
-  let cliStatus = $state<CliInstallStatus | null>(null);
+  let cliStatus = $state<(CliInstallStatus & { path?: string | null }) | null>(null);
   let checkingCli = $state(true);
   let selectedFolder = $state<string | null>(null);
   let folderName = $state<string>('');
@@ -37,10 +31,11 @@
   async function checkCliStatus() {
     checkingCli = true;
     try {
-      cliStatus = await invoke<CliInstallStatus>('check_cli_installed');
+      const status = await api.checkCliInstalled();
+      cliStatus = { ...status, path: null };
     } catch (e) {
       console.error('Failed to check CLI:', e);
-      cliStatus = { installed: false, version: null, path: null };
+      cliStatus = { installed: false, version: undefined, path: null };
     } finally {
       checkingCli = false;
     }
@@ -55,7 +50,7 @@
       });
 
       if (selected && typeof selected === 'string') {
-        const valid = await invoke<boolean>('validate_folder', { path: selected });
+        const valid = await api.validateFolder(selected);
         if (!valid) {
           error = 'Cannot access this folder. Please choose another.';
           return;
@@ -89,17 +84,17 @@
 
     try {
       // Complete onboarding with default folder
-      await invoke('complete_onboarding', { defaultFolder: selectedFolder });
+      await api.completeOnboarding(selectedFolder);
 
       // Save to recent folders
-      await invoke('save_recent_folder', { path: selectedFolder });
+      await api.saveRecentFolder(selectedFolder);
 
       // Update app state
       app.setCliStatus({
         installed: true,
-        version: cliStatus.version,
+        version: cliStatus.version ?? null,
         authenticated: true,
-        path: cliStatus.path,
+        path: cliStatus.path ?? null,
       });
 
       // Start session

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { api } from '$lib/api';
   import { Shield, Pencil, AlertTriangle, ArrowUp, Square } from 'lucide-svelte';
   import { Button, ContextIndicator, ModelCircle } from '$lib/components/ui';
   import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
@@ -37,7 +37,7 @@
     // Optimistic update - backend will confirm via StateChanged event
     app.cyclePermissionMode();
     if (app.sessionId) {
-      invoke('set_permission_mode', { sessionId: app.sessionId, mode: app.permissionMode });
+      api.setPermissionMode(app.sessionId, app.permissionMode);
     }
   }
 
@@ -45,7 +45,7 @@
     // Optimistic update - backend will confirm via StateChanged event
     app.cycleModel();
     if (app.sessionId) {
-      invoke('set_model', { sessionId: app.sessionId, model: app.model });
+      api.setModel(app.sessionId, app.model);
     }
   }
 

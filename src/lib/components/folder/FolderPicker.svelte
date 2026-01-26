@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { api, type RecentFolder as ApiRecentFolder } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { Folder, Loader2, Sun, Moon, X } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
@@ -33,7 +33,13 @@
 
   async function loadRecentFolders() {
     try {
-      recentFolders = await invoke<RecentFolder[]>('get_recent_folders');
+      const folders = await api.getRecentFolders();
+      // Map API response to local format
+      recentFolders = folders.map(f => ({
+        path: f.path,
+        name: f.path.split('/').pop() || f.path,
+        timestamp: new Date(f.lastUsed).getTime() / 1000,
+      }));
     } catch (e) {
       console.error('Failed to load recent folders:', e);
     }
@@ -60,7 +66,7 @@
     error = null;
 
     try {
-      const valid = await invoke<boolean>('validate_folder', { path });
+      const valid = await api.validateFolder(path);
 
       if (!valid) {
         error = 'Cannot access this folder. Please choose another.';
@@ -68,7 +74,7 @@
       }
 
       // Save to recent folders
-      await invoke('save_recent_folder', { path });
+      await api.saveRecentFolder(path);
 
       // Start session
       await app.startSession(path);

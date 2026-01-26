@@ -1,5 +1,5 @@
 // App state store using Svelte 5 runes
-import { invoke } from '@tauri-apps/api/core';
+import { api } from '$lib/api';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 
@@ -129,11 +129,7 @@ class AppState {
 
   async startSession(folder: string): Promise<void> {
     this.folder = folder;
-    this.sessionId = await invoke<string>('create_session', {
-      folderPath: folder,
-      permissionMode: this.permissionMode,
-      model: this.model,
-    });
+    this.sessionId = await api.createSession(folder, this.permissionMode, this.model);
     this.screen = 'chat';
   }
 

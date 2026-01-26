@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { api } from '$lib/api';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
   import { marked } from 'marked';
@@ -81,10 +81,7 @@
     scrollToBottom();
 
     try {
-      await invoke('send_message', {
-        sessionId: app.sessionId,
-        message,
-      });
+      await api.sendMessage(app.sessionId, message);
     } catch (e) {
       console.error('Failed to send message:', e);
       chat.setStreaming(false);
@@ -110,10 +107,7 @@
     scrollToBottom();
 
     try {
-      await invoke('send_message', {
-        sessionId: app.sessionId,
-        message: nextMessage,
-      });
+      await api.sendMessage(app.sessionId, nextMessage);
     } catch (e) {
       console.error('Failed to send queued message:', e);
       chat.setStreaming(false);
@@ -146,7 +140,7 @@
     chat.clearPendingPermissions();
 
     try {
-      await invoke('abort_session', { sessionId: app.sessionId });
+      await api.abortSession(app.sessionId);
     } catch (e) {
       console.error('Failed to abort session:', e);
       chat.finalize();

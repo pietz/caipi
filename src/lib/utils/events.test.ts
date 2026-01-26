@@ -806,9 +806,8 @@ describe('handleClaudeEvent', () => {
   });
 
   describe('Lifecycle events - Error', () => {
-    it('should add error message, stop streaming, and call onError callback', () => {
+    it('should add error message, finalize, and call onError callback', () => {
       const onError = vi.fn();
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const event: ChatEvent = {
         type: 'Error',
@@ -817,17 +816,13 @@ describe('handleClaudeEvent', () => {
 
       handleClaudeEvent(event, { onError });
 
-      expect(consoleSpy).toHaveBeenCalledWith('Claude error:', 'Something went wrong');
+      expect(chat.finalize).toHaveBeenCalled();
       expect(chat.addErrorMessage).toHaveBeenCalledWith('Something went wrong');
-      expect(chat.setStreaming).toHaveBeenCalledWith(false);
       expect(onError).toHaveBeenCalledWith('Something went wrong');
-
-      consoleSpy.mockRestore();
     });
 
     it('should use default error message if none provided', () => {
       const onError = vi.fn();
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const event: ChatEvent = {
         type: 'Error',
@@ -837,13 +832,9 @@ describe('handleClaudeEvent', () => {
 
       expect(chat.addErrorMessage).toHaveBeenCalledWith('An unknown error occurred');
       expect(onError).toHaveBeenCalledWith('Unknown error');
-
-      consoleSpy.mockRestore();
     });
 
     it('should work without onError callback', () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
       const event: ChatEvent = {
         type: 'Error',
         message: 'Error without callback',
@@ -851,8 +842,6 @@ describe('handleClaudeEvent', () => {
 
       expect(() => handleClaudeEvent(event)).not.toThrow();
       expect(chat.addErrorMessage).toHaveBeenCalledWith('Error without callback');
-
-      consoleSpy.mockRestore();
     });
   });
 

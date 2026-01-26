@@ -1,5 +1,5 @@
 // Event handling utility for Claude events
-import { invoke } from '@tauri-apps/api/core';
+import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 
@@ -263,11 +263,7 @@ export async function respondToPermission(
   }
 
   try {
-    await invoke('respond_permission', {
-      sessionId,
-      requestId: tool.permissionRequestId,
-      allowed,
-    });
+    await api.respondPermission(sessionId, tool.permissionRequestId, allowed);
     // Status will be updated via ToolStatusUpdate event from backend
   } catch (e) {
     console.error('Failed to respond to permission:', e);

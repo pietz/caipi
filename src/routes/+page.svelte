@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { api } from '$lib/api';
   import { onMount } from 'svelte';
   import { Loader2 } from 'lucide-svelte';
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
@@ -21,12 +21,13 @@
 
   onMount(async () => {
     try {
-      const startupInfo = await invoke<StartupInfo>('get_startup_info');
+      // Note: Backend returns snake_case, cast to local interface
+      const startupInfo = await api.getStartupInfo() as unknown as StartupInfo;
 
       // If onboarding is completed and we have a default folder, go directly to chat
       if (startupInfo.onboarding_completed && startupInfo.default_folder) {
         // Validate the folder still exists/is accessible
-        const valid = await invoke<boolean>('validate_folder', { path: startupInfo.default_folder });
+        const valid = await api.validateFolder(startupInfo.default_folder);
 
         if (valid) {
           // Set CLI status if available
