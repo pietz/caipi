@@ -35,9 +35,16 @@ pub fn extract_tool_target(tool: &ToolUseBlock) -> String {
                 .to_string()
         }
         "Bash" => {
-            tool.input.get("command")
+            // Prefer description if available (human-readable)
+            tool.input.get("description")
                 .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
+                .map(|s| truncate_str(s, 60))
+                .or_else(|| {
+                    // Fall back to command if no description
+                    tool.input.get("command")
+                        .and_then(|v| v.as_str())
+                        .map(|s| truncate_str(s, 50))
+                })
                 .unwrap_or_else(|| "command".to_string())
         }
         "WebSearch" => {
@@ -218,7 +225,18 @@ mod tests {
 
     #[test]
     fn test_extract_target_bash() {
-        // Bash tool extracts and truncates command
+        // Bash tool prefers description over command
+        let tool_with_desc = ToolUseBlock {
+            id: "test".to_string(),
+            name: "Bash".to_string(),
+            input: json!({
+                "command": "git commit -m 'Fix bug'",
+                "description": "Create commit with fix message"
+            }),
+        };
+        assert_eq!(extract_tool_target(&tool_with_desc), "Create commit with fix message");
+
+        // Falls back to command if no description
         let tool = ToolUseBlock {
             id: "test".to_string(),
             name: "Bash".to_string(),
@@ -226,7 +244,21 @@ mod tests {
         };
         assert_eq!(extract_tool_target(&tool), "ls -la");
 
-        // Test truncation for long commands
+        // Test truncation for long descriptions (60 char limit)
+        let long_desc = "This is a very long description that should be truncated at sixty characters limit";
+        let tool_long_desc = ToolUseBlock {
+            id: "test".to_string(),
+            name: "Bash".to_string(),
+            input: json!({
+                "command": "some command",
+                "description": long_desc
+            }),
+        };
+        let result = extract_tool_target(&tool_long_desc);
+        assert_eq!(result.len(), 60); // 57 chars + "..."
+        assert!(result.ends_with("..."));
+
+        // Test truncation for long commands (50 char limit when no description)
         let long_command = "echo this is a very long command that should be truncated to fifty characters max";
         let tool_long = ToolUseBlock {
             id: "test".to_string(),

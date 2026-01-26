@@ -82,9 +82,16 @@ fn extract_tool_target(tool_name: &str, tool_input: &serde_json::Value) -> Strin
                 .to_string()
         }
         "Bash" => {
-            tool_input.get("command")
+            // Prefer description if available (human-readable)
+            tool_input.get("description")
                 .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
+                .map(|s| truncate_str(s, 60))
+                .or_else(|| {
+                    // Fall back to command if no description
+                    tool_input.get("command")
+                        .and_then(|v| v.as_str())
+                        .map(|s| truncate_str(s, 50))
+                })
                 .unwrap_or_else(|| "command".to_string())
         }
         "WebSearch" => {
@@ -552,14 +559,31 @@ mod tests {
 
     #[test]
     fn test_extract_tool_target_bash() {
-        // Bash tool extracts and truncates command
+        // Bash tool prefers description over command
+        let with_description = json!({
+            "command": "git commit -m 'Fix bug'",
+            "description": "Create commit with fix message"
+        });
+        let result = extract_tool_target("Bash", &with_description);
+        assert_eq!(result, "Create commit with fix message");
+
+        // Falls back to command if no description
         let short_cmd = json!({
             "command": "ls -la"
         });
         let result = extract_tool_target("Bash", &short_cmd);
         assert_eq!(result, "ls -la");
 
-        // Test truncation (should truncate at 50 chars)
+        // Test truncation for description (should truncate at 60 chars)
+        let long_desc = json!({
+            "command": "some command",
+            "description": "This is a very long description that should be truncated because it exceeds the sixty character limit"
+        });
+        let result = extract_tool_target("Bash", &long_desc);
+        assert!(result.len() <= 63); // 60 + "..."
+        assert!(result.ends_with("..."));
+
+        // Test truncation for command fallback (should truncate at 50 chars)
         let long_cmd = json!({
             "command": "this is a very long command that should be truncated because it exceeds the limit"
         });
