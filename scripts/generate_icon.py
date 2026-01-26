@@ -10,7 +10,11 @@ macOS Icon Specs:
 - Icon shape: 824 × 824 px centered
 - Corner radius: 185.4 px (for 824px shape)
 - Gutter: 100 px on all sides
-- Drop shadow: 28px blur radius, 12px Y-offset, 50% black opacity
+
+Drop shadow (Big Sur template):
+- Gaussian blur stdDeviation: 10px (Pillow: blur radius = 10)
+- Y-offset: 10px
+- Black opacity: 30%
 """
 
 import io
@@ -33,9 +37,9 @@ CORNER_RADIUS = 185
 GUTTER = (CANVAS_SIZE - ICON_SIZE) // 2  # 100px
 
 # Shadow specs
-SHADOW_BLUR = 28
-SHADOW_Y_OFFSET = 12
-SHADOW_OPACITY = 0.5
+SHADOW_BLUR = 10
+SHADOW_Y_OFFSET = 10
+SHADOW_OPACITY = 0.3
 
 # Background color (white to match the SVG interior)
 BG_COLOR = (255, 255, 255)  # Pure white

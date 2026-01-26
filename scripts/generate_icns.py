@@ -23,15 +23,33 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 ICONS_DIR = PROJECT_ROOT / "src-tauri/icons"
 MASTER_ICON = ICONS_DIR / "icon-1024.png"
 
+def generate_tauri_pngs(master: Image.Image) -> None:
+    """Generate Tauri's PNG icon sizes from the 1024×1024 master."""
+    sizes = {
+        "icon.png": 512,  # Base icon
+        "32x32.png": 32,
+        "128x128.png": 128,
+        "128x128@2x.png": 256,
+    }
+
+    for filename, size in sizes.items():
+        icon = master.resize((size, size), Image.Resampling.LANCZOS)
+        icon.save(ICONS_DIR / filename, "PNG")
+        print(f"Created {filename} ({size}x{size})")
+
 
 def generate_icns() -> None:
     """Generate .icns file using iconutil."""
     if not MASTER_ICON.exists():
         print(f"Error: Master icon not found at {MASTER_ICON}")
-        print("Run generate_icon.py first.")
+        print("Run generate_icon.py (SVG source) or create_app_icon.py (PNG source) first.")
         return
 
     master = Image.open(MASTER_ICON)
+
+    print("=== Tauri PNGs ===")
+    generate_tauri_pngs(master)
+    print()
 
     # Create temporary iconset directory
     with tempfile.TemporaryDirectory() as tmpdir:

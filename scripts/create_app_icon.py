@@ -1,5 +1,5 @@
 # /// script
-# dependencies = ["pillow", "numpy"]
+# dependencies = ["pillow"]
 # requires-python = ">=3.12"
 # ///
 """
@@ -9,10 +9,9 @@ Specifications:
 - Canvas: 1024x1024
 - Icon shape: 824x824 centered (100px padding)
 - Corner radius: ~185px with continuous corners (squircle approximation)
-- Shadow: 28px blur, 12px Y-offset, black 50%
+- Shadow: tuned to be subtle in Finder/Dock (defaults below)
 """
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from pathlib import Path
 
@@ -24,6 +23,8 @@ def create_squircle_mask(size: int, radius: float, smoothness: float = 0.6) -> I
     Apple uses n≈4-5 for their superellipse. We approximate with n=4.
     Formula: |x|^n + |y|^n = 1
     """
+    import numpy as np
+
     mask = Image.new('L', (size, size), 0)
 
     # Use superellipse formula for smoother corners
@@ -87,6 +88,8 @@ def create_continuous_corner_mask(size: int, radius: int) -> Image.Image:
 
     This blends between a rounded rect and a squircle for smooth corners.
     """
+    import numpy as np
+
     # Create both masks
     rounded = create_rounded_rect_mask(size, radius)
 
@@ -105,7 +108,7 @@ def create_continuous_corner_mask(size: int, radius: int) -> Image.Image:
     return Image.fromarray(blended.astype(np.uint8), mode='L')
 
 
-def add_shadow(image: Image.Image, blur: int = 28, offset_y: int = 12, opacity: float = 0.5) -> Image.Image:
+def add_shadow(image: Image.Image, blur: int = 16, offset_y: int = 10, opacity: float = 0.18) -> Image.Image:
     """Add a drop shadow to an RGBA image."""
     # Create shadow from alpha channel
     shadow = Image.new('RGBA', image.size, (0, 0, 0, 0))
@@ -141,6 +144,9 @@ def create_app_icon(
     icon_size: int = 824,
     corner_radius: int = 185,
     add_drop_shadow: bool = True,
+    shadow_blur: int = 16,
+    shadow_offset_y: int = 10,
+    shadow_opacity: float = 0.18,
     background_color: tuple = (255, 255, 255, 255),
 ) -> None:
     """
@@ -185,9 +191,9 @@ def create_app_icon(
     offset = (canvas_size - icon_size) // 2
     canvas.paste(icon_with_alpha, (offset, offset), icon_with_alpha)
 
-    # Add shadow if requested (subtle shadow - half strength)
+    # Add shadow if requested
     if add_drop_shadow:
-        canvas = add_shadow(canvas, blur=14, offset_y=6, opacity=0.15)
+        canvas = add_shadow(canvas, blur=shadow_blur, offset_y=shadow_offset_y, opacity=shadow_opacity)
 
     # Save
     canvas.save(output_path, 'PNG')
@@ -227,16 +233,28 @@ def create_inapp_logo(
 
 
 def main():
-    import sys
+    import argparse
 
-    # Get source from command line or use default
-    if len(sys.argv) > 1:
-        source = Path(sys.argv[1])
-        # Generate output name from source
-        output_name = f"icon-{source.stem[-4:]}.png"
-    else:
-        source = Path.home() / "Downloads" / "Gemini_Generated_Image_qlos6fqlos6fqlos.png"
-        output_name = "icon-new.png"
+    parser = argparse.ArgumentParser(description="Generate Caipi app icon assets from a square PNG.")
+    parser.add_argument(
+        "source",
+        nargs="?",
+        default=str(Path(__file__).resolve().parent.parent / "assets" / "caipi-logo-source.png"),
+        help="Path to a square source PNG (default: assets/caipi-logo-source.png).",
+    )
+    parser.add_argument("--shadow-blur", type=int, default=16, help="Gaussian blur radius in px (default: 16).")
+    parser.add_argument("--shadow-dy", type=int, default=10, help="Shadow Y offset in px (default: 10).")
+    parser.add_argument(
+        "--shadow-opacity",
+        type=float,
+        default=0.18,
+        help="Shadow opacity 0..1 (default: 0.18).",
+    )
+    parser.add_argument("--no-shadow", action="store_true", help="Disable drop shadow entirely.")
+    args = parser.parse_args()
+
+    source = Path(args.source)
+    output_name = "icon-1024.png"
 
     output_dir = Path("/Users/pietz/Private/caipi/src-tauri/icons")
 
@@ -247,7 +265,10 @@ def main():
         canvas_size=1024,
         icon_size=824,
         corner_radius=185,
-        add_drop_shadow=True,
+        add_drop_shadow=not args.no_shadow,
+        shadow_blur=args.shadow_blur,
+        shadow_offset_y=args.shadow_dy,
+        shadow_opacity=args.shadow_opacity,
         background_color=(255, 255, 255, 255),  # White background
     )
 

@@ -17,6 +17,7 @@ use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use super::agent::PermissionResponse;
+use super::settings::{self, ClaudeSettings};
 use super::tool_utils::truncate_str;
 
 /// Type alias for permission channels - maps request ID to response sender
@@ -308,6 +309,9 @@ pub fn build_pre_tool_use_hook(
     abort_flag: Arc<AtomicBool>,
     abort_notify: Arc<Notify>,
 ) -> HookCallback {
+    // Load user settings once at hook creation
+    let user_settings: Option<ClaudeSettings> = settings::load_user_settings();
+
     Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
         let permission_channels = permission_channels.clone();
         let app_handle = app_handle.clone();
@@ -315,6 +319,7 @@ pub fn build_pre_tool_use_hook(
         let permission_mode_arc = permission_mode_arc.clone();
         let abort_flag = abort_flag.clone();
         let abort_notify = abort_notify.clone();
+        let user_settings = user_settings.clone();
 
         Box::pin(async move {
             // 1. Check if abort was requested
@@ -360,7 +365,20 @@ pub fn build_pre_tool_use_hook(
                 return decision;
             }
 
-            // 5. Check if this tool requires permission prompting
+            // 5. Check if allowed by user settings (~/.claude/settings.json)
+            if let Some(ref settings) = user_settings {
+                if settings::is_tool_allowed(settings, &tool_name, &tool_input) {
+                    // Emit status update: running (allowed by user settings)
+                    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                        tool_use_id: tool_id,
+                        status: "running".to_string(),
+                        permission_request_id: None,
+                    });
+                    return allow_response("Allowed by user settings");
+                }
+            }
+
+            // 6. Check if this tool requires permission prompting
             if !requires_permission(&tool_name) {
                 // Emit status update: running (no permission needed)
                 let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
@@ -371,7 +389,7 @@ pub fn build_pre_tool_use_hook(
                 return allow_response("Read-only operation");
             }
 
-            // 6. Prompt user for permission
+            // 7. Prompt user for permission
             let request_id = Uuid::new_v4().to_string();
             prompt_user_permission(
                 permission_channels,
