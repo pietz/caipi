@@ -62,6 +62,15 @@ pub enum ChatEvent {
         session_id: String,
     },
     Error { message: String },
+    ThinkingStart {
+        #[serde(rename = "thinkingId")]
+        thinking_id: String,
+        content: String,
+    },
+    ThinkingEnd {
+        #[serde(rename = "thinkingId")]
+        thinking_id: String,
+    },
 }
 
 #[tauri::command]
@@ -232,6 +241,23 @@ pub async fn set_model(
     });
 
     result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_extended_thinking(
+    session_id: String,
+    enabled: bool,
+    app: AppHandle,
+) -> Result<(), String> {
+    let sessions: tauri::State<'_, SessionStore> = app.state();
+
+    // Clone the session, releasing the lock immediately
+    let session = {
+        let store = sessions.lock().await;
+        store.get(&session_id).ok_or("Session not found")?.clone()
+    };
+
+    session.set_extended_thinking(enabled).await.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

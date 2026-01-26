@@ -1,7 +1,5 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { LogicalSize } from '@tauri-apps/api/dpi';
 
 export type Screen = 'loading' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
@@ -42,6 +40,7 @@ class AppState {
   // Settings
   permissionMode = $state<PermissionMode>('default');
   model = $state<Model>(getPersistedModel());
+  extendedThinking = $state(false);
 
   // Auth info
   authType = $state<string | null>(null);
@@ -82,20 +81,10 @@ class AppState {
 
   toggleLeftSidebar() {
     this.leftSidebar = !this.leftSidebar;
-    this.updateMinWindowSize();
   }
 
   toggleRightSidebar() {
     this.rightSidebar = !this.rightSidebar;
-    this.updateMinWindowSize();
-  }
-
-  updateMinWindowSize() {
-    const baseWidth = 576;
-    const sidebarWidth = 224;
-    const sidebars = (this.leftSidebar ? 1 : 0) + (this.rightSidebar ? 1 : 0);
-    const minWidth = baseWidth + sidebars * sidebarWidth;
-    getCurrentWindow().setMinSize(new LogicalSize(minWidth, 512));
   }
 
   setModel(model: Model) {
@@ -121,6 +110,10 @@ class AppState {
     this.permissionMode = modes[next];
   }
 
+  toggleExtendedThinking() {
+    this.extendedThinking = !this.extendedThinking;
+  }
+
   // Sync state from backend events
   syncState(permissionMode: PermissionMode, model: Model) {
     this.permissionMode = permissionMode;
@@ -142,7 +135,6 @@ class AppState {
     this.leftSidebar = false;
     this.rightSidebar = false;
     this.authType = null;
-    this.updateMinWindowSize();
   }
 }
 

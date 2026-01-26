@@ -17,8 +17,8 @@
         "titleBarStyle": "Overlay",
         "trafficLightPosition": { "x": 15, "y": 15 },
         "width": 900,
-        "height": 700,
-        "minWidth": 576,
+        "height": 640,
+        "minWidth": 800,
         "minHeight": 512,
         "center": true,
         "decorations": true

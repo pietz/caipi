@@ -16,6 +16,7 @@
     Ban,
     AlertCircle,
     Clock,
+    Brain,
   } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
 
@@ -60,6 +61,9 @@
     Skill: { icon: Sparkles, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'skill' },
     Task: { icon: ListTodo, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'task' },
     AskUserQuestion: { icon: MessageCircle, className: 'bg-blue-500/10 border-blue-500/20 text-blue-500', label: 'ask' },
+
+    // Thinking
+    Thinking: { icon: Brain, className: 'bg-purple-500/10 border-purple-500/20 text-purple-500', label: 'thinking' },
   };
 
   const defaultConfig: ToolConfig = {

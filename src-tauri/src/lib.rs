@@ -68,6 +68,7 @@ pub fn run() {
             commands::abort_session,
             commands::set_permission_mode,
             commands::set_model,
+            commands::set_extended_thinking,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

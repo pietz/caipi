@@ -4,6 +4,7 @@
 
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { openPath } from '@tauri-apps/plugin-opener';
   import { ChevronDown, ChevronRight, Folder, File } from 'lucide-svelte';
   import { files } from '$lib/stores/files.svelte';
   import FileTreeItem from './FileTreeItem.svelte';
@@ -49,13 +50,27 @@
       files.setSelected(item.path);
     }
   }
+
+  async function handleDoubleClick() {
+    console.log('Double click on:', item.path, 'isFolder:', isFolder);
+    if (!isFolder) {
+      try {
+        console.log('Calling openPath with:', item.path);
+        await openPath(item.path);
+        console.log('openPath succeeded');
+      } catch (e) {
+        console.error('Failed to open file:', e);
+      }
+    }
+  }
 </script>
 
 <div>
   <button
     type="button"
     onclick={handleClick}
-    class="flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted/50 transition-colors w-full text-left"
+    ondblclick={handleDoubleClick}
+    class="flex items-center gap-1 py-1 px-2 rounded hover:bg-muted/50 transition-colors w-full text-left"
     style="padding-left: {depth * 12 + 8}px;"
   >
     {#if isFolder}

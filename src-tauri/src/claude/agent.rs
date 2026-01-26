@@ -49,6 +49,7 @@ pub struct AgentSession {
     app_handle: AppHandle,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
+    extended_thinking: Arc<RwLock<bool>>,
     /// Flag to signal abort - can be set without holding any locks
     abort_flag: Arc<AtomicBool>,
     /// Notify for abort signaling - only fires when explicitly triggered
@@ -65,6 +66,7 @@ impl Clone for AgentSession {
             app_handle: self.app_handle.clone(),
             permission_mode: self.permission_mode.clone(),
             model: self.model.clone(),
+            extended_thinking: self.extended_thinking.clone(),
             abort_flag: self.abort_flag.clone(),
             abort_notify: self.abort_notify.clone(),
         }
@@ -101,6 +103,7 @@ impl AgentSession {
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
+            extended_thinking: Arc::new(RwLock::new(false)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
         })
@@ -146,6 +149,12 @@ impl AgentSession {
         Ok(())
     }
 
+    pub async fn set_extended_thinking(&self, enabled: bool) -> Result<(), AgentError> {
+        let mut current = self.extended_thinking.write().await;
+        *current = enabled;
+        Ok(())
+    }
+
     pub async fn get_permission_mode(&self) -> String {
         self.permission_mode.read().await.clone()
     }
@@ -186,16 +195,28 @@ impl AgentSession {
         // Get the current settings for the SDK options
         let current_mode = self.permission_mode.read().await.clone();
         let current_model = self.model.read().await.clone();
+        let extended_thinking = *self.extended_thinking.read().await;
         let sdk_mode = string_to_permission_mode(&current_mode);
         let model_id = string_to_model_id(&current_model);
 
-        let options = ClaudeAgentOptions::builder()
-            .cwd(&self.folder_path)
-            .hooks(hooks)
-            .permission_mode(sdk_mode)
-            .model(model_id)
-            .setting_sources(vec![SettingSource::User, SettingSource::Project])
-            .build();
+        let options = if extended_thinking {
+            ClaudeAgentOptions::builder()
+                .cwd(&self.folder_path)
+                .hooks(hooks)
+                .permission_mode(sdk_mode)
+                .model(model_id)
+                .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                .max_thinking_tokens(10000)
+                .build()
+        } else {
+            ClaudeAgentOptions::builder()
+                .cwd(&self.folder_path)
+                .hooks(hooks)
+                .permission_mode(sdk_mode)
+                .model(model_id)
+                .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                .build()
+        };
 
         // Create client if needed (model changes are handled via set_model() control protocol)
         let mut client_guard = self.client.lock().await;
@@ -278,6 +299,20 @@ impl AgentSession {
                                             ContentBlock::ToolUse(_tool) => {
                                                 // ToolStart is now emitted from PreToolUse hook
                                                 // with full context including permission status
+                                            }
+                                            ContentBlock::Thinking(thinking_block) => {
+                                                let thinking_id = format!("thinking-{}", Uuid::new_v4());
+
+                                                // Emit ThinkingStart
+                                                let _ = self.app_handle.emit("claude:event", &ChatEvent::ThinkingStart {
+                                                    thinking_id: thinking_id.clone(),
+                                                    content: thinking_block.thinking.clone(),
+                                                });
+
+                                                // Emit ThinkingEnd immediately (thinking comes as complete block)
+                                                let _ = self.app_handle.emit("claude:event", &ChatEvent::ThinkingEnd {
+                                                    thinking_id,
+                                                });
                                             }
                                             _ => {
                                                 // ToolResult should come via Message::User, not here

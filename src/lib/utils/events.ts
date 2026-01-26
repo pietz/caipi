@@ -19,6 +19,8 @@ export interface ChatEvent {
   model?: string;
   totalTokens?: number;
   sessionId?: string;
+  // Thinking events
+  thinkingId?: string;
 }
 
 export interface EventHandlerOptions {
@@ -74,7 +76,20 @@ export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions
     case 'Error':
       handleErrorEvent(event, onError);
       break;
+
+    case 'ThinkingStart':
+      handleThinkingStartEvent(event);
+      break;
+
+    case 'ThinkingEnd':
+      // Thinking blocks arrive complete, so ThinkingEnd is a no-op
+      break;
   }
+}
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + '...';
 }
 
 function handleTextEvent(event: ChatEvent) {
@@ -194,6 +209,25 @@ function handleToolEndEvent(event: ChatEvent) {
       }
     }
   }
+}
+
+function handleThinkingStartEvent(event: ChatEvent) {
+  if (!event.thinkingId || !event.content) return;
+
+  // Flush buffered text before thinking to preserve ordering
+  if (lineBuffer) {
+    chat.appendText(lineBuffer);
+    lineBuffer = '';
+  }
+
+  chat.addTool({
+    id: event.thinkingId,
+    toolType: 'Thinking',
+    target: truncate(event.content, 50),  // Preview of thinking
+    status: 'completed',  // Thinking arrives complete
+    input: { content: event.content },  // Store full content
+    timestamp: Date.now() / 1000,
+  });
 }
 
 function handleCompleteEvent(onComplete?: () => void) {

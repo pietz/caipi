@@ -13,10 +13,13 @@
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = $derived(circumference - (percentage / 100) * circumference);
+
+  // Color gradient: green (120°) -> yellow (60°) -> red (0°)
+  const progressColor = $derived(`hsl(${120 - (percentage * 1.2)}, 70%, 45%)`);
 </script>
 
 <Button
-  variant="outline"
+  variant="ghost"
   size="sm"
   class={cn('gap-1.5 h-8 text-xs', className)}
   {onclick}
@@ -38,12 +41,12 @@
       cy="9"
       r={radius}
       fill="none"
-      stroke="currentColor"
+      stroke={progressColor}
       stroke-width="2"
       stroke-linecap="round"
       stroke-dasharray={circumference}
       stroke-dashoffset={strokeDashoffset}
-      class="text-orange-500"
+      class="transition-all duration-300"
     />
   </svg>
   <span>{percentage}%</span>

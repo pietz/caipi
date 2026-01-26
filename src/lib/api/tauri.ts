@@ -28,4 +28,6 @@ export const api = {
     invoke<void>('set_permission_mode', { sessionId, mode }),
   setModel: (sessionId: string, model: string) =>
     invoke<void>('set_model', { sessionId, model }),
+  setExtendedThinking: (sessionId: string, enabled: boolean) =>
+    invoke<void>('set_extended_thinking', { sessionId, enabled }),
 };
