@@ -1,36 +1,28 @@
 <script lang="ts">
-  import {
-    Check,
-    Loader2,
-    X,
-    Ban,
-    AlertCircle,
-    Clock,
-  } from 'lucide-svelte';
+  import { Check, Loader2, X, Ban, AlertCircle, Clock } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
   import { getToolConfig } from './tool-configs';
 
   interface Props {
     tool: ToolState;
+    showPermissionButtons?: boolean;
     onPermissionResponse?: (allowed: boolean) => void;
   }
 
-  let {
-    tool,
-    onPermissionResponse,
-  }: Props = $props();
-
-  const isAwaitingPermission = $derived(tool.status === 'awaiting_permission');
+  let { tool, showPermissionButtons = false, onPermissionResponse }: Props = $props();
 
   const config = $derived(getToolConfig(tool.toolType));
   const ToolIcon = $derived(config.icon);
+  const isAwaitingPermission = $derived(tool.status === 'awaiting_permission');
 </script>
 
-<div class="flex items-center justify-between rounded-lg border px-3 h-10 my-2 {config.className}">
+<div class="flex items-center justify-between py-0.5 px-2">
   <div class="flex items-center gap-2 min-w-0">
-    <ToolIcon size={14} />
-    <span class="text-xs font-medium uppercase tracking-wide opacity-70">{config.label}</span>
-    <span class="text-xs text-muted-foreground truncate">{tool.target}</span>
+    <div class="w-5 h-5 flex items-center justify-center {config.iconColor}">
+      <ToolIcon size={14} />
+    </div>
+    <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{config.label}</span>
+    <span class="text-xs text-muted-foreground/70 truncate">{tool.target}</span>
   </div>
 
   <div class="flex items-center gap-1.5 h-6">
@@ -46,7 +38,7 @@
       <Clock size={14} class="text-muted-foreground animate-pulse" />
     {:else if tool.status === 'running'}
       <Loader2 size={14} class="animate-spin" />
-    {:else if isAwaitingPermission && onPermissionResponse}
+    {:else if isAwaitingPermission && showPermissionButtons && onPermissionResponse}
       <button
         type="button"
         class="h-6 w-6 rounded-md flex items-center justify-center bg-green-500/15 hover:bg-green-500/25 text-green-500 transition-colors"
@@ -63,6 +55,8 @@
       >
         <X size={14} />
       </button>
+    {:else if isAwaitingPermission}
+      <Clock size={14} class="text-amber-500 animate-pulse" />
     {/if}
   </div>
 </div>

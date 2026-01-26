@@ -12,7 +12,9 @@ use std::path::PathBuf;
 pub struct Permissions {
     #[serde(default)]
     pub allow: Vec<String>,
+    /// Deny list - reserved for future implementation
     #[serde(default)]
+    #[allow(dead_code)]
     pub deny: Vec<String>,
 }
 

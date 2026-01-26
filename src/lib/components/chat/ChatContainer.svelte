@@ -10,12 +10,18 @@
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityCard from './ActivityCard.svelte';
+  import ToolCallStack from './ToolCallStack.svelte';
   import MessageInput from './MessageInput.svelte';
   import { HIDDEN_TOOL_TYPES } from './constants';
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import { app } from '$lib/stores/app.svelte';
-  import { chat, type StreamItem } from '$lib/stores/chat.svelte';
+  import { chat, type StreamItem, type ToolState } from '$lib/stores/chat.svelte';
   import { handleClaudeEvent, respondToPermission, resetEventState, type ChatEvent } from '$lib/utils/events';
+
+  // Types for grouped stream items
+  type GroupedTextItem = { type: 'text'; content: string };
+  type GroupedToolItem = { type: 'tool-group'; tools: ToolState[] };
+  type GroupedItem = GroupedTextItem | GroupedToolItem;
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
@@ -168,6 +174,35 @@
       })
       .sort((a, b) => a.insertionIndex - b.insertionIndex)
   );
+
+  // Group consecutive tools together
+  const groupedStreamItems = $derived((): GroupedItem[] => {
+    const groups: GroupedItem[] = [];
+    let currentToolGroup: ToolState[] = [];
+
+    for (const item of sortedStreamItems) {
+      if (item.type === 'tool' && item.toolId) {
+        const tool = chat.getTool(item.toolId);
+        if (tool) {
+          currentToolGroup.push(tool);
+        }
+      } else if (item.type === 'text' && item.content) {
+        // Text breaks tool groups
+        if (currentToolGroup.length > 0) {
+          groups.push({ type: 'tool-group', tools: [...currentToolGroup] });
+          currentToolGroup = [];
+        }
+        groups.push({ type: 'text', content: item.content });
+      }
+    }
+
+    // Don't forget remaining tools
+    if (currentToolGroup.length > 0) {
+      groups.push({ type: 'tool-group', tools: currentToolGroup });
+    }
+
+    return groups;
+  });
 </script>
 
 <div class="flex flex-col h-full relative">
@@ -268,22 +303,28 @@
             <!-- Stream Items (during streaming) -->
             {#if chat.isStreaming && sortedStreamItems.length > 0}
               <div>
-                {#each sortedStreamItems as item, index (item.insertionIndex)}
-                  {#if item.type === 'text' && item.content}
+                {#each groupedStreamItems() as group, index (index)}
+                  {#if group.type === 'text'}
                     <div
                       class="message-content text-sm leading-relaxed text-foreground/90"
                     >
-                      {@html item.content ? DOMPurify.sanitize(marked.parse(item.content) as string) : ''}
+                      {@html group.content ? DOMPurify.sanitize(marked.parse(group.content) as string) : ''}
                     </div>
-                  {:else if item.type === 'tool' && item.toolId}
-                    {@const tool = chat.getTool(item.toolId)}
-                    {#if tool}
+                  {:else if group.type === 'tool-group'}
+                    {#if group.tools.length === 1}
+                      <!-- Single tool: use ActivityCard -->
                       <div class="mt-2">
                         <ActivityCard
-                          {tool}
-                          onPermissionResponse={(allowed) => handlePermissionResponse(tool.id, allowed)}
+                          tool={group.tools[0]}
+                          onPermissionResponse={(allowed) => handlePermissionResponse(group.tools[0].id, allowed)}
                         />
                       </div>
+                    {:else}
+                      <!-- Multiple tools: use ToolCallStack -->
+                      <ToolCallStack
+                        tools={group.tools}
+                        onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
+                      />
                     {/if}
                   {/if}
                 {/each}
