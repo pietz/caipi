@@ -1,6 +1,6 @@
 {
   "name": "caipi",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "description": "",
   "type": "module",
   "scripts": {
@@ -13,7 +13,10 @@
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:ui": "vitest --ui",
-    "test:all": "npm test && cd src-tauri && cargo test"
+    "test:all": "npm test && cd src-tauri && cargo test",
+    "release": "tauri build && npm run release:rename",
+    "release:rename": "node scripts/release-rename.js",
+    "release:publish": "node scripts/release-publish.js"
   },
   "license": "MIT",
   "dependencies": {

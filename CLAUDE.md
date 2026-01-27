@@ -2,215 +2,60 @@
 
 ## Overview
 
-Caipi is a Tauri 2.0 desktop application that provides a friendly chat UI for Claude Code's agent capabilities. It wraps the Claude Code CLI with a native desktop interface.
+Caipi is a macOS desktop app written in Tauri 2, providing a chat UI for Claude Code. Svelte 5 frontend, Rust backend.
 
-## Repository Architecture
+## Repositories
 
-This project uses two GitHub repositories:
+| Repo | Purpose | Location |
+|------|---------|----------|
+| `pietz/caipi` (private) | Source code | `/Users/pietz/Private/caipi` |
+| `pietz/caipi.ai` (public) | Releases, website, Homebrew tap | `/Users/pietz/Private/caipi.ai` |
 
-### `pietz/caipi` (Private)
-- **Purpose**: Source code, development
-- **Location**: `/Users/pietz/Private/caipi`
-- **Contains**: All application source code (Svelte frontend, Rust backend)
-- **Access**: Private - not shared publicly
-
-### `pietz/caipi.ai` (Public)
-- **Purpose**: Releases, website, community
-- **Location**: `/Users/pietz/Private/caipi.ai`
-- **Domain**: https://caipi.ai (GitHub Pages)
-- **Contains**:
-  - Landing page and marketing website (Astro)
-  - App releases (DMG, update manifests)
-  - GitHub Issues for bug reports
-  - GitHub Discussions for feature requests and community
-- **Updater endpoint**: `https://github.com/pietz/caipi.ai/releases/latest/download/latest.json`
-
-### Release Workflow
-1. Build signed app in this repo: `source .env && npm run tauri build`
-2. Create `latest.json` manifest with version, signatures, and download URLs
-3. Upload DMG + tar.gz + latest.json to GitHub Releases on `pietz/caipi.ai`
-4. App's built-in updater checks the public repo for updates
-
-## Tech Stack
-
-- **Frontend**: Svelte 5 (with runes) + TypeScript + SvelteKit (static adapter)
-- **Styling**: Tailwind CSS v3 + custom CSS variables
-- **Backend**: Rust + Tauri 2.0
-- **Claude Integration**: `claude-agent-sdk-rs` v0.6
+**URLs:**
+- Website: https://caipi.ai
+- Download: `https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg`
+- Homebrew cask: `caipi.ai/Casks/caipi.rb`
 
 ## Commands
 
-### Development
 ```bash
-# Run the app in development mode
-npm run tauri dev
+# Development
+npm run tauri dev      # Run app in dev mode
+npm run check          # Type check frontend
+npm run test:all       # Run all tests
 
-# Type check the frontend
-npm run check
-
-# Build for production (signed & notarized)
-source .env && npm run tauri build
+# Release (requires `source .env` first for signing credentials)
+npm run release                   # Build only
+npm run release && npm run release:publish  # Build + publish to GitHub + update Homebrew
 ```
 
-**Note**: The `.env` file contains Apple code signing credentials and Tauri signing keys. Source it before building to enable signing and notarization.
+**Version bump**: Update `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` before release.
 
-### Environment Variables (`.env`)
-The `.env` file (gitignored) contains sensitive credentials:
-```bash
-# Apple Code Signing & Notarization
-APPLE_SIGNING_IDENTITY="Developer ID Application: ..."
-APPLE_TEAM_ID="..."
-APPLE_ID="..."           # Apple ID email
-APPLE_PASSWORD="..."     # App-specific password (not Apple ID password)
+## Tech Stack
 
-# Tauri Updater Signing
-TAURI_SIGNING_PRIVATE_KEY="..."      # Ed25519 private key (base64)
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" # Empty if no password set
-```
-
-The Tauri signing keypair is stored at `~/.tauri/caipi.key` (private) and `~/.tauri/caipi.key.pub` (public). The public key is embedded in `tauri.conf.json`.
-
-### Rust Only
-```bash
-cd src-tauri
-cargo check    # Check for errors
-cargo build    # Build the backend
-cargo test     # Run Rust tests
-```
-
-### Testing
-```bash
-npm test           # Run frontend tests (vitest)
-npm run test:watch # Run tests in watch mode
-npm run test:all   # Run both frontend and Rust tests
-```
-
-## Project Structure
-
-```
-caipi/
-├── src/                          # Svelte frontend
-│   ├── lib/
-│   │   ├── assets/               # Static assets (caipi-logo.png)
-│   │   ├── components/
-│   │   │   ├── ui/               # Base components (Button, Card, Dialog, Spinner, Input, Textarea, ContextIndicator, ModelCircle)
-│   │   │   ├── icons/            # Only CaipiIcon.svelte - all other icons use lucide-svelte
-│   │   │   ├── sidebar/          # Sidebars (FileExplorer, FileTreeItem, ContextPanel, TodoList, SkillsList)
-│   │   │   ├── onboarding/       # Welcome screen and SetupWizard with CLI detection
-│   │   │   ├── folder/           # Folder picker with drag-drop
-│   │   │   └── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard, Divider)
-│   │   ├── stores/               # Svelte 5 rune stores (app.svelte.ts, chat.svelte.ts, files.svelte.ts, theme.ts)
-│   │   └── utils/                # Utilities (cn function, events)
-│   ├── routes/                   # SvelteKit routes (+page.svelte, +layout.svelte)
-│   └── app.css                   # Global styles + CSS variables
-├── src-tauri/                    # Rust backend
-│   ├── src/
-│   │   ├── lib.rs                # Tauri app setup, command registration
-│   │   ├── main.rs               # Entry point
-│   │   ├── commands/             # Tauri commands
-│   │   │   ├── setup.rs          # CLI detection (check_cli_installed, check_cli_authenticated)
-│   │   │   ├── folder.rs         # Folder operations (get_recent_folders, save_recent_folder)
-│   │   │   ├── files.rs          # File operations (list_directory)
-│   │   │   ├── chat.rs           # Chat/session management (create_session, send_message, set_permission_mode, set_model)
-│   │   │   └── events.rs         # Event emission helpers
-│   │   ├── claude/               # SDK integration
-│   │   │   ├── agent.rs          # AgentSession wrapper, streaming events
-│   │   │   ├── hooks.rs          # Permission and tool hooks (pre/post tool use)
-│   │   │   └── tool_utils.rs     # Tool target extraction, string utilities
-│   │   └── storage/              # Local data persistence
-│   └── capabilities/default.json # Tauri permission capabilities
-└── package.json
-```
-
-## Design System
-
-### Brand Colors (from logo)
-```
-Dark blue-gray:  #122e38   (mascot outline, potential dark accents)
-Forest green:    #439c3a   (deeper green tones)
-Acid green:      #a9d80d   (bright lime highlights)
-```
+- **Frontend**: Svelte 5 (runes) + TypeScript + SvelteKit + Tailwind CSS
+- **Backend**: Rust + Tauri 2.0 + `claude-agent-sdk-rs`
 
 ## Architecture
 
-### Data Flow
-1. User sends message via `MessageInput.svelte`
-2. Frontend invokes `send_message` Tauri command
-3. Rust backend sends to Claude SDK via `AgentSession`
-4. SDK streams events back
-5. Rust emits Tauri events (`claude:text`, `claude:tool_start`, etc.)
-6. Frontend listens via `@tauri-apps/api/event` and updates UI
-
-### Tauri Events
-- `claude:text` - Streaming text chunks
-- `claude:tool_start` - Tool execution started
-- `claude:tool_end` - Tool execution completed
-- `claude:permission_request` - Permission needed
-- `claude:complete` - Turn complete
-- `claude:error` - Error occurred
-
-### State Management
-- `app.ts` store: Current screen, selected folder, sidebar toggles, permission mode, model selection
-- `chat.ts` store: Messages, tool activities, streaming state, tasks, skills, token count
-- `files.ts` store: File tree state, expanded paths, selected file
-
-### Permission Modes
-Controlled via footer button in chat input. Affects how tool permissions are handled:
-- **Default**: Prompts for Write/Edit/Bash/NotebookEdit
-- **Edit** (acceptEdits): Auto-allows file edits, prompts only for Bash
-- **Danger** (bypassPermissions): Bypasses all permission checks
-
-### Model Selection
-Controlled via footer button in chat input. Available models:
-- **Opus 4.5** (large dot): `claude-opus-4-5-20251101`
-- **Sonnet 4.5** (medium dot): `claude-sonnet-4-5-20250514`
-- **Haiku 4.5** (small dot): `claude-haiku-3-5-20241022`
+- **Data flow**: User message → Tauri command → Rust SDK → streaming events → frontend UI
+- **Events**: `claude:text`, `claude:tool_start`, `claude:tool_end`, `claude:permission_request`, `claude:complete`, `claude:error`
+- **Stores**: `app` (screen, folder, settings), `chat` (messages, tools, streaming), `files` (tree state)
+- **Permission modes**: Default (prompts), Edit (auto-allow edits), Danger (bypass all)
+- **Models**: Opus 4.5, Sonnet 4.5, Haiku 4.5
 
 ## Svelte 5 Runes
 
-This project uses Svelte 5 runes syntax:
-- `$state()` for reactive state
-- `$derived()` for computed values
-- `$effect()` for side effects
-- `$props()` for component props
+Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.
 
-## UI Components
+## Brand Colors
 
-### Sidebars
-- **Left sidebar (200px)**: File explorer with tree view, toggled via header button
-- **Right sidebar (220px)**: Context panel with task list and active skills
+- Dark blue-gray: `#122e38`
+- Forest green: `#439c3a`
+- Acid green: `#a9d80d`
 
-### Chat Interface
-- Role-based message labels (no avatars)
-- Dividers between messages
-- Floating send button inside textarea (icon-only, theme-aware colors)
-- Footer with model selector, permission mode selector, and context indicator
+## After Changes
 
-## Known Issues
-
-1. **Unused Rust code**: `extract_tool_target` function in `tool_utils.rs` and `AgentError::Session` variant are defined but not yet used
-
-## Tauri Permissions
-
-Permissions are configured in `src-tauri/capabilities/default.json`. The app requires:
-- `dialog:default`, `dialog:allow-open` - Native file dialogs
-- `fs:default`, `fs:allow-read`, `fs:allow-write` - Filesystem access
-- `opener:default` - Opening external URLs
-
-## Testing
-
-### Test Files
-- `src/lib/stores/app.test.ts` - App store tests
-- `src/lib/stores/chat.test.ts` - Chat store tests
-- `src/lib/utils/events.test.ts` - Event handling tests
-- `src-tauri/src/commands/chat.rs` - Session creation tests (inline)
-- `src-tauri/src/claude/hooks.rs` - Rust hook tests (inline)
-- `src-tauri/src/claude/tool_utils.rs` - Rust utility tests (inline)
-- `src-tauri/src/storage/mod.rs` - Storage tests (inline)
-
-### After Making Changes
-1. Run `npm run test:all` to run all tests
-2. Run `npm run tauri dev` to test the app manually
-3. Check browser console for frontend errors
-4. Check terminal for Rust backend logs/warnings
-5. The app flow is: Onboarding → Folder Picker → Chat
+1. Run `npm run test:all`
+2. Test manually with `npm run tauri dev`
+3. App flow: Onboarding → Folder Picker → Chat
