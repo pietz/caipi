@@ -120,7 +120,8 @@
   * {
     @apply border-border outline-ring/50;
     cursor: default;
-    }
+    overscroll-behavior: none;
+  }
   body {
     @apply font-sans bg-background text-foreground;
     }

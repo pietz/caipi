@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import { PanelLeft, PanelRight, Sun, Moon, Menu } from 'lucide-svelte';
@@ -93,7 +93,6 @@
     // Start streaming
     chat.setStreaming(true);
 
-    // Scroll to bottom
     scrollToBottom();
 
     try {
@@ -130,12 +129,16 @@
     }
   }
 
-  function scrollToBottom() {
-    setTimeout(() => {
-      if (messagesContainer) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      }
-    }, 50);
+  async function scrollToBottom() {
+    // Wait for Svelte to update the DOM with new content
+    await tick();
+
+    if (messagesContainer) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'instant'
+      });
+    }
   }
 
   function goBack() {
