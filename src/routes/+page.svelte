@@ -90,7 +90,7 @@
 {:else if app.screen === 'onboarding'}
   <SetupWizard />
 {:else if app.screen === 'folder'}
-  <SessionPicker showClose={true} />
+  <SessionPicker showClose={!!app.sessionId} />
 {:else if app.screen === 'chat'}
   <ChatContainer />
 {/if}

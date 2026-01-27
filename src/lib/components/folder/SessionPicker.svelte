@@ -5,6 +5,8 @@
   import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
+  import { chat } from '$lib/stores/chat.svelte';
+  import { resetEventState } from '$lib/utils/events';
 
   interface Props {
     showClose?: boolean;
@@ -76,10 +78,19 @@
   }
 
   async function resumeSession(session: SessionInfo) {
+    // If clicking on the currently active session, just return to chat
+    if (app.sessionId === session.sessionId && app.folder === session.folderPath) {
+      app.setScreen('chat');
+      return;
+    }
+
     validating = true;
     error = null;
 
     try {
+      // Reset state before loading different session
+      chat.reset();
+      resetEventState();
       await app.resumeSession(session.folderPath, session.sessionId);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to resume session';
@@ -118,6 +129,10 @@
 
       // Save to recent folders
       await api.saveRecentFolder(path);
+
+      // Reset state before starting new session
+      chat.reset();
+      resetEventState();
 
       // Start session
       await app.startSession(path);

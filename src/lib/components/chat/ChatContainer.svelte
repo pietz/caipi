@@ -142,8 +142,11 @@
   }
 
   function goBack() {
-    resetEventState();
-    chat.reset();
+    // If streaming, finalize current state but preserve messages
+    if (chat.isStreaming) {
+      chat.finalize();
+      resetEventState();
+    }
     app.setScreen('folder');
   }
 
