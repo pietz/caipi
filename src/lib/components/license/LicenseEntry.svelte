@@ -96,7 +96,7 @@
     <div class="space-y-4">
       <Input
         type="text"
-        placeholder="CAIPI-XXXX-XXXX-XXXX"
+        placeholder="Enter your license key"
         bind:value={licenseKey}
         onkeydown={handleKeyDown}
         disabled={validating || success}

@@ -146,7 +146,7 @@ def create_app_icon(
     add_drop_shadow: bool = True,
     shadow_blur: int = 16,
     shadow_offset_y: int = 10,
-    shadow_opacity: float = 0.18,
+    shadow_opacity: float = 0.1,
     background_color: tuple = (255, 255, 255, 255),
 ) -> None:
     """
@@ -247,8 +247,8 @@ def main():
     parser.add_argument(
         "--shadow-opacity",
         type=float,
-        default=0.18,
-        help="Shadow opacity 0..1 (default: 0.18).",
+        default=0.1,
+        help="Shadow opacity 0..1 (default: 0.1).",
     )
     parser.add_argument("--no-shadow", action="store_true", help="Disable drop shadow entirely.")
     args = parser.parse_args()
