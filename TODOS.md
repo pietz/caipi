@@ -54,3 +54,23 @@ Files in the file explorer don't align horizontally. Need to investigate and fix
 User encountered issues with email skill. May be skill-specific or related to general command execution. Needs investigation to determine if it's a Caipi issue or skill configuration issue.
 
 **Context**: Skills are Claude Code features that provide specialized capabilities. The email skill uses AppleScript to interact with Mail.app. Issue may be permission-related or skill implementation.
+
+### P2: Verbose builder pattern in agent.rs
+The 4-way match for `ClaudeAgentOptions` builder (lines 203-252) is repetitive. Refactor to chained conditionals.
+
+**File**: `src-tauri/src/claude/agent.rs`
+
+### P3: Hardcoded version in SessionPicker
+Version `v0.1.0` is hardcoded at line 197. Should pull from config or constant.
+
+**File**: `src/lib/components/folder/SessionPicker.svelte`
+
+### P3: Effect without cleanup in SessionPicker
+`loadSessions()` runs in `$effect` without cancellation. Could cause race conditions on fast remount.
+
+**File**: `src/lib/components/folder/SessionPicker.svelte`
+
+### P3: Remove orphaned FolderPicker if unused
+`FolderPicker.svelte` may be fully replaced by `SessionPicker.svelte`. Verify and delete if unused.
+
+**File**: `src/lib/components/folder/FolderPicker.svelte`

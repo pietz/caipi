@@ -5,6 +5,9 @@ import type {
   RecentFolder,
   LicenseStatus,
   LicenseValidationResult,
+  SessionInfo,
+  ProjectSessions,
+  HistoryMessage,
 } from './types';
 
 export const api = {
@@ -19,9 +22,16 @@ export const api = {
   // Folders
   getRecentFolders: () => invoke<RecentFolder[]>('get_recent_folders'),
 
+  // Sessions
+  getAllSessions: () => invoke<ProjectSessions[]>('get_all_sessions'),
+  getProjectSessions: (folderPath: string) =>
+    invoke<SessionInfo[]>('get_project_sessions', { folderPath }),
+  getSessionHistory: (folderPath: string, sessionId: string) =>
+    invoke<HistoryMessage[]>('get_session_history', { folderPath, sessionId }),
+
   // Session
-  createSession: (folderPath: string, permissionMode?: string, model?: string) =>
-    invoke<string>('create_session', { folderPath, permissionMode, model }),
+  createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string) =>
+    invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId }),
   sendMessage: (sessionId: string, message: string) =>
     invoke<void>('send_message', { sessionId, message }),
   abortSession: (sessionId: string) =>

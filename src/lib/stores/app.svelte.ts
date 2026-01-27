@@ -1,5 +1,6 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
+import { chat } from './chat.svelte';
 
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
@@ -137,6 +138,24 @@ class AppState {
   async startSession(folder: string): Promise<void> {
     this.folder = folder;
     this.sessionId = await api.createSession(folder, this.permissionMode, this.model);
+    this.screen = 'chat';
+  }
+
+  async resumeSession(folderPath: string, sessionId: string): Promise<void> {
+    this.folder = folderPath;
+
+    // Create session first - if this fails, don't pollute chat state
+    this.sessionId = await api.createSession(
+      folderPath,
+      this.permissionMode,
+      this.model,
+      sessionId
+    );
+
+    // Only load history after successful session creation
+    const history = await api.getSessionHistory(folderPath, sessionId);
+    chat.loadHistory(history);
+
     this.screen = 'chat';
   }
 

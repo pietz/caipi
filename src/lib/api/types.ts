@@ -15,6 +15,38 @@ export interface RecentFolder {
   lastUsed: string;
 }
 
+// Sessions
+export interface SessionInfo {
+  sessionId: string;
+  folderPath: string;
+  folderName: string;
+  firstPrompt: string;
+  messageCount: number;
+  created: string;
+  modified: string;
+}
+
+export interface ProjectSessions {
+  folderPath: string;
+  folderName: string;
+  sessions: SessionInfo[];
+  latestModified: string;
+}
+
+export interface HistoryTool {
+  id: string;
+  toolType: string;
+  target: string;
+}
+
+export interface HistoryMessage {
+  id: string;
+  role: string;
+  content: string;
+  timestamp: number;
+  tools: HistoryTool[];
+}
+
 // License
 export interface LicenseStatus {
   valid: boolean;

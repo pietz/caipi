@@ -1,6 +1,6 @@
 // Chat state store using Svelte 5 runes
 
-export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted';
+export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted' | 'history';
 
 export interface ToolState {
   id: string;  // tool_use_id - the canonical identifier
@@ -289,6 +289,48 @@ class ChatState {
     this.activeSkills = [];
     this.tokenCount = 0;
     this.sessionDuration = 0;
+  }
+
+  // --- History ---
+
+  loadHistory(historyMessages: Array<{ id: string; role: string; content: string; timestamp: number; tools: Array<{ id: string; toolType: string; target: string }> }>) {
+    // Merge consecutive assistant messages that have tools but no text content
+    const mergedMessages: Message[] = [];
+    let toolCounter = 0;
+
+    for (const msg of historyMessages) {
+      const tools: ToolState[] = msg.tools.map((tool) => ({
+        id: tool.id,
+        toolType: tool.toolType,
+        target: tool.target,
+        status: 'history' as const,
+        timestamp: msg.timestamp,
+        insertionIndex: toolCounter++,
+      }));
+
+      const lastMessage = mergedMessages[mergedMessages.length - 1];
+      const canMerge =
+        msg.role === 'assistant' &&
+        !msg.content.trim() &&
+        tools.length > 0 &&
+        lastMessage?.role === 'assistant';
+
+      if (canMerge) {
+        // Merge tools into previous assistant message
+        lastMessage.tools = [...(lastMessage.tools || []), ...tools];
+      } else {
+        // Create new message
+        mergedMessages.push({
+          id: msg.id,
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: msg.timestamp,
+          tools: tools.length > 0 ? tools : undefined,
+        });
+      }
+    }
+
+    this.messages = mergedMessages;
   }
 }
 

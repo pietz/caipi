@@ -2,9 +2,8 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import hljs from 'highlight.js';
-  import type { Message, ToolState } from '$lib/stores';
+  import type { Message } from '$lib/stores';
   import { HIDDEN_TOOL_TYPES } from './constants';
-  import ActivityCard from './ActivityCard.svelte';
   import ToolCallStack from './ToolCallStack.svelte';
   import Divider from './Divider.svelte';
 
@@ -18,15 +17,6 @@
     message.tools?.filter(t => !HIDDEN_TOOL_TYPES.includes(t.toolType)) ?? []
   );
   const hasTools = $derived(visibleTools.length > 0);
-
-  // Group consecutive tools (for finalized messages, all tools are consecutive)
-  // Using ToolCallStack for 2+ tools, ActivityCard for single tools
-  type ToolGroup = { tools: ToolState[] };
-  const toolGroups = $derived((): ToolGroup[] => {
-    if (visibleTools.length === 0) return [];
-    // For finalized messages, all tools belong to one group
-    return [{ tools: visibleTools }];
-  });
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -60,15 +50,7 @@
 <!-- Tools (for completed messages) -->
 {#if hasTools}
   <div class="mt-3">
-    {#each toolGroups() as group (group.tools.map(t => t.id).join('-'))}
-      {#if group.tools.length === 1}
-        <!-- Single tool: use ActivityCard -->
-        <ActivityCard tool={group.tools[0]} />
-      {:else}
-        <!-- Multiple tools: use ToolCallStack -->
-        <ToolCallStack tools={group.tools} />
-      {/if}
-    {/each}
+    <ToolCallStack tools={visibleTools} />
   </div>
 {/if}
 

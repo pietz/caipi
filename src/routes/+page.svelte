@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { Loader2 } from 'lucide-svelte';
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
-  import FolderPicker from '$lib/components/folder/FolderPicker.svelte';
+  import SessionPicker from '$lib/components/folder/SessionPicker.svelte';
   import ChatContainer from '$lib/components/chat/ChatContainer.svelte';
   import { LicenseEntry } from '$lib/components/license';
   import { app } from '$lib/stores/app.svelte';
@@ -90,7 +90,7 @@
 {:else if app.screen === 'onboarding'}
   <SetupWizard />
 {:else if app.screen === 'folder'}
-  <FolderPicker showClose={true} />
+  <SessionPicker showClose={true} />
 {:else if app.screen === 'chat'}
   <ChatContainer />
 {/if}

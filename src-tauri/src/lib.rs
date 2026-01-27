@@ -60,6 +60,10 @@ pub fn run() {
             commands::validate_folder,
             commands::get_recent_folders,
             commands::save_recent_folder,
+            // Session commands
+            commands::get_all_sessions,
+            commands::get_project_sessions,
+            commands::get_session_history,
             // File commands
             commands::list_directory,
             // Chat commands

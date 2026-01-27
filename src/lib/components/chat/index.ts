@@ -2,7 +2,6 @@
 export { default as ChatContainer } from './ChatContainer.svelte';
 export { default as ChatMessage } from './ChatMessage.svelte';
 export { default as MessageInput } from './MessageInput.svelte';
-export { default as ActivityCard } from './ActivityCard.svelte';
 export { default as ToolCallStack } from './ToolCallStack.svelte';
 export { default as Divider } from './Divider.svelte';
 

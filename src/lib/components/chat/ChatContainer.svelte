@@ -4,12 +4,11 @@
   import { onMount, onDestroy } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { PanelLeft, PanelRight, Sun, Moon, Home } from 'lucide-svelte';
+  import { PanelLeft, PanelRight, Sun, Moon, Menu } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import ChatMessage from './ChatMessage.svelte';
-  import ActivityCard from './ActivityCard.svelte';
   import ToolCallStack from './ToolCallStack.svelte';
   import MessageInput from './MessageInput.svelte';
   import { HIDDEN_TOOL_TYPES } from './constants';
@@ -39,6 +38,17 @@
 
     // Set up keyboard shortcuts for permission handling
     cleanupKeyboardShortcuts = setupKeyboardShortcuts();
+  });
+
+  // Scroll to bottom when history is loaded (messages jump from 0 to many)
+  let prevMessageCount = $state(0);
+  $effect(() => {
+    const count = chat.messages.length;
+    // History loaded: went from 0 to multiple messages at once
+    if (prevMessageCount === 0 && count > 1) {
+      scrollToBottom();
+    }
+    prevMessageCount = count;
   });
 
   onDestroy(() => {
@@ -228,7 +238,7 @@
         class="h-6 w-6 text-muted-foreground"
         onclick={goBack}
       >
-        <Home size={14} />
+        <Menu size={14} />
       </Button>
     </div>
 
@@ -282,16 +292,10 @@
       >
         {#if chat.messages.length === 0 && !chat.isStreaming}
           <!-- Empty State -->
-          <div class="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <div class="mb-3 opacity-50">
-              <CaipiIcon size={64} />
+          <div class="flex items-center justify-center h-full">
+            <div class="opacity-20">
+              <CaipiIcon size={128} />
             </div>
-            <p class="text-sm mb-1">
-              Start a conversation
-            </p>
-            <p class="text-xs text-muted-foreground/70">
-              Ask Claude to help with your code
-            </p>
           </div>
         {:else}
           <!-- Message List -->
@@ -311,21 +315,10 @@
                       {@html group.content ? DOMPurify.sanitize(marked.parse(group.content) as string) : ''}
                     </div>
                   {:else if group.type === 'tool-group'}
-                    {#if group.tools.length === 1}
-                      <!-- Single tool: use ActivityCard -->
-                      <div class="mt-2">
-                        <ActivityCard
-                          tool={group.tools[0]}
-                          onPermissionResponse={(allowed) => handlePermissionResponse(group.tools[0].id, allowed)}
-                        />
-                      </div>
-                    {:else}
-                      <!-- Multiple tools: use ToolCallStack -->
-                      <ToolCallStack
-                        tools={group.tools}
-                        onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
-                      />
-                    {/if}
+                    <ToolCallStack
+                      tools={group.tools}
+                      onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
+                    />
                   {/if}
                 {/each}
               </div>

@@ -16,7 +16,7 @@ import type { ComponentType } from 'svelte';
 
 export type ToolConfig = {
   icon: ComponentType;
-  // Full class for ActivityCard (colored background)
+  // Full class (colored background) - kept for future use
   className: string;
   // Text color only for stack icons
   iconColor: string;

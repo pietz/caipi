@@ -50,6 +50,8 @@ pub struct AgentSession {
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
     extended_thinking: Arc<RwLock<bool>>,
+    /// Session ID to resume from Claude CLI
+    resume_session_id: Option<String>,
     /// Flag to signal abort - can be set without holding any locks
     abort_flag: Arc<AtomicBool>,
     /// Notify for abort signaling - only fires when explicitly triggered
@@ -67,6 +69,7 @@ impl Clone for AgentSession {
             permission_mode: self.permission_mode.clone(),
             model: self.model.clone(),
             extended_thinking: self.extended_thinking.clone(),
+            resume_session_id: self.resume_session_id.clone(),
             abort_flag: self.abort_flag.clone(),
             abort_notify: self.abort_notify.clone(),
         }
@@ -92,7 +95,7 @@ fn string_to_model_id(model: &str) -> &'static str {
 }
 
 impl AgentSession {
-    pub async fn new(folder_path: String, permission_mode: String, model: String, app_handle: AppHandle) -> Result<Self, AgentError> {
+    pub async fn new(folder_path: String, permission_mode: String, model: String, resume_session_id: Option<String>, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
 
         Ok(Self {
@@ -104,6 +107,7 @@ impl AgentSession {
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
             extended_thinking: Arc::new(RwLock::new(false)),
+            resume_session_id,
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
         })
@@ -199,23 +203,47 @@ impl AgentSession {
         let sdk_mode = string_to_permission_mode(&current_mode);
         let model_id = string_to_model_id(&current_model);
 
-        let options = if extended_thinking {
-            ClaudeAgentOptions::builder()
-                .cwd(&self.folder_path)
-                .hooks(hooks)
-                .permission_mode(sdk_mode)
-                .model(model_id)
-                .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                .max_thinking_tokens(10000)
-                .build()
-        } else {
-            ClaudeAgentOptions::builder()
-                .cwd(&self.folder_path)
-                .hooks(hooks)
-                .permission_mode(sdk_mode)
-                .model(model_id)
-                .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                .build()
+        let options = match (&self.resume_session_id, extended_thinking) {
+            (Some(session_id), true) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .resume(session_id.clone())
+                    .max_thinking_tokens(10000)
+                    .build()
+            }
+            (Some(session_id), false) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .resume(session_id.clone())
+                    .build()
+            }
+            (None, true) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .max_thinking_tokens(10000)
+                    .build()
+            }
+            (None, false) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .build()
+            }
         };
 
         // Create client if needed (model changes are handled via set_model() control protocol)

@@ -19,7 +19,7 @@
 
   // Track which tool IDs have been revealed (by ID to prevent re-animation on remount)
   // Initialize with completed tools (they don't need animation)
-  const COMPLETED_STATUSES = ['completed', 'error', 'denied', 'aborted'];
+  const COMPLETED_STATUSES = ['completed', 'error', 'denied', 'aborted', 'history'];
   let revealedIds = $state<string[]>(
     tools.filter(t => COMPLETED_STATUSES.includes(t.status)).map(t => t.id)
   );

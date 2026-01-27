@@ -78,12 +78,13 @@ pub async fn create_session(
     folder_path: String,
     permission_mode: Option<String>,
     model: Option<String>,
+    resume_session_id: Option<String>,
     app: AppHandle,
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
     let mode = permission_mode.unwrap_or_else(|| "default".to_string());
     let model = model.unwrap_or_else(|| "sonnet".to_string());
-    let session = AgentSession::new(folder_path, mode, model, app.clone()).await.map_err(|e| e.to_string())?;
+    let session = AgentSession::new(folder_path, mode, model, resume_session_id, app.clone()).await.map_err(|e| e.to_string())?;
     let session_id = session.id.clone();
 
     let mut store = sessions.lock().await;

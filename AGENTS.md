@@ -45,7 +45,7 @@ caipi/
 │   │   │   ├── sidebar/          # Sidebars (FileExplorer, FileTreeItem, ContextPanel, TodoList, SkillsList)
 │   │   │   ├── onboarding/       # Welcome screen and SetupWizard with CLI detection
 │   │   │   ├── folder/           # Folder picker with drag-drop
-│   │   │   └── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ActivityCard, Divider)
+│   │   │   └── chat/             # Chat interface (ChatContainer, ChatMessage, MessageInput, ToolCallStack, Divider)
 │   │   ├── stores/               # Svelte 5 rune stores (app.svelte.ts, chat.svelte.ts, files.svelte.ts, theme.ts)
 │   │   └── utils/                # Utilities (cn function, events)
 │   ├── routes/                   # SvelteKit routes (+page.svelte, +layout.svelte)

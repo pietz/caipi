@@ -26,7 +26,7 @@
   </div>
 
   <div class="flex items-center gap-1.5 h-6">
-    {#if tool.status === 'completed'}
+    {#if tool.status === 'completed' || tool.status === 'history'}
       <Check size={14} class="text-green-500" />
     {:else if tool.status === 'error'}
       <AlertCircle size={14} class="text-red-500" />
