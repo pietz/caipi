@@ -5,6 +5,7 @@
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
   import FolderPicker from '$lib/components/folder/FolderPicker.svelte';
   import ChatContainer from '$lib/components/chat/ChatContainer.svelte';
+  import { LicenseEntry } from '$lib/components/license';
   import { app } from '$lib/stores/app.svelte';
 
   interface StartupInfo {
@@ -21,6 +22,24 @@
 
   onMount(async () => {
     try {
+      // First check license status
+      const licenseStatus = await api.getLicenseStatus();
+
+      if (!licenseStatus.valid) {
+        // No valid license - show license entry screen
+        app.setScreen('license');
+        app.setLoading(false);
+        return;
+      }
+
+      // Store license info in app state
+      app.setLicense({
+        valid: true,
+        licenseKey: licenseStatus.license_key,
+        activatedAt: licenseStatus.activated_at,
+        email: licenseStatus.email,
+      });
+
       // Note: Backend returns snake_case, cast to local interface
       const startupInfo = await api.getStartupInfo() as unknown as StartupInfo;
 
@@ -55,8 +74,8 @@
       app.setLoading(false);
     } catch (e) {
       console.error('Failed to get startup info:', e);
-      // Fallback to onboarding on error
-      app.setScreen('onboarding');
+      // Fallback to license check on error (most secure default)
+      app.setScreen('license');
       app.setLoading(false);
     }
   });
@@ -66,6 +85,8 @@
   <div class="flex items-center justify-center h-full" data-tauri-drag-region>
     <Loader2 size={24} class="animate-spin text-muted-foreground" />
   </div>
+{:else if app.screen === 'license'}
+  <LicenseEntry />
 {:else if app.screen === 'onboarding'}
   <SetupWizard />
 {:else if app.screen === 'folder'}

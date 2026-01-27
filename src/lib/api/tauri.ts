@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CliInstallStatus, StartupInfo, RecentFolder } from './types';
+import type {
+  CliInstallStatus,
+  StartupInfo,
+  RecentFolder,
+  LicenseStatus,
+  LicenseValidationResult,
+} from './types';
 
 export const api = {
   // Setup
@@ -30,4 +36,10 @@ export const api = {
     invoke<void>('set_model', { sessionId, model }),
   setExtendedThinking: (sessionId: string, enabled: boolean) =>
     invoke<void>('set_extended_thinking', { sessionId, enabled }),
+
+  // License
+  validateLicense: (licenseKey: string) =>
+    invoke<LicenseValidationResult>('validate_license', { licenseKey }),
+  getLicenseStatus: () => invoke<LicenseStatus>('get_license_status'),
+  clearLicense: () => invoke<void>('clear_license'),
 };

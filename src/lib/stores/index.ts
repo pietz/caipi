@@ -9,6 +9,7 @@ export { themeStore, resolvedTheme, applyTheme, type ThemePreference, type Resol
 export type { Screen, PermissionMode, Model, CliStatus } from './app.svelte';
 export type { Message, ToolState, ToolStatus, TodoItem, StreamItem } from './chat.svelte';
 export type { FileEntry } from './files.svelte';
+export type { UpdateStatus } from './updater.svelte';
 
 // Event handling utilities
 export { handleClaudeEvent, respondToPermission, resetEventState, type ChatEvent, type EventHandlerOptions } from '$lib/utils/events';

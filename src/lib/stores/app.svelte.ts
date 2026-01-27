@@ -1,9 +1,16 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
 
-export type Screen = 'loading' | 'onboarding' | 'folder' | 'chat';
+export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 export type Model = 'opus' | 'sonnet' | 'haiku';
+
+export interface LicenseInfo {
+  valid: boolean;
+  licenseKey: string | null;
+  activatedAt: number | null;
+  email: string | null;
+}
 
 export interface CliStatus {
   installed: boolean;
@@ -45,6 +52,9 @@ class AppState {
   // Auth info
   authType = $state<string | null>(null);
 
+  // License
+  license = $state<LicenseInfo | null>(null);
+
   // Derived
   get folderName(): string {
     return this.folder?.split('/').pop() ?? '';
@@ -77,6 +87,10 @@ class AppState {
 
   setAuthType(authType: string | null) {
     this.authType = authType;
+  }
+
+  setLicense(license: LicenseInfo | null) {
+    this.license = license;
   }
 
   toggleLeftSidebar() {

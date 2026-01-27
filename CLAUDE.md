@@ -4,6 +4,33 @@
 
 Caipi is a Tauri 2.0 desktop application that provides a friendly chat UI for Claude Code's agent capabilities. It wraps the Claude Code CLI with a native desktop interface.
 
+## Repository Architecture
+
+This project uses two GitHub repositories:
+
+### `pietz/caipi` (Private)
+- **Purpose**: Source code, development
+- **Location**: `/Users/pietz/Private/caipi`
+- **Contains**: All application source code (Svelte frontend, Rust backend)
+- **Access**: Private - not shared publicly
+
+### `pietz/caipi.ai` (Public)
+- **Purpose**: Releases, website, community
+- **Location**: `/Users/pietz/Private/caipi.ai`
+- **Domain**: https://caipi.ai (GitHub Pages)
+- **Contains**:
+  - Landing page and marketing website (Astro)
+  - App releases (DMG, update manifests)
+  - GitHub Issues for bug reports
+  - GitHub Discussions for feature requests and community
+- **Updater endpoint**: `https://github.com/pietz/caipi.ai/releases/latest/download/latest.json`
+
+### Release Workflow
+1. Build signed app in this repo: `source .env && npm run tauri build`
+2. Create `latest.json` manifest with version, signatures, and download URLs
+3. Upload DMG + tar.gz + latest.json to GitHub Releases on `pietz/caipi.ai`
+4. App's built-in updater checks the public repo for updates
+
 ## Tech Stack
 
 - **Frontend**: Svelte 5 (with runes) + TypeScript + SvelteKit (static adapter)
@@ -21,9 +48,27 @@ npm run tauri dev
 # Type check the frontend
 npm run check
 
-# Build for production
-npm run tauri build
+# Build for production (signed & notarized)
+source .env && npm run tauri build
 ```
+
+**Note**: The `.env` file contains Apple code signing credentials and Tauri signing keys. Source it before building to enable signing and notarization.
+
+### Environment Variables (`.env`)
+The `.env` file (gitignored) contains sensitive credentials:
+```bash
+# Apple Code Signing & Notarization
+APPLE_SIGNING_IDENTITY="Developer ID Application: ..."
+APPLE_TEAM_ID="..."
+APPLE_ID="..."           # Apple ID email
+APPLE_PASSWORD="..."     # App-specific password (not Apple ID password)
+
+# Tauri Updater Signing
+TAURI_SIGNING_PRIVATE_KEY="..."      # Ed25519 private key (base64)
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" # Empty if no password set
+```
+
+The Tauri signing keypair is stored at `~/.tauri/caipi.key` (private) and `~/.tauri/caipi.key.pub` (public). The public key is embedded in `tauri.conf.json`.
 
 ### Rust Only
 ```bash

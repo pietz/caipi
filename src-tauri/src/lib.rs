@@ -18,6 +18,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(session_store)
         .manage(permission_channels)
         .on_window_event(|window, event| {
@@ -69,6 +71,10 @@ pub fn run() {
             commands::set_permission_mode,
             commands::set_model,
             commands::set_extended_thinking,
+            // License commands
+            commands::validate_license,
+            commands::get_license_status,
+            commands::clear_license,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -31,6 +31,15 @@ pub struct CliStatusCache {
     pub cached_at: u64, // Unix timestamp in seconds
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LicenseData {
+    pub license_key: String,
+    pub activated_at: u64, // Unix timestamp in seconds
+    pub email: Option<String>,
+    #[serde(default)]
+    pub instance_id: Option<String>, // Lemon Squeezy instance ID for deactivation
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AppData {
     pub recent_folders: Vec<RecentFolder>,
@@ -40,6 +49,8 @@ pub struct AppData {
     pub cli_status_cache: Option<CliStatusCache>,
     #[serde(default)]
     pub default_folder: Option<String>,
+    #[serde(default)]
+    pub license: Option<LicenseData>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
@@ -159,6 +170,37 @@ pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
     Ok(())
 }
 
+pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
+    let data = load_data()?;
+    Ok(data.license)
+}
+
+pub fn set_license(
+    license_key: String,
+    activated_at: u64,
+    email: Option<String>,
+    instance_id: Option<String>,
+) -> Result<(), StorageError> {
+    let _guard = get_storage_lock().lock().unwrap();
+    let mut data = load_data()?;
+    data.license = Some(LicenseData {
+        license_key,
+        activated_at,
+        email,
+        instance_id,
+    });
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn clear_license() -> Result<(), StorageError> {
+    let _guard = get_storage_lock().lock().unwrap();
+    let mut data = load_data()?;
+    data.license = None;
+    save_data(&data)?;
+    Ok(())
+}
+
 // Test helper functions that accept explicit paths
 #[cfg(test)]
 fn load_data_from(path: &std::path::Path) -> Result<AppData, StorageError> {
@@ -249,6 +291,7 @@ mod tests {
                 cached_at: 12345,
             }),
             default_folder: Some("/default/path".to_string()),
+            license: None,
         };
 
         save_data_to(&data_path, &original_data).unwrap();
@@ -505,5 +548,71 @@ mod tests {
         // Here we verify the file exists and contains valid data
         let loaded = load_data_from(&data_path).unwrap();
         assert!(loaded.onboarding_completed);
+    }
+
+    #[test]
+    fn test_license_set_and_get_roundtrip() {
+        let (_temp_dir, data_path) = setup_test_dir();
+
+        let mut data = AppData::default();
+        data.license = Some(LicenseData {
+            license_key: "CAIPI-1234567890ABCDEF".to_string(),
+            activated_at: 1700000000,
+            email: Some("user@example.com".to_string()),
+            instance_id: None,
+        });
+
+        save_data_to(&data_path, &data).unwrap();
+        let loaded_data = load_data_from(&data_path).unwrap();
+
+        assert!(loaded_data.license.is_some());
+        let license = loaded_data.license.unwrap();
+        assert_eq!(license.license_key, "CAIPI-1234567890ABCDEF");
+        assert_eq!(license.activated_at, 1700000000);
+        assert_eq!(license.email, Some("user@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_license_clear() {
+        let (_temp_dir, data_path) = setup_test_dir();
+
+        let mut data = AppData::default();
+        data.license = Some(LicenseData {
+            license_key: "CAIPI-TEST123456789".to_string(),
+            activated_at: 1700000000,
+            email: None,
+            instance_id: None,
+        });
+
+        save_data_to(&data_path, &data).unwrap();
+
+        let mut loaded_data = load_data_from(&data_path).unwrap();
+        assert!(loaded_data.license.is_some());
+
+        loaded_data.license = None;
+        save_data_to(&data_path, &loaded_data).unwrap();
+
+        let final_data = load_data_from(&data_path).unwrap();
+        assert!(final_data.license.is_none());
+    }
+
+    #[test]
+    fn test_license_without_email() {
+        let (_temp_dir, data_path) = setup_test_dir();
+
+        let mut data = AppData::default();
+        data.license = Some(LicenseData {
+            license_key: "CAIPI-NOEMAILTESTKEY".to_string(),
+            activated_at: 1700000000,
+            email: None,
+            instance_id: None,
+        });
+
+        save_data_to(&data_path, &data).unwrap();
+        let loaded_data = load_data_from(&data_path).unwrap();
+
+        assert!(loaded_data.license.is_some());
+        let license = loaded_data.license.unwrap();
+        assert!(license.email.is_none());
     }
 }
