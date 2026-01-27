@@ -299,8 +299,8 @@
         {#if chat.messages.length === 0 && !chat.isStreaming}
           <!-- Empty State -->
           <div class="flex items-center justify-center h-full">
-            <div class="opacity-20">
-              <CaipiIcon size={128} />
+            <div class="opacity-50">
+              <CaipiIcon size={192} />
             </div>
           </div>
         {:else}
