@@ -8,18 +8,6 @@
   import { LicenseEntry } from '$lib/components/license';
   import { app } from '$lib/stores/app.svelte';
 
-  interface StartupInfo {
-    onboarding_completed: boolean;
-    cli_status: {
-      installed: boolean;
-      version: string | null;
-      authenticated: boolean;
-      path: string | null;
-    } | null;
-    cli_status_fresh: boolean;
-    default_folder: string | null;
-  }
-
   onMount(async () => {
     try {
       // First check license status
@@ -35,28 +23,32 @@
       // Store license info in app state
       app.setLicense({
         valid: true,
-        licenseKey: licenseStatus.license_key,
-        activatedAt: licenseStatus.activated_at,
+        licenseKey: licenseStatus.licenseKey,
+        activatedAt: licenseStatus.activatedAt,
         email: licenseStatus.email,
       });
 
-      // Note: Backend returns snake_case, cast to local interface
-      const startupInfo = await api.getStartupInfo() as unknown as StartupInfo;
+      const startupInfo = await api.getStartupInfo();
+
+      // Set CLI path if available (for custom Claude CLI location)
+      if (startupInfo.cliPath) {
+        app.setCliPath(startupInfo.cliPath);
+      }
 
       // If onboarding is completed and we have a default folder, go directly to chat
-      if (startupInfo.onboarding_completed && startupInfo.default_folder) {
+      if (startupInfo.onboardingCompleted && startupInfo.defaultFolder) {
         // Validate the folder still exists/is accessible
-        const valid = await api.validateFolder(startupInfo.default_folder);
+        const valid = await api.validateFolder(startupInfo.defaultFolder);
 
         if (valid) {
           // Set CLI status if available
-          if (startupInfo.cli_status) {
-            app.setCliStatus(startupInfo.cli_status);
+          if (startupInfo.cliStatus) {
+            app.setCliStatus(startupInfo.cliStatus);
           }
 
           // Start session directly
           try {
-            await app.startSession(startupInfo.default_folder);
+            await app.startSession(startupInfo.defaultFolder);
             app.setLoading(false);
             return;
           } catch (e) {

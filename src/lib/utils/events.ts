@@ -33,6 +33,13 @@ let lineBuffer = '';
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const FLUSH_DELAY_MS = 150;
 
+// Callback to notify when content changes (for scrolling)
+let onContentChange: (() => void) | null = null;
+
+export function setOnContentChange(callback: (() => void) | null) {
+  onContentChange = callback;
+}
+
 export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions = {}) {
   const { onComplete, onError } = options;
 
@@ -104,6 +111,7 @@ function handleTextEvent(event: ChatEvent) {
   // Push complete lines (with newline restored)
   if (lines.length > 0) {
     chat.appendText(lines.join('\n') + '\n');
+    onContentChange?.();
   }
 
   // Schedule a timer-based flush for buffered content without newlines
@@ -114,6 +122,7 @@ function handleTextEvent(event: ChatEvent) {
       if (lineBuffer) {
         chat.appendText(lineBuffer);
         lineBuffer = '';
+        onContentChange?.();
       }
       flushTimer = null;
     }, FLUSH_DELAY_MS);

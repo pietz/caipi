@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crate::storage;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct RecentFolder {
     pub path: String,
     pub name: String,

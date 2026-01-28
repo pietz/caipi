@@ -15,7 +15,7 @@
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import { app } from '$lib/stores/app.svelte';
   import { chat, type StreamItem, type ToolState } from '$lib/stores/chat.svelte';
-  import { handleClaudeEvent, respondToPermission, resetEventState, type ChatEvent } from '$lib/utils/events';
+  import { handleClaudeEvent, respondToPermission, resetEventState, setOnContentChange, type ChatEvent } from '$lib/utils/events';
 
   // Types for grouped stream items
   type GroupedTextItem = { type: 'text'; content: string };
@@ -27,6 +27,9 @@
   let cleanupKeyboardShortcuts: (() => void) | null = null;
 
   onMount(async () => {
+    // Register scroll callback for content changes (e.g., buffer flush)
+    setOnContentChange(scrollToBottom);
+
     // Listen for Claude events
     unlisten = await listen<ChatEvent>('claude:event', (event) => {
       handleClaudeEvent(event.payload, { onComplete: processQueuedMessages });
@@ -51,6 +54,7 @@
   onDestroy(() => {
     unlisten?.();
     cleanupKeyboardShortcuts?.();
+    setOnContentChange(null);
     resetEventState();
   });
 
@@ -130,12 +134,15 @@
     // Wait for Svelte to update the DOM with new content
     await tick();
 
-    if (messagesContainer) {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'instant'
-      });
-    }
+    // Wait for browser layout/paint to complete
+    requestAnimationFrame(() => {
+      if (messagesContainer) {
+        messagesContainer.scrollTo({
+          top: messagesContainer.scrollHeight,
+          behavior: 'instant'
+        });
+      }
+    });
   }
 
   function goBack() {

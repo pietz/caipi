@@ -12,6 +12,7 @@ const LEMON_SQUEEZY_DEACTIVATE_URL: &str = "https://api.lemonsqueezy.com/v1/lice
 
 /// License status returned to the frontend
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct LicenseStatus {
     pub valid: bool,
     pub license_key: Option<String>,
@@ -21,6 +22,7 @@ pub struct LicenseStatus {
 
 /// Result of a license validation attempt
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LicenseValidationResult {
     pub valid: bool,
     pub error: Option<String>,

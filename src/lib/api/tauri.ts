@@ -32,8 +32,8 @@ export const api = {
     invoke<HistoryMessage[]>('get_session_history', { folderPath, sessionId }),
 
   // Session
-  createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string) =>
-    invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId }),
+  createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string, cliPath?: string) =>
+    invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId, cliPath }),
   sendMessage: (sessionId: string, message: string) =>
     invoke<void>('send_message', { sessionId, message }),
   abortSession: (sessionId: string) =>
@@ -54,4 +54,8 @@ export const api = {
     invoke<LicenseValidationResult>('validate_license', { licenseKey }),
   getLicenseStatus: () => invoke<LicenseStatus>('get_license_status'),
   clearLicense: () => invoke<void>('clear_license'),
+
+  // CLI Path
+  getCliPath: () => invoke<string | null>('get_cli_path'),
+  setCliPath: (path?: string) => invoke<void>('set_cli_path', { path }),
 };

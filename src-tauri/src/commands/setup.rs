@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CliStatus {
     pub installed: bool,
     pub version: Option<String>,
@@ -14,6 +15,7 @@ pub struct CliStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CliInstallStatus {
     pub installed: bool,
     pub version: Option<String>,
@@ -110,17 +112,20 @@ pub async fn check_cli_status() -> Result<CliStatus, String> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartupInfo {
     pub onboarding_completed: bool,
     pub cli_status: Option<CliStatus>,
     pub cli_status_fresh: bool,
     pub default_folder: Option<String>,
+    pub cli_path: Option<String>,
 }
 
 #[tauri::command]
 pub async fn get_startup_info() -> Result<StartupInfo, String> {
     let onboarding_completed = storage::get_onboarding_completed().map_err(|e| e.to_string())?;
     let default_folder = storage::get_default_folder().map_err(|e| e.to_string())?;
+    let cli_path = storage::get_cli_path().map_err(|e| e.to_string())?;
 
     let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;
 
@@ -142,6 +147,7 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
         cli_status,
         cli_status_fresh,
         default_folder,
+        cli_path,
     })
 }
 
@@ -170,6 +176,17 @@ pub async fn set_default_folder(path: Option<String>) -> Result<(), String> {
 pub async fn reset_onboarding() -> Result<(), String> {
     storage::set_onboarding_completed(false).map_err(|e| e.to_string())?;
     storage::clear_cli_status_cache().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_cli_path() -> Result<Option<String>, String> {
+    storage::get_cli_path().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_cli_path(path: Option<String>) -> Result<(), String> {
+    storage::set_cli_path(path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

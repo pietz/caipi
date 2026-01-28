@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::claude::tool_utils::extract_tool_target;
+
 #[derive(Debug, Serialize, Clone)]
 pub struct SessionInfo {
     #[serde(rename = "sessionId")]
@@ -216,115 +218,6 @@ pub struct HistoryMessage {
     pub content: String,
     pub timestamp: i64,
     pub tools: Vec<HistoryTool>,
-}
-
-/// Truncate a string for display
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count > max_chars {
-        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    } else {
-        s.to_string()
-    }
-}
-
-/// Extract the target (file path, pattern, etc.) from a tool's input for display
-fn extract_tool_target(tool_name: &str, input: &Value) -> String {
-    match tool_name {
-        "Read" | "Write" | "Edit" => {
-            input.get("file_path")
-                .or_else(|| input.get("path"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        }
-        "Glob" => {
-            input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("*")
-                .to_string()
-        }
-        "Grep" => {
-            input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("...")
-                .to_string()
-        }
-        "Bash" => {
-            input.get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 60))
-                .or_else(|| {
-                    input.get("command")
-                        .and_then(|v| v.as_str())
-                        .map(|s| truncate_str(s, 50))
-                })
-                .unwrap_or_else(|| "command".to_string())
-        }
-        "WebSearch" => {
-            input.get("query")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "searching...".to_string())
-        }
-        "WebFetch" => {
-            input.get("url")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "fetching...".to_string())
-        }
-        "Skill" => {
-            input.get("skill")
-                .and_then(|v| v.as_str())
-                .unwrap_or("skill")
-                .to_string()
-        }
-        "Task" => {
-            input.get("description")
-                .or_else(|| input.get("prompt"))
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "task".to_string())
-        }
-        "AskUserQuestion" => "asking question...".to_string(),
-        "NotebookEdit" => {
-            input.get("notebook_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("notebook")
-                .to_string()
-        }
-        "TaskCreate" => {
-            input.get("subject")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "new task".to_string())
-        }
-        "TaskUpdate" => {
-            input.get("taskId")
-                .and_then(|v| v.as_str())
-                .map(|id| format!("task {}", truncate_str(id, 20)))
-                .unwrap_or_else(|| "task".to_string())
-        }
-        "TaskList" | "TaskGet" => "tasks".to_string(),
-        "TodoWrite" => {
-            input.get("todos")
-                .and_then(|v| v.as_array())
-                .map(|arr| format!("{} todo(s)", arr.len()))
-                .unwrap_or_else(|| "todos".to_string())
-        }
-        "TodoRead" => "reading todos".to_string(),
-        _ => {
-            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
-            for field in fields {
-                if let Some(val) = input.get(field).and_then(|v| v.as_str()) {
-                    let detail = truncate_str(val, 40);
-                    return format!("{}: {}", tool_name, detail);
-                }
-            }
-            tool_name.to_string()
-        }
-    }
 }
 
 /// Read messages from a session file for display

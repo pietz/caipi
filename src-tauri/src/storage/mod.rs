@@ -51,6 +51,8 @@ pub struct AppData {
     pub default_folder: Option<String>,
     #[serde(default)]
     pub license: Option<LicenseData>,
+    #[serde(default)]
+    pub cli_path: Option<String>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
@@ -201,6 +203,19 @@ pub fn clear_license() -> Result<(), StorageError> {
     Ok(())
 }
 
+pub fn get_cli_path() -> Result<Option<String>, StorageError> {
+    let data = load_data()?;
+    Ok(data.cli_path)
+}
+
+pub fn set_cli_path(path: Option<String>) -> Result<(), StorageError> {
+    let _guard = get_storage_lock().lock().unwrap();
+    let mut data = load_data()?;
+    data.cli_path = path;
+    save_data(&data)?;
+    Ok(())
+}
+
 // Test helper functions that accept explicit paths
 #[cfg(test)]
 fn load_data_from(path: &std::path::Path) -> Result<AppData, StorageError> {
@@ -292,6 +307,7 @@ mod tests {
             }),
             default_folder: Some("/default/path".to_string()),
             license: None,
+            cli_path: None,
         };
 
         save_data_to(&data_path, &original_data).unwrap();

@@ -56,6 +56,8 @@ pub fn run() {
             commands::complete_onboarding,
             commands::reset_onboarding,
             commands::set_default_folder,
+            commands::get_cli_path,
+            commands::set_cli_path,
             // Folder commands
             commands::validate_folder,
             commands::get_recent_folders,

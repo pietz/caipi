@@ -1,7 +1,15 @@
 // Setup
+export interface CliStatus {
+  installed: boolean;
+  version?: string;
+  authenticated: boolean;
+  path?: string;
+}
+
 export interface CliInstallStatus {
   installed: boolean;
   version?: string;
+  path?: string;
 }
 
 export interface CliAuthStatus {
@@ -9,14 +17,18 @@ export interface CliAuthStatus {
 }
 
 export interface StartupInfo {
-  needsOnboarding: boolean;
-  lastFolder?: string;
+  onboardingCompleted: boolean;
+  cliStatus?: CliStatus;
+  cliStatusFresh: boolean;
+  defaultFolder?: string;
+  cliPath?: string;
 }
 
 // Folders
 export interface RecentFolder {
   path: string;
-  lastUsed: string;
+  name: string;
+  timestamp: number;
 }
 
 // Sessions
@@ -54,13 +66,13 @@ export interface HistoryMessage {
 // License
 export interface LicenseStatus {
   valid: boolean;
-  license_key: string | null;
-  activated_at: number | null;
-  email: string | null;
+  licenseKey?: string;
+  activatedAt?: number;
+  email?: string;
 }
 
 export interface LicenseValidationResult {
   valid: boolean;
-  error: string | null;
-  email: string | null;
+  error?: string;
+  email?: string;
 }

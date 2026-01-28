@@ -52,6 +52,8 @@ pub struct AgentSession {
     extended_thinking: Arc<RwLock<bool>>,
     /// Session ID to resume from Claude CLI
     resume_session_id: Option<String>,
+    /// Custom CLI path (if user has configured one)
+    cli_path: Option<String>,
     /// Flag to signal abort - can be set without holding any locks
     abort_flag: Arc<AtomicBool>,
     /// Notify for abort signaling - only fires when explicitly triggered
@@ -70,6 +72,7 @@ impl Clone for AgentSession {
             model: self.model.clone(),
             extended_thinking: self.extended_thinking.clone(),
             resume_session_id: self.resume_session_id.clone(),
+            cli_path: self.cli_path.clone(),
             abort_flag: self.abort_flag.clone(),
             abort_notify: self.abort_notify.clone(),
         }
@@ -95,7 +98,7 @@ fn string_to_model_id(model: &str) -> &'static str {
 }
 
 impl AgentSession {
-    pub async fn new(folder_path: String, permission_mode: String, model: String, resume_session_id: Option<String>, app_handle: AppHandle) -> Result<Self, AgentError> {
+    pub async fn new(folder_path: String, permission_mode: String, model: String, resume_session_id: Option<String>, cli_path: Option<String>, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
 
         Ok(Self {
@@ -108,6 +111,7 @@ impl AgentSession {
             model: Arc::new(RwLock::new(model)),
             extended_thinking: Arc::new(RwLock::new(false)),
             resume_session_id,
+            cli_path,
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
         })
@@ -203,8 +207,22 @@ impl AgentSession {
         let sdk_mode = string_to_permission_mode(&current_mode);
         let model_id = string_to_model_id(&current_model);
 
-        let options = match (&self.resume_session_id, extended_thinking) {
-            (Some(session_id), true) => {
+        // Build options based on configuration
+        // Using match on tuple to handle all combinations while adding cli_path
+        let options = match (&self.resume_session_id, extended_thinking, &self.cli_path) {
+            (Some(session_id), true, Some(cli_path)) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .cli_path(cli_path)
+                    .resume(session_id.clone())
+                    .max_thinking_tokens(10000)
+                    .build()
+            }
+            (Some(session_id), true, None) => {
                 ClaudeAgentOptions::builder()
                     .cwd(&self.folder_path)
                     .hooks(hooks)
@@ -215,7 +233,18 @@ impl AgentSession {
                     .max_thinking_tokens(10000)
                     .build()
             }
-            (Some(session_id), false) => {
+            (Some(session_id), false, Some(cli_path)) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .cli_path(cli_path)
+                    .resume(session_id.clone())
+                    .build()
+            }
+            (Some(session_id), false, None) => {
                 ClaudeAgentOptions::builder()
                     .cwd(&self.folder_path)
                     .hooks(hooks)
@@ -225,7 +254,18 @@ impl AgentSession {
                     .resume(session_id.clone())
                     .build()
             }
-            (None, true) => {
+            (None, true, Some(cli_path)) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .cli_path(cli_path)
+                    .max_thinking_tokens(10000)
+                    .build()
+            }
+            (None, true, None) => {
                 ClaudeAgentOptions::builder()
                     .cwd(&self.folder_path)
                     .hooks(hooks)
@@ -235,7 +275,17 @@ impl AgentSession {
                     .max_thinking_tokens(10000)
                     .build()
             }
-            (None, false) => {
+            (None, false, Some(cli_path)) => {
+                ClaudeAgentOptions::builder()
+                    .cwd(&self.folder_path)
+                    .hooks(hooks)
+                    .permission_mode(sdk_mode)
+                    .model(model_id)
+                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
+                    .cli_path(cli_path)
+                    .build()
+            }
+            (None, false, None) => {
                 ClaudeAgentOptions::builder()
                     .cwd(&self.folder_path)
                     .hooks(hooks)

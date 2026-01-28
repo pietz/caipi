@@ -1,4 +1,4 @@
-use claude_agent_sdk_rs::ToolUseBlock;
+use serde_json::Value;
 
 /// Truncate a string to a maximum number of characters, adding "..." if truncated
 pub fn truncate_str(s: &str, max_chars: usize) -> String {
@@ -12,81 +12,80 @@ pub fn truncate_str(s: &str, max_chars: usize) -> String {
 }
 
 /// Extract the target (file path, pattern, etc.) from a tool's input for display
-#[allow(dead_code)]
-pub fn extract_tool_target(tool: &ToolUseBlock) -> String {
-    match tool.name.as_str() {
+pub fn extract_tool_target(tool_name: &str, tool_input: &Value) -> String {
+    match tool_name {
         "Read" | "Write" | "Edit" => {
-            tool.input.get("file_path")
-                .or_else(|| tool.input.get("path"))
+            tool_input.get("file_path")
+                .or_else(|| tool_input.get("path"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string()
         }
         "Glob" => {
-            tool.input.get("pattern")
+            tool_input.get("pattern")
                 .and_then(|v| v.as_str())
                 .unwrap_or("*")
                 .to_string()
         }
         "Grep" => {
-            tool.input.get("pattern")
+            tool_input.get("pattern")
                 .and_then(|v| v.as_str())
                 .unwrap_or("...")
                 .to_string()
         }
         "Bash" => {
             // Prefer description if available (human-readable)
-            tool.input.get("description")
+            tool_input.get("description")
                 .and_then(|v| v.as_str())
                 .map(|s| truncate_str(s, 60))
                 .or_else(|| {
                     // Fall back to command if no description
-                    tool.input.get("command")
+                    tool_input.get("command")
                         .and_then(|v| v.as_str())
                         .map(|s| truncate_str(s, 50))
                 })
                 .unwrap_or_else(|| "command".to_string())
         }
         "WebSearch" => {
-            tool.input.get("query")
+            tool_input.get("query")
                 .and_then(|v| v.as_str())
                 .map(|s| truncate_str(s, 50))
                 .unwrap_or_else(|| "searching...".to_string())
         }
         "WebFetch" => {
-            tool.input.get("url")
+            tool_input.get("url")
                 .and_then(|v| v.as_str())
                 .map(|s| truncate_str(s, 50))
                 .unwrap_or_else(|| "fetching...".to_string())
         }
         "Skill" => {
-            tool.input.get("skill")
+            tool_input.get("skill")
                 .and_then(|v| v.as_str())
                 .unwrap_or("skill")
                 .to_string()
         }
         "Task" => {
-            tool.input.get("description")
-                .or_else(|| tool.input.get("prompt"))
+            tool_input.get("description")
+                .or_else(|| tool_input.get("prompt"))
                 .and_then(|v| v.as_str())
                 .map(|s| truncate_str(s, 50))
                 .unwrap_or_else(|| "task".to_string())
         }
         "AskUserQuestion" => "asking question...".to_string(),
         "NotebookEdit" => {
-            tool.input.get("notebook_path")
+            tool_input.get("notebook_path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("notebook")
                 .to_string()
         }
         "TaskCreate" => {
-            tool.input.get("subject")
+            tool_input.get("subject")
                 .and_then(|v| v.as_str())
                 .map(|s| truncate_str(s, 50))
                 .unwrap_or_else(|| "new task".to_string())
         }
         "TaskUpdate" => {
-            tool.input.get("taskId")
+            tool_input.get("taskId")
                 .and_then(|v| v.as_str())
                 .map(|id| format!("task {}", truncate_str(id, 20)))
                 .unwrap_or_else(|| "task".to_string())
@@ -94,7 +93,7 @@ pub fn extract_tool_target(tool: &ToolUseBlock) -> String {
         "TaskList" | "TaskGet" => "tasks".to_string(),
         "TodoWrite" => {
             // Count how many todos in the array
-            tool.input.get("todos")
+            tool_input.get("todos")
                 .and_then(|v| v.as_array())
                 .map(|arr| format!("{} todo(s)", arr.len()))
                 .unwrap_or_else(|| "todos".to_string())
@@ -104,13 +103,13 @@ pub fn extract_tool_target(tool: &ToolUseBlock) -> String {
             // Try common field names for unknown tools
             let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
             for field in fields {
-                if let Some(val) = tool.input.get(field).and_then(|v| v.as_str()) {
+                if let Some(val) = tool_input.get(field).and_then(|v| v.as_str()) {
                     let detail = truncate_str(val, 40);
-                    return format!("{}: {}", tool.name, detail);
+                    return format!("{}: {}", tool_name, detail);
                 }
             }
             // Fallback: show tool name only
-            tool.name.clone()
+            tool_name.to_string()
         }
     }
 }
@@ -175,161 +174,101 @@ mod tests {
 
     #[test]
     fn test_extract_target_read() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Read".to_string(),
-            input: json!({"file_path": "/path/to/file.txt"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "/path/to/file.txt");
+        let input = json!({"file_path": "/path/to/file.txt"});
+        assert_eq!(extract_tool_target("Read", &input), "/path/to/file.txt");
     }
 
     #[test]
     fn test_extract_target_write() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Write".to_string(),
-            input: json!({"file_path": "/output/data.json"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "/output/data.json");
+        let input = json!({"file_path": "/output/data.json"});
+        assert_eq!(extract_tool_target("Write", &input), "/output/data.json");
     }
 
     #[test]
     fn test_extract_target_edit() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Edit".to_string(),
-            input: json!({"file_path": "/src/main.rs"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "/src/main.rs");
+        let input = json!({"file_path": "/src/main.rs"});
+        assert_eq!(extract_tool_target("Edit", &input), "/src/main.rs");
     }
 
     #[test]
     fn test_extract_target_glob() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Glob".to_string(),
-            input: json!({"pattern": "**/*.rs"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "**/*.rs");
+        let input = json!({"pattern": "**/*.rs"});
+        assert_eq!(extract_tool_target("Glob", &input), "**/*.rs");
     }
 
     #[test]
     fn test_extract_target_grep() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Grep".to_string(),
-            input: json!({"pattern": "TODO"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "TODO");
+        let input = json!({"pattern": "TODO"});
+        assert_eq!(extract_tool_target("Grep", &input), "TODO");
     }
 
     #[test]
     fn test_extract_target_bash() {
         // Bash tool prefers description over command
-        let tool_with_desc = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Bash".to_string(),
-            input: json!({
-                "command": "git commit -m 'Fix bug'",
-                "description": "Create commit with fix message"
-            }),
-        };
-        assert_eq!(extract_tool_target(&tool_with_desc), "Create commit with fix message");
+        let input_with_desc = json!({
+            "command": "git commit -m 'Fix bug'",
+            "description": "Create commit with fix message"
+        });
+        assert_eq!(extract_tool_target("Bash", &input_with_desc), "Create commit with fix message");
 
         // Falls back to command if no description
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Bash".to_string(),
-            input: json!({"command": "ls -la"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "ls -la");
+        let input = json!({"command": "ls -la"});
+        assert_eq!(extract_tool_target("Bash", &input), "ls -la");
 
         // Test truncation for long descriptions (60 char limit)
         let long_desc = "This is a very long description that should be truncated at sixty characters limit";
-        let tool_long_desc = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Bash".to_string(),
-            input: json!({
-                "command": "some command",
-                "description": long_desc
-            }),
-        };
-        let result = extract_tool_target(&tool_long_desc);
+        let input_long_desc = json!({
+            "command": "some command",
+            "description": long_desc
+        });
+        let result = extract_tool_target("Bash", &input_long_desc);
         assert_eq!(result.len(), 60); // 57 chars + "..."
         assert!(result.ends_with("..."));
 
         // Test truncation for long commands (50 char limit when no description)
         let long_command = "echo this is a very long command that should be truncated to fifty characters max";
-        let tool_long = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Bash".to_string(),
-            input: json!({"command": long_command}),
-        };
-        let result = extract_tool_target(&tool_long);
+        let input_long = json!({"command": long_command});
+        let result = extract_tool_target("Bash", &input_long);
         assert_eq!(result.len(), 50); // 47 chars + "..."
         assert!(result.ends_with("..."));
     }
 
     #[test]
     fn test_extract_target_websearch() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "WebSearch".to_string(),
-            input: json!({"query": "rust programming"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "rust programming");
+        let input = json!({"query": "rust programming"});
+        assert_eq!(extract_tool_target("WebSearch", &input), "rust programming");
 
         // Test truncation for long queries
         let long_query = "how to write a very long search query that exceeds the fifty character limit";
-        let tool_long = ToolUseBlock {
-            id: "test".to_string(),
-            name: "WebSearch".to_string(),
-            input: json!({"query": long_query}),
-        };
-        let result = extract_tool_target(&tool_long);
+        let input_long = json!({"query": long_query});
+        let result = extract_tool_target("WebSearch", &input_long);
         assert_eq!(result.len(), 50);
         assert!(result.ends_with("..."));
     }
 
     #[test]
     fn test_extract_target_task() {
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Task".to_string(),
-            input: json!({"description": "Analyze the codebase"}),
-        };
-        assert_eq!(extract_tool_target(&tool), "Analyze the codebase");
+        let input = json!({"description": "Analyze the codebase"});
+        assert_eq!(extract_tool_target("Task", &input), "Analyze the codebase");
 
         // Test with prompt field as fallback
-        let tool_prompt = ToolUseBlock {
-            id: "test".to_string(),
-            name: "Task".to_string(),
-            input: json!({"prompt": "Search for bugs"}),
-        };
-        assert_eq!(extract_tool_target(&tool_prompt), "Search for bugs");
+        let input_prompt = json!({"prompt": "Search for bugs"});
+        assert_eq!(extract_tool_target("Task", &input_prompt), "Search for bugs");
     }
 
     #[test]
     fn test_extract_target_todowrite() {
         // TodoWrite shows count
-        let tool = ToolUseBlock {
-            id: "test".to_string(),
-            name: "TodoWrite".to_string(),
-            input: json!({"todos": [
-                {"task": "task 1"},
-                {"task": "task 2"},
-                {"task": "task 3"}
-            ]}),
-        };
-        assert_eq!(extract_tool_target(&tool), "3 todo(s)");
+        let input = json!({"todos": [
+            {"task": "task 1"},
+            {"task": "task 2"},
+            {"task": "task 3"}
+        ]});
+        assert_eq!(extract_tool_target("TodoWrite", &input), "3 todo(s)");
 
         // Empty array
-        let tool_empty = ToolUseBlock {
-            id: "test".to_string(),
-            name: "TodoWrite".to_string(),
-            input: json!({"todos": []}),
-        };
-        assert_eq!(extract_tool_target(&tool_empty), "0 todo(s)");
+        let input_empty = json!({"todos": []});
+        assert_eq!(extract_tool_target("TodoWrite", &input_empty), "0 todo(s)");
     }
 
     #[test]
@@ -337,37 +276,21 @@ mod tests {
         // Unknown tool tries common fields then falls back to name
 
         // Test with file_path field
-        let tool_with_path = ToolUseBlock {
-            id: "test".to_string(),
-            name: "UnknownTool".to_string(),
-            input: json!({"file_path": "/some/file.txt"}),
-        };
-        assert_eq!(extract_tool_target(&tool_with_path), "UnknownTool: /some/file.txt");
+        let input_with_path = json!({"file_path": "/some/file.txt"});
+        assert_eq!(extract_tool_target("UnknownTool", &input_with_path), "UnknownTool: /some/file.txt");
 
         // Test with pattern field
-        let tool_with_pattern = ToolUseBlock {
-            id: "test".to_string(),
-            name: "CustomSearch".to_string(),
-            input: json!({"pattern": "search_term"}),
-        };
-        assert_eq!(extract_tool_target(&tool_with_pattern), "CustomSearch: search_term");
+        let input_with_pattern = json!({"pattern": "search_term"});
+        assert_eq!(extract_tool_target("CustomSearch", &input_with_pattern), "CustomSearch: search_term");
 
         // Test with no known fields - should fall back to tool name
-        let tool_no_fields = ToolUseBlock {
-            id: "test".to_string(),
-            name: "MyCustomTool".to_string(),
-            input: json!({"unknown_field": "value"}),
-        };
-        assert_eq!(extract_tool_target(&tool_no_fields), "MyCustomTool");
+        let input_no_fields = json!({"unknown_field": "value"});
+        assert_eq!(extract_tool_target("MyCustomTool", &input_no_fields), "MyCustomTool");
 
         // Test truncation in unknown tool with long field value
         let long_value = "this is a very long value that exceeds the forty character limit for unknown tools";
-        let tool_long = ToolUseBlock {
-            id: "test".to_string(),
-            name: "LongTool".to_string(),
-            input: json!({"command": long_value}),
-        };
-        let result = extract_tool_target(&tool_long);
+        let input_long = json!({"command": long_value});
+        let result = extract_tool_target("LongTool", &input_long);
         assert!(result.starts_with("LongTool: "));
         assert!(result.ends_with("..."));
         // "LongTool: " is 10 chars, truncated value should be 40 chars total

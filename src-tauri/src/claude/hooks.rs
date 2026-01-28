@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::agent::PermissionResponse;
 use super::settings::{self, ClaudeSettings};
-use super::tool_utils::truncate_str;
+use super::tool_utils::extract_tool_target;
 
 /// Type alias for permission channels - maps request ID to response sender
 pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
@@ -53,110 +53,6 @@ pub fn deny_response(reason: &str) -> HookJsonOutput {
         )),
         ..Default::default()
     })
-}
-
-// ============================================================================
-// Tool Target Extraction
-// ============================================================================
-
-/// Extract the target (file path, pattern, etc.) from tool name + input for display
-fn extract_tool_target(tool_name: &str, tool_input: &serde_json::Value) -> String {
-    match tool_name {
-        "Read" | "Write" | "Edit" => {
-            tool_input.get("file_path")
-                .or_else(|| tool_input.get("path"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        }
-        "Glob" => {
-            tool_input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("*")
-                .to_string()
-        }
-        "Grep" => {
-            tool_input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("...")
-                .to_string()
-        }
-        "Bash" => {
-            // Prefer description if available (human-readable)
-            tool_input.get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 60))
-                .or_else(|| {
-                    // Fall back to command if no description
-                    tool_input.get("command")
-                        .and_then(|v| v.as_str())
-                        .map(|s| truncate_str(s, 50))
-                })
-                .unwrap_or_else(|| "command".to_string())
-        }
-        "WebSearch" => {
-            tool_input.get("query")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "searching...".to_string())
-        }
-        "WebFetch" => {
-            tool_input.get("url")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "fetching...".to_string())
-        }
-        "Skill" => {
-            tool_input.get("skill")
-                .and_then(|v| v.as_str())
-                .unwrap_or("skill")
-                .to_string()
-        }
-        "Task" => {
-            tool_input.get("description")
-                .or_else(|| tool_input.get("prompt"))
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "task".to_string())
-        }
-        "AskUserQuestion" => "asking question...".to_string(),
-        "NotebookEdit" => {
-            tool_input.get("notebook_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("notebook")
-                .to_string()
-        }
-        "TaskCreate" => {
-            tool_input.get("subject")
-                .and_then(|v| v.as_str())
-                .map(|s| truncate_str(s, 50))
-                .unwrap_or_else(|| "new task".to_string())
-        }
-        "TaskUpdate" => {
-            tool_input.get("taskId")
-                .and_then(|v| v.as_str())
-                .map(|id| format!("task {}", truncate_str(id, 20)))
-                .unwrap_or_else(|| "task".to_string())
-        }
-        "TaskList" | "TaskGet" => "tasks".to_string(),
-        "TodoWrite" => {
-            tool_input.get("todos")
-                .and_then(|v| v.as_array())
-                .map(|arr| format!("{} todo(s)", arr.len()))
-                .unwrap_or_else(|| "todos".to_string())
-        }
-        "TodoRead" => "reading todos".to_string(),
-        _ => {
-            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
-            for field in fields {
-                if let Some(val) = tool_input.get(field).and_then(|v| v.as_str()) {
-                    let detail = truncate_str(val, 40);
-                    return format!("{}: {}", tool_name, detail);
-                }
-            }
-            tool_name.to_string()
-        }
-    }
 }
 
 // ============================================================================

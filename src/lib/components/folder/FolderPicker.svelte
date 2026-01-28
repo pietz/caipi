@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type RecentFolder as ApiRecentFolder } from '$lib/api';
+  import { api, type RecentFolder } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { Folder, Loader2, X } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
@@ -11,12 +11,6 @@
 
   let { showClose = false }: Props = $props();
 
-  interface RecentFolder {
-    path: string;
-    name: string;
-    timestamp: number;
-  }
-
   let recentFolders = $state<RecentFolder[]>([]);
   let validating = $state(false);
   let error = $state<string | null>(null);
@@ -26,13 +20,7 @@
 
   async function loadRecentFolders() {
     try {
-      const folders = await api.getRecentFolders();
-      // Map API response to local format
-      recentFolders = folders.map(f => ({
-        path: f.path,
-        name: f.path.split('/').pop() || f.path,
-        timestamp: new Date(f.lastUsed).getTime() / 1000,
-      }));
+      recentFolders = await api.getRecentFolders();
     } catch (e) {
       console.error('Failed to load recent folders:', e);
     }

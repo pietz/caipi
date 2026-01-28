@@ -35,18 +35,15 @@
   );
   const currentConfig = $derived(currentTool ? getToolConfig(currentTool.toolType) : null);
 
-  // Check if current tool needs permission (for inline buttons)
-  const currentNeedsPermission = $derived(
-    currentTool?.status === 'awaiting_permission'
-  );
-
   // Simple reveal logic:
-  // - Reveal all unrevealed tools up to (and including) the first one needing permission
-  // - If current tool needs permission, pause (don't reveal more)
-  // - When permission is granted, this effect re-runs and reveals more
+  // - Always reveal tools up to (and including) the first one needing permission
+  // - If a tool needs permission, pause revealing further until permission is granted
   $effect(() => {
-    // If current tool needs permission, pause revealing
-    if (currentTool?.status === 'awaiting_permission') {
+    // Find the first tool awaiting permission (whether revealed or not)
+    const firstAwaiting = tools.find(t => t.status === 'awaiting_permission');
+
+    // If the first awaiting is already revealed, don't reveal more until it's handled
+    if (firstAwaiting && revealedIds.includes(firstAwaiting.id)) {
       return;
     }
 
@@ -54,15 +51,10 @@
     const unrevealedTools = tools.filter(t => !revealedIds.includes(t.id));
     if (unrevealedTools.length === 0) return;
 
-    // Find the first unrevealed tool that needs permission (if any)
-    const firstNeedingPermission = unrevealedTools.find(
-      t => t.status === 'awaiting_permission'
-    );
-
     let idsToReveal: string[];
-    if (firstNeedingPermission) {
+    if (firstAwaiting) {
       // Reveal all tools up to and including the first one needing permission
-      const targetIndex = tools.findIndex(t => t.id === firstNeedingPermission.id);
+      const targetIndex = tools.findIndex(t => t.id === firstAwaiting.id);
       idsToReveal = tools
         .slice(0, targetIndex + 1)
         .map(t => t.id)
@@ -96,7 +88,7 @@
   };
 
   // Include one extra tool on the left for slide-out animation
-  const renderableTools = $derived(() => {
+  const renderableTools = $derived.by(() => {
     if (revealedTools.length <= MAX_VISIBLE_ICONS) {
       return revealedTools;
     }
@@ -129,7 +121,7 @@
         <!-- Stacked icons with overflow hidden for slide-out effect -->
         {#if stackWidth > 0}
           <div class="relative h-6 overflow-hidden shrink-0" style="width: {stackWidth}px;">
-            {#each renderableTools() as tool (tool.id)}
+            {#each renderableTools as tool (tool.id)}
               {@const toolIndex = revealedTools.indexOf(tool)}
               {@const visualIndex = getVisualIndex(toolIndex)}
               <ToolStackIcon
@@ -156,12 +148,12 @@
 
       <!-- Right side: permission buttons or count/chevron -->
       <div class="flex items-center gap-2">
-        {#if currentNeedsPermission && currentTool}
-          <!-- Inline permission buttons -->
+        {#if firstAwaitingPermission}
+          <!-- Inline permission buttons for first tool awaiting permission -->
           <button
             type="button"
             class="h-6 w-6 rounded-md flex items-center justify-center bg-green-500/15 hover:bg-green-500/25 text-green-500 transition-colors"
-            onclick={() => handlePermissionResponse(currentTool.id, true)}
+            onclick={() => handlePermissionResponse(firstAwaitingPermission.id, true)}
             title="Allow (Enter)"
           >
             <Check size={14} />
@@ -169,7 +161,7 @@
           <button
             type="button"
             class="h-6 w-6 rounded-md flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-500 transition-colors"
-            onclick={() => handlePermissionResponse(currentTool.id, false)}
+            onclick={() => handlePermissionResponse(firstAwaitingPermission.id, false)}
             title="Deny (Esc)"
           >
             <X size={14} />
@@ -197,10 +189,10 @@
     <!-- Expanded view - seamlessly connected with horizontal separator -->
     {#if expanded}
       <div class="border-t border-border bg-muted/30">
-        {#each tools.slice().reverse() as tool (tool.id)}
+        {#each tools as tool (tool.id)}
           <ToolExpandedRow
             {tool}
-            showPermissionButtons={firstAwaitingPermission?.id === tool.id && tool.id !== currentTool?.id}
+            showPermissionButtons={tool.status === 'awaiting_permission' && tool.id !== firstAwaitingPermission?.id}
             onPermissionResponse={(allowed) => handlePermissionResponse(tool.id, allowed)}
           />
         {/each}

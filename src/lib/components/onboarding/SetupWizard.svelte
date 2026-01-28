@@ -8,7 +8,7 @@
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
-  let cliStatus = $state<(CliInstallStatus & { path?: string | null }) | null>(null);
+  let cliStatus = $state<CliInstallStatus | null>(null);
   let authStatus = $state<CliAuthStatus | null>(null);
   let checkingCli = $state(true);
   let selectedFolder = $state<string | null>(null);
@@ -33,7 +33,7 @@
     checkingCli = true;
     try {
       const status = await api.checkCliInstalled();
-      cliStatus = { ...status, path: null };
+      cliStatus = status;
 
       // Only check auth if CLI is installed
       if (status.installed) {
@@ -44,7 +44,7 @@
       }
     } catch (e) {
       console.error('Failed to check CLI:', e);
-      cliStatus = { installed: false, version: undefined, path: null };
+      cliStatus = { installed: false };
       authStatus = { authenticated: false };
     } finally {
       checkingCli = false;
@@ -102,9 +102,9 @@
       // Update app state
       app.setCliStatus({
         installed: true,
-        version: cliStatus.version ?? null,
+        version: cliStatus.version,
         authenticated: authStatus?.authenticated ?? false,
-        path: cliStatus.path ?? null,
+        path: cliStatus.path,
       });
 
       // Start session

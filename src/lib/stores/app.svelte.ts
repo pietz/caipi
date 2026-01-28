@@ -8,16 +8,16 @@ export type Model = 'opus' | 'sonnet' | 'haiku';
 
 export interface LicenseInfo {
   valid: boolean;
-  licenseKey: string | null;
-  activatedAt: number | null;
-  email: string | null;
+  licenseKey?: string;
+  activatedAt?: number;
+  email?: string;
 }
 
 export interface CliStatus {
   installed: boolean;
-  version: string | null;
+  version?: string;
   authenticated: boolean;
-  path: string | null;
+  path?: string;
 }
 
 function getPersistedModel(): Model {
@@ -57,6 +57,9 @@ class AppState {
   // License
   license = $state<LicenseInfo | null>(null);
 
+  // CLI Path (custom path to Claude CLI)
+  cliPath = $state<string | null>(null);
+
   // Derived
   get folderName(): string {
     return this.folder?.split('/').pop() ?? '';
@@ -93,6 +96,10 @@ class AppState {
 
   setLicense(license: LicenseInfo | null) {
     this.license = license;
+  }
+
+  setCliPath(path: string | null) {
+    this.cliPath = path;
   }
 
   toggleLeftSidebar() {
@@ -146,7 +153,7 @@ class AppState {
 
   async startSession(folder: string): Promise<void> {
     this.folder = folder;
-    this.sessionId = await api.createSession(folder, this.permissionMode, this.model);
+    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined);
     this.screen = 'chat';
   }
 
@@ -158,7 +165,8 @@ class AppState {
       folderPath,
       this.permissionMode,
       this.model,
-      sessionId
+      sessionId,
+      this.cliPath ?? undefined
     );
 
     // Only load history after successful session creation
