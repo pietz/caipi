@@ -44,6 +44,7 @@ class AppState {
   // UI
   leftSidebar = $state(false);
   rightSidebar = $state(false);
+  settingsOpen = $state(false);
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
@@ -100,6 +101,14 @@ class AppState {
 
   toggleRightSidebar() {
     this.rightSidebar = !this.rightSidebar;
+  }
+
+  openSettings() {
+    this.settingsOpen = true;
+  }
+
+  closeSettings() {
+    this.settingsOpen = false;
   }
 
   setModel(model: Model) {

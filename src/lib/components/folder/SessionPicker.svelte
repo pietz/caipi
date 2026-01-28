@@ -1,9 +1,8 @@
 <script lang="ts">
   import { api, type ProjectSessions, type SessionInfo } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { Folder, Loader2, Sun, Moon, X, ChevronRight, ChevronDown, Plus } from 'lucide-svelte';
+  import { Folder, Loader2, X, ChevronRight, ChevronDown, Plus } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
-  import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { resetEventState } from '$lib/utils/events';
@@ -19,12 +18,6 @@
   let loading = $state(true);
   let validating = $state(false);
   let error = $state<string | null>(null);
-
-  const currentTheme = $derived($resolvedTheme);
-
-  function toggleTheme() {
-    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
-  }
 
   async function loadSessions() {
     try {
@@ -187,18 +180,6 @@
 <div class="flex flex-col h-full pt-9 px-4 pb-8 relative" data-tauri-drag-region>
   <!-- Top right controls - matches ChatContainer titlebar positioning -->
   <div class="absolute top-1.5 right-4 flex items-center gap-1">
-    <Button
-      variant="ghost"
-      size="icon"
-      class="h-6 w-6 text-muted-foreground"
-      onclick={toggleTheme}
-    >
-      {#if currentTheme === 'dark'}
-        <Sun size={14} />
-      {:else}
-        <Moon size={14} />
-      {/if}
-    </Button>
     {#if showClose}
       <Button
         variant="ghost"
@@ -208,8 +189,6 @@
       >
         <X size={14} />
       </Button>
-    {:else}
-      <span class="text-xs text-muted-foreground/50 ml-2">v0.1.0</span>
     {/if}
   </div>
 

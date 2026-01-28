@@ -4,10 +4,10 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { PanelLeft, PanelRight, Sun, Moon, Menu } from 'lucide-svelte';
+  import { PanelLeft, PanelRight, Settings, Menu } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
-  import { themeStore, resolvedTheme } from '$lib/stores/theme';
+  import { Settings as SettingsPanel } from '$lib/components/settings';
   import ChatMessage from './ChatMessage.svelte';
   import ToolCallStack from './ToolCallStack.svelte';
   import MessageInput from './MessageInput.svelte';
@@ -25,9 +25,6 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
   let cleanupKeyboardShortcuts: (() => void) | null = null;
-
-  // Theme
-  const currentTheme = $derived($resolvedTheme);
 
   onMount(async () => {
     // Listen for Claude events
@@ -150,10 +147,6 @@
     app.setScreen('folder');
   }
 
-  function toggleTheme() {
-    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
-  }
-
   async function abortSession() {
     if (!app.sessionId) return;
 
@@ -221,132 +214,132 @@
   });
 </script>
 
-<div class="flex flex-col h-full relative">
-  <!-- Titlebar -->
-  <div
-    class="h-9 flex items-center justify-between px-4 border-b border-border shrink-0 relative"
-    data-tauri-drag-region
-  >
-    <!-- Left - Window Controls Space + Sidebar Toggle + Home -->
-    <div class="flex items-center gap-1">
-      <div class="w-16"></div>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-6 w-6 text-muted-foreground"
-        onclick={() => app.toggleLeftSidebar()}
-      >
-        <PanelLeft size={14} />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-6 w-6 text-muted-foreground"
-        onclick={goBack}
-      >
-        <Menu size={14} />
-      </Button>
-    </div>
-
-    <!-- Center - Project Name (absolutely centered) -->
-    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-      <span class="text-sm font-medium">{app.folderName}</span>
-    </div>
-
-    <!-- Right - Controls -->
-    <div class="flex items-center gap-1">
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-6 w-6 text-muted-foreground"
-        onclick={toggleTheme}
-      >
-        {#if currentTheme === 'dark'}
-          <Sun size={14} />
-        {:else}
-          <Moon size={14} />
-        {/if}
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-6 w-6 text-muted-foreground"
-        onclick={() => app.toggleRightSidebar()}
-      >
-        <PanelRight size={14} />
-      </Button>
-    </div>
-  </div>
-
-  <!-- Content area with sidebars -->
-  <div class="flex flex-1 min-h-0">
-    <!-- Left Sidebar - File Explorer -->
+{#if app.settingsOpen}
+  <SettingsPanel onClose={() => app.closeSettings()} />
+{:else}
+  <div class="flex flex-col h-full relative">
+    <!-- Titlebar -->
     <div
-      class="shrink-0 overflow-hidden transition-all duration-200 border-r border-border bg-muted/50 {app.leftSidebar ? 'w-48' : 'w-0'}"
+      class="h-9 flex items-center justify-between px-4 border-b border-border shrink-0 relative"
+      data-tauri-drag-region
     >
-      {#if app.folder}
-        <FileExplorer rootPath={app.folder} />
-      {/if}
+      <!-- Left - Window Controls Space + Sidebar Toggle + Home -->
+      <div class="flex items-center gap-1">
+        <div class="w-16"></div>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 text-muted-foreground"
+          onclick={() => app.toggleLeftSidebar()}
+        >
+          <PanelLeft size={14} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 text-muted-foreground"
+          onclick={goBack}
+        >
+          <Menu size={14} />
+        </Button>
+      </div>
+
+      <!-- Center - Project Name (absolutely centered) -->
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <span class="text-sm font-medium">{app.folderName}</span>
+      </div>
+
+      <!-- Right - Controls -->
+      <div class="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 text-muted-foreground"
+          onclick={() => app.openSettings()}
+        >
+          <Settings size={14} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 text-muted-foreground"
+          onclick={() => app.toggleRightSidebar()}
+        >
+          <PanelRight size={14} />
+        </Button>
+      </div>
     </div>
 
-    <!-- Main Chat Area -->
-    <div class="flex-1 flex flex-col min-w-0">
-      <!-- Messages -->
+    <!-- Content area with sidebars -->
+    <div class="flex flex-1 min-h-0">
+      <!-- Left Sidebar - File Explorer -->
       <div
-        bind:this={messagesContainer}
-        class="flex-1 overflow-y-auto"
+        class="shrink-0 overflow-hidden transition-all duration-200 border-r border-border bg-muted/50 {app.leftSidebar ? 'w-48' : 'w-0'}"
       >
-        {#if chat.messages.length === 0 && !chat.isStreaming}
-          <!-- Empty State -->
-          <div class="flex items-center justify-center h-full">
-            <div class="opacity-50">
-              <CaipiIcon size={192} />
-            </div>
-          </div>
-        {:else}
-          <!-- Message List -->
-          <div class="max-w-3xl mx-auto px-6 py-4">
-            {#each chat.messages as message (message.id)}
-              <ChatMessage {message} />
-            {/each}
-
-            <!-- Stream Items (during streaming) -->
-            {#if chat.isStreaming && sortedStreamItems.length > 0}
-              <div>
-                {#each groupedStreamItems() as group, index (index)}
-                  {#if group.type === 'text'}
-                    <div
-                      class="message-content text-sm leading-relaxed text-foreground/90"
-                    >
-                      {@html group.content ? DOMPurify.sanitize(marked.parse(group.content) as string) : ''}
-                    </div>
-                  {:else if group.type === 'tool-group'}
-                    <ToolCallStack
-                      tools={group.tools}
-                      onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
-                    />
-                  {/if}
-                {/each}
-              </div>
-            {/if}
-          </div>
+        {#if app.folder}
+          <FileExplorer rootPath={app.folder} />
         {/if}
       </div>
 
-      <!-- Input -->
-      <MessageInput
-        onSend={sendMessage}
-        onQueue={queueMessage}
-        onAbort={abortSession}
-        isStreaming={chat.isStreaming}
-      />
-    </div>
+      <!-- Main Chat Area -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <!-- Messages -->
+        <div
+          bind:this={messagesContainer}
+          class="flex-1 overflow-y-auto"
+        >
+          {#if chat.messages.length === 0 && !chat.isStreaming}
+            <!-- Empty State -->
+            <div class="flex items-center justify-center h-full">
+              <div class="opacity-50">
+                <CaipiIcon size={192} />
+              </div>
+            </div>
+          {:else}
+            <!-- Message List -->
+            <div class="max-w-3xl mx-auto px-6 py-4">
+              {#each chat.messages as message (message.id)}
+                <ChatMessage {message} />
+              {/each}
 
-    <!-- Right Sidebar - Context Panel -->
-    <div
-      class="shrink-0 overflow-hidden transition-all duration-200 border-l border-border bg-muted/50 {app.rightSidebar ? 'w-48' : 'w-0'}"
-    >
-      <ContextPanel />
+              <!-- Stream Items (during streaming) -->
+              {#if chat.isStreaming && sortedStreamItems.length > 0}
+                <div>
+                  {#each groupedStreamItems() as group, index (index)}
+                    {#if group.type === 'text'}
+                      <div
+                        class="message-content text-sm leading-relaxed text-foreground/90"
+                      >
+                        {@html group.content ? DOMPurify.sanitize(marked.parse(group.content) as string) : ''}
+                      </div>
+                    {:else if group.type === 'tool-group'}
+                      <ToolCallStack
+                        tools={group.tools}
+                        onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
+                      />
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Input -->
+        <MessageInput
+          onSend={sendMessage}
+          onQueue={queueMessage}
+          onAbort={abortSession}
+          isStreaming={chat.isStreaming}
+        />
+      </div>
+
+      <!-- Right Sidebar - Context Panel -->
+      <div
+        class="shrink-0 overflow-hidden transition-all duration-200 border-l border-border bg-muted/50 {app.rightSidebar ? 'w-48' : 'w-0'}"
+      >
+        <ContextPanel />
+      </div>
     </div>
   </div>
-</div>
+{/if}

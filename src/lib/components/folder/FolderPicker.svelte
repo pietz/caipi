@@ -1,9 +1,8 @@
 <script lang="ts">
   import { api, type RecentFolder as ApiRecentFolder } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { Folder, Loader2, Sun, Moon, X } from 'lucide-svelte';
+  import { Folder, Loader2, X } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
-  import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
   interface Props {
@@ -24,12 +23,6 @@
   let dragOver = $state(false);
   let dropZoneHover = $state(false);
   let hoveredFolder = $state<string | null>(null);
-
-  const currentTheme = $derived($resolvedTheme);
-
-  function toggleTheme() {
-    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
-  }
 
   async function loadRecentFolders() {
     try {
@@ -139,18 +132,6 @@
 <div class="flex flex-col items-center justify-center h-full pt-12 px-8 pb-8 relative" data-tauri-drag-region>
   <!-- Top right controls -->
   <div class="absolute top-3 right-4 flex items-center gap-1">
-    <Button
-      variant="ghost"
-      size="icon"
-      class="h-8 w-8 text-muted-foreground"
-      onclick={toggleTheme}
-    >
-      {#if currentTheme === 'dark'}
-        <Sun size={16} />
-      {:else}
-        <Moon size={16} />
-      {/if}
-    </Button>
     {#if showClose}
       <Button
         variant="ghost"
@@ -160,8 +141,6 @@
       >
         <X size={16} />
       </Button>
-    {:else}
-      <span class="text-xs text-muted-foreground/50 ml-2">v0.1.0</span>
     {/if}
   </div>
 

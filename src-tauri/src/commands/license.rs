@@ -245,14 +245,13 @@ pub async fn clear_license() -> Result<(), String> {
     Ok(())
 }
 
-/// Mask a license key for display (show first 10 chars, mask the rest)
+/// Mask a license key for display (show only last 4 chars)
 fn mask_license_key(key: &str) -> String {
-    if key.len() <= 10 {
+    if key.len() <= 4 {
         return key.to_string();
     }
-    let visible = &key[..10];
-    let masked_len = key.len() - 10;
-    format!("{}...{}", visible, "*".repeat(masked_len.min(8)))
+    let visible = &key[key.len() - 4..];
+    format!("...{}", visible)
 }
 
 #[cfg(test)]
@@ -261,16 +260,14 @@ mod tests {
 
     #[test]
     fn test_mask_license_key_short() {
-        assert_eq!(mask_license_key("SHORT"), "SHORT");
-        assert_eq!(mask_license_key("EXACTLY10C"), "EXACTLY10C");
+        assert_eq!(mask_license_key("AB"), "AB");
+        assert_eq!(mask_license_key("ABCD"), "ABCD");
     }
 
     #[test]
     fn test_mask_license_key_long() {
-        let result = mask_license_key("ABCDEFGHIJ1234567890");
-        assert!(result.starts_with("ABCDEFGHIJ"));
-        assert!(result.contains("..."));
-        assert!(result.contains("*"));
+        assert_eq!(mask_license_key("ABCDEFGHIJ1234567890"), "...7890");
+        assert_eq!(mask_license_key("12345"), "...2345");
     }
 
     #[test]
