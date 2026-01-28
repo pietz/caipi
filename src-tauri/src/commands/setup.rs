@@ -63,11 +63,27 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
     })
 }
 
+/// Check if credentials file exists in the given home directory
+fn check_credentials_file(home_dir: &std::path::Path) -> bool {
+    let creds_path = home_dir.join(".claude").join(".credentials.json");
+    creds_path.exists()
+}
+
 #[tauri::command]
 pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
-    // Skip the slow auth check - we'll handle auth errors at chat time
-    // The CLI will provide clear error messages if not authenticated
-    Ok(CliAuthStatus { authenticated: true })
+    // Check environment variable first
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        return Ok(CliAuthStatus { authenticated: true });
+    }
+
+    // Check Claude's credentials file
+    if let Some(home) = dirs::home_dir() {
+        if check_credentials_file(&home) {
+            return Ok(CliAuthStatus { authenticated: true });
+        }
+    }
+
+    Ok(CliAuthStatus { authenticated: false })
 }
 
 #[tauri::command]
@@ -155,4 +171,38 @@ pub async fn reset_onboarding() -> Result<(), String> {
     storage::set_onboarding_completed(false).map_err(|e| e.to_string())?;
     storage::clear_cli_status_cache().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_check_credentials_file_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let claude_dir = temp_dir.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(claude_dir.join(".credentials.json"), "{}").unwrap();
+
+        assert!(check_credentials_file(temp_dir.path()));
+    }
+
+    #[test]
+    fn test_check_credentials_file_not_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        // No .claude directory or credentials file
+
+        assert!(!check_credentials_file(temp_dir.path()));
+    }
+
+    #[test]
+    fn test_check_credentials_file_claude_dir_exists_but_no_creds() {
+        let temp_dir = TempDir::new().unwrap();
+        let claude_dir = temp_dir.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        // .claude directory exists but no .credentials.json
+
+        assert!(!check_credentials_file(temp_dir.path()));
+    }
 }

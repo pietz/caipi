@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   CliInstallStatus,
+  CliAuthStatus,
   StartupInfo,
   RecentFolder,
   LicenseStatus,
@@ -13,6 +14,7 @@ import type {
 export const api = {
   // Setup
   checkCliInstalled: () => invoke<CliInstallStatus>('check_cli_installed'),
+  checkCliAuthenticated: () => invoke<CliAuthStatus>('check_cli_authenticated'),
   getStartupInfo: () => invoke<StartupInfo>('get_startup_info'),
   validateFolder: (path: string) => invoke<boolean>('validate_folder', { path }),
   completeOnboarding: (defaultFolder?: string) =>

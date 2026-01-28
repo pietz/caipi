@@ -36,6 +36,37 @@ fn get_folder_name(path: &str) -> String {
     path.split('/').last().unwrap_or(path).to_string()
 }
 
+/// Verify that a project directory actually corresponds to the given folder path
+/// by checking the projectPath field in sessions-index.json
+fn verify_project_path(folder_path: &str, project_dir: &std::path::Path) -> bool {
+    let index_path = project_dir.join("sessions-index.json");
+    if !index_path.exists() {
+        return false;
+    }
+
+    let content = match fs::read_to_string(&index_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // Check first entry's projectPath to verify this is the right directory
+    if let Some(entries) = json.get("entries").and_then(|e| e.as_array()) {
+        if let Some(first) = entries.first() {
+            if let Some(stored_path) = first.get("projectPath").and_then(|p| p.as_str()) {
+                return stored_path == folder_path;
+            }
+        }
+    }
+
+    // No entries means we can't verify, treat as not matching
+    false
+}
+
 /// Read and parse sessions-index.json from a project directory
 fn read_sessions_index(project_dir: &PathBuf) -> Option<Vec<SessionInfo>> {
     let index_path = project_dir.join("sessions-index.json");
@@ -151,6 +182,12 @@ pub async fn get_project_sessions(folder_path: String) -> Result<Vec<SessionInfo
     let project_dir = projects_dir.join(&encoded);
 
     if !project_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    // Verify the project directory actually belongs to this folder path
+    // This prevents collisions like /Users/foo-bar and /Users/foo/bar
+    if !verify_project_path(&folder_path, &project_dir) {
         return Ok(Vec::new());
     }
 
@@ -301,9 +338,15 @@ pub async fn get_session_history(
 
     // Encode the folder path to match Claude's format
     let encoded = folder_path.replace('/', "-");
-    let session_file = projects_dir.join(&encoded).join(format!("{}.jsonl", session_id));
+    let project_dir = projects_dir.join(&encoded);
+    let session_file = project_dir.join(format!("{}.jsonl", session_id));
 
     if !session_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    // Verify the project directory actually belongs to this folder path
+    if !verify_project_path(&folder_path, &project_dir) {
         return Ok(Vec::new());
     }
 
@@ -419,11 +462,94 @@ pub async fn get_session_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_get_folder_name() {
         assert_eq!(get_folder_name("/Users/pietz/Desktop"), "Desktop");
         assert_eq!(get_folder_name("/Users/pietz/Private/caipi"), "caipi");
         assert_eq!(get_folder_name("/Users/me/my-project"), "my-project");
+    }
+
+    #[test]
+    fn test_verify_project_path_matching() {
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().join("sessions-index.json");
+
+        let content = r#"{
+            "entries": [
+                {"sessionId": "abc123", "projectPath": "/Users/test/my-project"}
+            ]
+        }"#;
+        std::fs::write(&index_path, content).unwrap();
+
+        assert!(verify_project_path("/Users/test/my-project", temp_dir.path()));
+    }
+
+    #[test]
+    fn test_verify_project_path_not_matching() {
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().join("sessions-index.json");
+
+        let content = r#"{
+            "entries": [
+                {"sessionId": "abc123", "projectPath": "/Users/test/other-project"}
+            ]
+        }"#;
+        std::fs::write(&index_path, content).unwrap();
+
+        // This simulates the collision case: requesting /Users/test/my-project
+        // but the directory contains sessions for /Users/test/other-project
+        assert!(!verify_project_path("/Users/test/my-project", temp_dir.path()));
+    }
+
+    #[test]
+    fn test_verify_project_path_collision_scenario() {
+        // Simulate: /Users/foo-bar and /Users/foo/bar both encode to -Users-foo-bar
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().join("sessions-index.json");
+
+        // Directory contains sessions for /Users/foo/bar
+        let content = r#"{
+            "entries": [
+                {"sessionId": "abc123", "projectPath": "/Users/foo/bar"}
+            ]
+        }"#;
+        std::fs::write(&index_path, content).unwrap();
+
+        // Request for /Users/foo/bar should match
+        assert!(verify_project_path("/Users/foo/bar", temp_dir.path()));
+
+        // Request for /Users/foo-bar should NOT match (collision case)
+        assert!(!verify_project_path("/Users/foo-bar", temp_dir.path()));
+    }
+
+    #[test]
+    fn test_verify_project_path_no_index_file() {
+        let temp_dir = TempDir::new().unwrap();
+        // No sessions-index.json file exists
+        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
+    }
+
+    #[test]
+    fn test_verify_project_path_empty_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().join("sessions-index.json");
+
+        let content = r#"{"entries": []}"#;
+        std::fs::write(&index_path, content).unwrap();
+
+        // No entries to verify against, return false to be safe
+        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
+    }
+
+    #[test]
+    fn test_verify_project_path_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let index_path = temp_dir.path().join("sessions-index.json");
+
+        std::fs::write(&index_path, "not valid json").unwrap();
+
+        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
     }
 }

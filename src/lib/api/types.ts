@@ -4,6 +4,10 @@ export interface CliInstallStatus {
   version?: string;
 }
 
+export interface CliAuthStatus {
+  authenticated: boolean;
+}
+
 export interface StartupInfo {
   needsOnboarding: boolean;
   lastFolder?: string;

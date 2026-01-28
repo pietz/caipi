@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { api, type CliInstallStatus } from '$lib/api';
+  import { api, type CliInstallStatus, type CliAuthStatus } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { Check, Folder, Loader2, Sun, Moon, Copy } from 'lucide-svelte';
+  import { Check, Folder, Loader2, Sun, Moon, Copy, AlertTriangle } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
   import { app } from '$lib/stores/app.svelte';
 
   let cliStatus = $state<(CliInstallStatus & { path?: string | null }) | null>(null);
+  let authStatus = $state<CliAuthStatus | null>(null);
   let checkingCli = $state(true);
   let selectedFolder = $state<string | null>(null);
   let folderName = $state<string>('');
@@ -33,9 +34,18 @@
     try {
       const status = await api.checkCliInstalled();
       cliStatus = { ...status, path: null };
+
+      // Only check auth if CLI is installed
+      if (status.installed) {
+        const auth = await api.checkCliAuthenticated();
+        authStatus = auth;
+      } else {
+        authStatus = { authenticated: false };
+      }
     } catch (e) {
       console.error('Failed to check CLI:', e);
       cliStatus = { installed: false, version: undefined, path: null };
+      authStatus = { authenticated: false };
     } finally {
       checkingCli = false;
     }
@@ -93,7 +103,7 @@
       app.setCliStatus({
         installed: true,
         version: cliStatus.version ?? null,
-        authenticated: true,
+        authenticated: authStatus?.authenticated ?? false,
         path: cliStatus.path ?? null,
       });
 
@@ -106,7 +116,7 @@
     }
   }
 
-  const canProceed = $derived(cliStatus?.installed && selectedFolder && !completing);
+  const canProceed = $derived(cliStatus?.installed && authStatus?.authenticated && selectedFolder && !completing);
 </script>
 
 <div class="flex flex-col items-center justify-center h-full gap-6 pt-12 px-10 pb-10 relative" data-tauri-drag-region>
@@ -145,8 +155,10 @@
         <span class="text-sm font-medium text-foreground">Claude Code CLI</span>
         {#if checkingCli}
           <Loader2 size={14} class="animate-spin text-muted-foreground" />
-        {:else if cliStatus?.installed}
+        {:else if cliStatus?.installed && authStatus?.authenticated}
           <Check size={14} class="text-green-500" />
+        {:else if cliStatus?.installed && !authStatus?.authenticated}
+          <AlertTriangle size={14} class="text-yellow-500" />
         {:else}
           <span class="w-2 h-2 rounded-full bg-red-500"></span>
         {/if}
@@ -154,10 +166,29 @@
 
       {#if checkingCli}
         <p class="text-xs text-muted-foreground">Checking installation...</p>
-      {:else if cliStatus?.installed}
+      {:else if cliStatus?.installed && authStatus?.authenticated}
         <p class="text-xs text-muted-foreground">
           Installed {cliStatus.version ? `(${cliStatus.version})` : ''}
         </p>
+      {:else if cliStatus?.installed && !authStatus?.authenticated}
+        <p class="text-xs text-muted-foreground mb-3">
+          Installed but not authenticated. Run this in your terminal:
+        </p>
+        <div class="flex items-center gap-2 mb-2">
+          <code class="flex-1 text-xs px-3 py-2 rounded bg-muted border border-border text-muted-foreground">
+            claude
+          </code>
+        </div>
+        <p class="text-xs text-muted-foreground/70 mb-2">
+          Follow the prompts to log in to your Anthropic account.
+        </p>
+        <button
+          type="button"
+          onclick={checkCliStatus}
+          class="text-xs text-primary hover:underline"
+        >
+          Recheck authentication
+        </button>
       {:else}
         <p class="text-xs text-muted-foreground mb-3">
           Required to use Caipi. Run this in your terminal:
@@ -251,6 +282,10 @@
   {#if !cliStatus?.installed && !checkingCli}
     <p class="text-xs text-muted-foreground/50">
       Install Claude Code CLI to continue
+    </p>
+  {:else if cliStatus?.installed && !authStatus?.authenticated && !checkingCli}
+    <p class="text-xs text-muted-foreground/50">
+      Authenticate Claude Code CLI to continue
     </p>
   {:else if !selectedFolder}
     <p class="text-xs text-muted-foreground/50">

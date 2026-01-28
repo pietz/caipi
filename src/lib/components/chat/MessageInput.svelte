@@ -143,7 +143,12 @@
                 'h-8 w-8',
                 app.extendedThinking && 'bg-purple-500/10 border-purple-500/30 text-purple-500'
               )}
-              onclick={() => app.toggleExtendedThinking()}
+              onclick={() => {
+                app.toggleExtendedThinking();
+                if (app.sessionId) {
+                  api.setExtendedThinking(app.sessionId, app.extendedThinking);
+                }
+              }}
             >
               <Brain size={14} />
             </Button>
