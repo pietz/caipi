@@ -4,6 +4,7 @@ use claude_agent_sdk_rs::{
     PermissionMode, SettingSource,
 };
 use futures::StreamExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
@@ -207,93 +208,17 @@ impl AgentSession {
         let sdk_mode = string_to_permission_mode(&current_mode);
         let model_id = string_to_model_id(&current_model);
 
-        // Build options based on configuration
-        // Using match on tuple to handle all combinations while adding cli_path
-        let options = match (&self.resume_session_id, extended_thinking, &self.cli_path) {
-            (Some(session_id), true, Some(cli_path)) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .cli_path(cli_path)
-                    .resume(session_id.clone())
-                    .max_thinking_tokens(10000)
-                    .build()
-            }
-            (Some(session_id), true, None) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .resume(session_id.clone())
-                    .max_thinking_tokens(10000)
-                    .build()
-            }
-            (Some(session_id), false, Some(cli_path)) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .cli_path(cli_path)
-                    .resume(session_id.clone())
-                    .build()
-            }
-            (Some(session_id), false, None) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .resume(session_id.clone())
-                    .build()
-            }
-            (None, true, Some(cli_path)) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .cli_path(cli_path)
-                    .max_thinking_tokens(10000)
-                    .build()
-            }
-            (None, true, None) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .max_thinking_tokens(10000)
-                    .build()
-            }
-            (None, false, Some(cli_path)) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .cli_path(cli_path)
-                    .build()
-            }
-            (None, false, None) => {
-                ClaudeAgentOptions::builder()
-                    .cwd(&self.folder_path)
-                    .hooks(hooks)
-                    .permission_mode(sdk_mode)
-                    .model(model_id)
-                    .setting_sources(vec![SettingSource::User, SettingSource::Project])
-                    .build()
-            }
+        // Build options with conditional configuration
+        let options = ClaudeAgentOptions {
+            cwd: Some(PathBuf::from(&self.folder_path)),
+            hooks: Some(hooks),
+            permission_mode: Some(sdk_mode),
+            model: Some(model_id.to_string()),
+            setting_sources: Some(vec![SettingSource::User, SettingSource::Project]),
+            resume: self.resume_session_id.clone(),
+            max_thinking_tokens: if extended_thinking { Some(10000) } else { None },
+            cli_path: self.cli_path.as_ref().map(PathBuf::from),
+            ..Default::default()
         };
 
         // Create client if needed (model changes are handled via set_model() control protocol)
