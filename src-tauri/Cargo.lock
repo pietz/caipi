@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "caipi"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "chrono",
  "claude-agent-sdk-rs",
@@ -4804,7 +4804,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

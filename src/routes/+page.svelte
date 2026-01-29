@@ -10,8 +10,11 @@
 
   onMount(async () => {
     try {
-      // First check license status
-      const licenseStatus = await api.getLicenseStatus();
+      // Fetch license and startup info in parallel
+      const [licenseStatus, startupInfo] = await Promise.all([
+        api.getLicenseStatus(),
+        api.getStartupInfo()
+      ]);
 
       if (!licenseStatus.valid) {
         // No valid license - show license entry screen
@@ -27,8 +30,6 @@
         activatedAt: licenseStatus.activatedAt,
         email: licenseStatus.email,
       });
-
-      const startupInfo = await api.getStartupInfo();
 
       // Set CLI path if available (for custom Claude CLI location)
       if (startupInfo.cliPath) {

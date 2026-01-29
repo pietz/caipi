@@ -1,6 +1,6 @@
 [package]
 name = "caipi"
-version = "0.1.9"
+version = "0.1.10"
 description = "A native macOS client for Claude Code"
 authors = ["you"]
 edition = "2021"
@@ -26,7 +26,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
 claude-agent-sdk-rs = "0.6"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
@@ -40,3 +40,9 @@ hostname = "0.4"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 mockall = "0.13"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
