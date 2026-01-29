@@ -27,60 +27,139 @@ pub struct CliAuthStatus {
     pub authenticated: bool,
 }
 
-#[tauri::command]
-pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
-    // Use a login shell to get the user's full PATH
-    // This works in production app bundles where PATH is limited
-    let shell_result = Command::new("/bin/zsh")
-        .args(["-l", "-c", "which claude"])
-        .output();
-
-    let path = match shell_result {
-        Ok(output) if output.status.success() => {
-            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        }
-        _ => None,
-    };
-
-    let Some(claude_path) = path else {
-        return Ok(CliInstallStatus {
-            installed: false,
-            version: None,
-            path: None,
-        });
-    };
-
-    // Check version using a login shell as well
-    let version = Command::new("/bin/zsh")
-        .args(["-l", "-c", "claude --version"])
+/// Try to find claude by running a command in a shell
+fn try_shell_which(shell: &str, args: &[&str]) -> Option<String> {
+    Command::new(shell)
+        .args(args)
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Get claude version by running the binary directly
+fn get_claude_version(claude_path: &str) -> Option<String> {
+    Command::new(claude_path)
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+#[tauri::command]
+pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
+    // Strategy:
+    // 1. Check common installation paths directly (fastest, most reliable)
+    // 2. Try user's shell with interactive config sourced (.zshrc/.bashrc)
+    // 3. Fall back to login shell attempts
+
+    // Check common installation paths first
+    if let Some(home) = dirs::home_dir() {
+        let common_paths = [
+            home.join(".local/bin/claude"),
+            home.join(".claude/local/bin/claude"),
+            std::path::PathBuf::from("/usr/local/bin/claude"),
+            std::path::PathBuf::from("/opt/homebrew/bin/claude"),
+        ];
+
+        for path in common_paths {
+            if path.is_file() {
+                let path_str = path.to_string_lossy().to_string();
+                if let Some(version) = get_claude_version(&path_str) {
+                    return Ok(CliInstallStatus {
+                        installed: true,
+                        version: Some(version),
+                        path: Some(path_str),
+                    });
+                }
+            }
+        }
+    }
+
+    // Determine user's shell
+    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let is_zsh = user_shell.contains("zsh");
+
+    // Try sourcing interactive shell config (where PATH is usually set)
+    let source_cmd = if is_zsh {
+        "source ~/.zshrc 2>/dev/null; which claude"
+    } else {
+        "source ~/.bashrc 2>/dev/null; which claude"
+    };
+
+    if let Some(claude_path) = try_shell_which(&user_shell, &["-c", source_cmd]) {
+        let version = get_claude_version(&claude_path);
+        return Ok(CliInstallStatus {
+            installed: true,
+            version,
+            path: Some(claude_path),
+        });
+    }
+
+    // Try login shell with user's preferred shell
+    if let Some(claude_path) = try_shell_which(&user_shell, &["-l", "-c", "which claude"]) {
+        let version = get_claude_version(&claude_path);
+        return Ok(CliInstallStatus {
+            installed: true,
+            version,
+            path: Some(claude_path),
+        });
+    }
+
+    // Final fallback: try both common shells with login flag
+    for shell in ["/bin/zsh", "/bin/bash"] {
+        if let Some(claude_path) = try_shell_which(shell, &["-l", "-c", "which claude"]) {
+            let version = get_claude_version(&claude_path);
+            return Ok(CliInstallStatus {
+                installed: true,
+                version,
+                path: Some(claude_path),
+            });
+        }
+    }
 
     Ok(CliInstallStatus {
-        installed: true,
-        version,
-        path: Some(claude_path),
+        installed: false,
+        version: None,
+        path: None,
     })
 }
 
-/// Check if credentials file exists in the given home directory
-fn check_credentials_file(home_dir: &std::path::Path) -> bool {
+/// Check if OAuth token exists in Claude Desktop's config
+fn check_oauth_token(home_dir: &std::path::Path) -> bool {
+    let config_path = home_dir
+        .join("Library/Application Support/Claude/config.json");
+
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        // Check if oauth:tokenCache field exists and has a value
+        return content.contains("\"oauth:tokenCache\"");
+    }
+    false
+}
+
+/// Check legacy credentials file location
+fn check_legacy_credentials(home_dir: &std::path::Path) -> bool {
     let creds_path = home_dir.join(".claude").join(".credentials.json");
     creds_path.exists()
 }
 
 #[tauri::command]
 pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
-    // Check environment variable first
+    // Check environment variable first (for API key users)
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
         return Ok(CliAuthStatus { authenticated: true });
     }
 
-    // Check Claude's credentials file
     if let Some(home) = dirs::home_dir() {
-        if check_credentials_file(&home) {
+        // Check Claude Desktop's OAuth token (most common for Pro/Max users)
+        if check_oauth_token(&home) {
+            return Ok(CliAuthStatus { authenticated: true });
+        }
+
+        // Check legacy credentials file location
+        if check_legacy_credentials(&home) {
             return Ok(CliAuthStatus { authenticated: true });
         }
     }
@@ -196,30 +275,52 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_check_credentials_file_exists() {
+    fn test_check_legacy_credentials_exists() {
         let temp_dir = TempDir::new().unwrap();
         let claude_dir = temp_dir.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
         std::fs::write(claude_dir.join(".credentials.json"), "{}").unwrap();
 
-        assert!(check_credentials_file(temp_dir.path()));
+        assert!(check_legacy_credentials(temp_dir.path()));
     }
 
     #[test]
-    fn test_check_credentials_file_not_exists() {
+    fn test_check_legacy_credentials_not_exists() {
         let temp_dir = TempDir::new().unwrap();
         // No .claude directory or credentials file
 
-        assert!(!check_credentials_file(temp_dir.path()));
+        assert!(!check_legacy_credentials(temp_dir.path()));
     }
 
     #[test]
-    fn test_check_credentials_file_claude_dir_exists_but_no_creds() {
+    fn test_check_oauth_token_exists() {
         let temp_dir = TempDir::new().unwrap();
-        let claude_dir = temp_dir.path().join(".claude");
-        std::fs::create_dir_all(&claude_dir).unwrap();
-        // .claude directory exists but no .credentials.json
+        let config_dir = temp_dir.path().join("Library/Application Support/Claude");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("config.json"),
+            r#"{"oauth:tokenCache": "sometoken"}"#,
+        )
+        .unwrap();
 
-        assert!(!check_credentials_file(temp_dir.path()));
+        assert!(check_oauth_token(temp_dir.path()));
+    }
+
+    #[test]
+    fn test_check_oauth_token_not_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        // No config file
+
+        assert!(!check_oauth_token(temp_dir.path()));
+    }
+
+    #[test]
+    fn test_check_oauth_token_no_token_field() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_dir = temp_dir.path().join("Library/Application Support/Claude");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("config.json"), r#"{"darkMode": "light"}"#).unwrap();
+
+        assert!(!check_oauth_token(temp_dir.path()));
     }
 }
