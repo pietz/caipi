@@ -83,8 +83,8 @@ impl Clone for AgentSession {
 fn string_to_permission_mode(mode: &str) -> PermissionMode {
     match mode {
         "acceptEdits" => PermissionMode::AcceptEdits,
-        "plan" => PermissionMode::Plan,
         "bypassPermissions" => PermissionMode::BypassPermissions,
+        // Note: Plan mode is not supported - it requires interactive CLI dialogs
         _ => PermissionMode::Default,
     }
 }
@@ -209,9 +209,18 @@ impl AgentSession {
         let model_id = string_to_model_id(&current_model);
 
         // Build options with conditional configuration
+        // Disabled tools:
+        // - AskUserQuestion: CLI blocks waiting for terminal input, no programmatic answer mechanism
+        // - EnterPlanMode/ExitPlanMode: Plan mode requires interactive CLI approval dialogs
+        // See ASK_USER_QUESTION_ISSUE.md for research details
         let options = ClaudeAgentOptions {
             cwd: Some(PathBuf::from(&self.folder_path)),
             hooks: Some(hooks),
+            disallowed_tools: vec![
+                "AskUserQuestion".to_string(),
+                "EnterPlanMode".to_string(),
+                "ExitPlanMode".to_string(),
+            ],
             permission_mode: Some(sdk_mode),
             model: Some(model_id.to_string()),
             setting_sources: Some(vec![SettingSource::User, SettingSource::Project]),
