@@ -49,7 +49,7 @@ class AppState {
   // Settings
   permissionMode = $state<PermissionMode>('default');
   model = $state<Model>(getPersistedModel());
-  extendedThinking = $state(false);
+  extendedThinking = $state(true);
 
   // Auth info
   authType = $state<string | null>(null);

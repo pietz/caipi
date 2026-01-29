@@ -110,7 +110,7 @@ impl AgentSession {
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
-            extended_thinking: Arc::new(RwLock::new(false)),
+            extended_thinking: Arc::new(RwLock::new(true)),
             resume_session_id,
             cli_path,
             abort_flag: Arc::new(AtomicBool::new(false)),
@@ -216,7 +216,7 @@ impl AgentSession {
             model: Some(model_id.to_string()),
             setting_sources: Some(vec![SettingSource::User, SettingSource::Project]),
             resume: self.resume_session_id.clone(),
-            max_thinking_tokens: if extended_thinking { Some(10000) } else { None },
+            max_thinking_tokens: if extended_thinking { Some(31999) } else { None },
             cli_path: self.cli_path.as_ref().map(PathBuf::from),
             ..Default::default()
         };
