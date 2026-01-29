@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { Loader2, Key, Sun, Moon, AlertCircle, CheckCircle } from 'lucide-svelte';
+  import { openUrl } from '@tauri-apps/plugin-opener';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button, Input } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
@@ -141,14 +142,12 @@
     <div class="text-xs text-muted-foreground space-y-2">
       <p>
         Don't have a license?
-        <a
-          href="https://caipi.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-primary hover:underline"
+        <button
+          onclick={() => openUrl('https://caipi.ai')}
+          class="text-primary underline underline-offset-2 hover:opacity-80"
         >
           Purchase one here
-        </a>
+        </button>
       </p>
       <p class="text-muted-foreground/70">
         Your license key was sent to your email after purchase.

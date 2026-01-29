@@ -2,6 +2,7 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import hljs from 'highlight.js';
+  import { openUrl } from '@tauri-apps/plugin-opener';
   import type { Message } from '$lib/stores';
   import { HIDDEN_TOOL_TYPES } from './constants';
   import ToolCallStack from './ToolCallStack.svelte';
@@ -17,6 +18,15 @@
     message.tools?.filter(t => !HIDDEN_TOOL_TYPES.includes(t.toolType)) ?? []
   );
   const hasTools = $derived(visibleTools.length > 0);
+
+  function handleClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    const anchor = target.closest('a');
+    if (anchor && anchor.href) {
+      event.preventDefault();
+      openUrl(anchor.href);
+    }
+  }
 
   // Configure marked with custom renderer for code highlighting
   const renderer = new marked.Renderer();
@@ -39,9 +49,11 @@
 
 <!-- Message content -->
 {#if message.content}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="message-content text-sm leading-relaxed {isUser ? 'text-foreground/70 italic' : isError ? 'text-red-500' : 'text-foreground/90'}"
     class:error-message={isError}
+    onclick={handleClick}
   >
     {@html htmlContent}
   </div>
@@ -120,5 +132,15 @@
   :global(.message-content h3:first-child),
   :global(.message-content h4:first-child) {
     margin-top: 0;
+  }
+
+  :global(.message-content a) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  :global(.message-content a:hover) {
+    opacity: 0.8;
   }
 </style>
