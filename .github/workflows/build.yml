@@ -42,10 +42,7 @@ jobs:
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)
-        run: npm run tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Rename artifacts
         run: node scripts/release-rename.js
