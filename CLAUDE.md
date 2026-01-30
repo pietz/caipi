@@ -9,27 +9,36 @@ Caipi is a macOS desktop app written in Tauri 2, providing a chat UI for Claude 
 | Repo | Purpose | Location |
 |------|---------|----------|
 | `pietz/caipi` (private) | Source code | `/Users/pietz/Private/caipi` |
-| `pietz/caipi.ai` (public) | Releases, website, Homebrew tap | `/Users/pietz/Private/caipi.ai` |
+| `pietz/caipi.ai` (public) | Releases, website | `/Users/pietz/Private/caipi.ai` |
 
 **URLs:**
 - Website: https://caipi.ai
 - Download: `https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg`
-- Homebrew cask: `caipi.ai/Casks/caipi.rb`
 
 ## Commands
 
 ```bash
-# Development
 npm run tauri dev      # Run app in dev mode
 npm run check          # Type check frontend
 npm run test:all       # Run all tests
-
-# Release (requires `source .env` first for signing credentials)
-npm run release                   # Build only
-npm run release && npm run release:publish  # Build + publish to GitHub + update Homebrew
 ```
 
-**Version bump**: Update `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` before release.
+## Release Process
+
+When asked to release a new version, update the version in these 3 files:
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+
+Commit and push. GitHub Actions will automatically detect the version change and build/publish the release.
+
+**After release**, update the release notes:
+```bash
+gh release edit v0.1.XX --repo pietz/caipi.ai --notes "## What's New
+
+- Change 1
+- Change 2"
+```
 
 ## Tech Stack
 
@@ -59,12 +68,3 @@ Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.
 1. Run `npm run test:all`
 2. Test manually with `npm run tauri dev`
 3. App flow: Onboarding → Folder Picker → Chat
-
-## Release Notes
-
-When publishing a release to `pietz/caipi.ai`, include a brief high-level changelog in the GitHub release notes. Focus on user-facing changes:
-- New features or UI improvements
-- Bug fixes
-- Performance changes
-
-Keep it concise (3-5 bullet points). No need for file-level details.

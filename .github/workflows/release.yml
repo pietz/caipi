@@ -1,6 +1,10 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -8,23 +12,23 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    tags:
-      - "v*.*.*"
 
 jobs:
-  validate:
+  check:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read and validate version
-        id: version
+      - name: Check if release needed
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.CAIPI_AI_PAT }}
         run: |
-          # Read version from package.json
+          # Read version from source files
           PKG_VERSION=$(jq -r '.version' package.json)
           TAURI_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           CARGO_VERSION=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
@@ -39,20 +43,22 @@ jobs:
             exit 1
           fi
 
-          # If triggered by tag, validate tag matches
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-              echo "::error::Tag v$TAG_VERSION doesn't match source version $PKG_VERSION"
-              exit 1
-            fi
+          echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
+
+          # Check if this version already exists as a release
+          EXISTING=$(gh release view "v$PKG_VERSION" --repo pietz/caipi.ai --json tagName 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Release v$PKG_VERSION already exists, skipping"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version v$PKG_VERSION detected, will release"
+            echo "should_release=true" >> $GITHUB_OUTPUT
           fi
 
-          echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $PKG_VERSION"
-
   build:
-    needs: validate
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -115,7 +121,7 @@ jobs:
 
       - name: Generate latest.json
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
+          VERSION="${{ needs.check.outputs.version }}"
           SIGNATURE=$(cat src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig)
           cat > src-tauri/target/release/bundle/latest.json << EOF
           {
@@ -149,7 +155,7 @@ jobs:
         run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
 
   publish:
-    needs: [validate, build]
+    needs: [check, build]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
@@ -163,12 +169,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CAIPI_AI_PAT }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
+          VERSION="${{ needs.check.outputs.version }}"
 
-          # Delete existing release if it exists (for re-runs)
-          gh release delete "v$VERSION" --repo pietz/caipi.ai --yes 2>/dev/null || true
-
-          # Create release with all artifacts
           gh release create "v$VERSION" \
             artifacts/src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg \
             artifacts/src-tauri/target/release/bundle/macos/caipi.app.tar.gz \
