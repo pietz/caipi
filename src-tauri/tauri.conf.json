@@ -40,7 +40,12 @@
     ],
     "createUpdaterArtifacts": true,
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "dmg": {
+        "windowSize": { "width": 540, "height": 380 },
+        "appPosition": { "x": 140, "y": 180 },
+        "applicationFolderPosition": { "x": 400, "y": 180 }
+      }
     }
   },
   "plugins": {
