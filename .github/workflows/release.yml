@@ -172,10 +172,10 @@ jobs:
           VERSION="${{ needs.check.outputs.version }}"
 
           gh release create "v$VERSION" \
-            artifacts/src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg \
-            artifacts/src-tauri/target/release/bundle/macos/caipi.app.tar.gz \
-            artifacts/src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig \
-            artifacts/src-tauri/target/release/bundle/latest.json \
+            artifacts/dmg/caipi_aarch64.dmg \
+            artifacts/macos/caipi.app.tar.gz \
+            artifacts/macos/caipi.app.tar.gz.sig \
+            artifacts/latest.json \
             --repo pietz/caipi.ai \
             --title "v$VERSION" \
             --notes "Release v$VERSION"
