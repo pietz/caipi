@@ -1,6 +1,6 @@
 {
   "name": "Caipi",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "A native macOS client for Claude Code",
   "type": "module",
   "scripts": {

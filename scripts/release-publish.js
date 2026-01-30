@@ -38,13 +38,17 @@ async function publish() {
   const sha256 = sha256Output.split(" ")[0];
   console.log(`✓ SHA256: ${sha256.slice(0, 16)}...`);
 
-  // 5. Update cask formula
+  // 5. Update cask formula (if it exists)
   const caskPath = join(CAIPI_AI_PATH, "Casks/caipi.rb");
-  let caskContent = await readFile(caskPath, "utf-8");
-  caskContent = caskContent.replace(/version "[^"]+"/, `version "${version}"`);
-  caskContent = caskContent.replace(/sha256 "[^"]+"/, `sha256 "${sha256}"`);
-  await writeFile(caskPath, caskContent);
-  console.log(`✓ Updated cask formula`);
+  try {
+    let caskContent = await readFile(caskPath, "utf-8");
+    caskContent = caskContent.replace(/version "[^"]+"/, `version "${version}"`);
+    caskContent = caskContent.replace(/sha256 "[^"]+"/, `sha256 "${sha256}"`);
+    await writeFile(caskPath, caskContent);
+    console.log(`✓ Updated cask formula`);
+  } catch (err) {
+    console.log(`⏭ Skipped cask formula (not found)`);
+  }
 
   // 6. Create GitHub release with files
   const dmgFile = join(BUNDLE_PATH, "dmg/caipi_aarch64.dmg");
@@ -77,22 +81,22 @@ async function publish() {
     process.exit(1);
   }
 
-  // 7. Commit cask formula update
-  console.log(`\n📝 Committing cask formula update...\n`);
+  // 7. Commit cask formula update (if it exists)
   try {
+    await readFile(caskPath, "utf-8"); // Check if file exists
+    console.log(`\n📝 Committing cask formula update...\n`);
     execSync(`git -C "${CAIPI_AI_PATH}" add Casks/caipi.rb`);
     execSync(`git -C "${CAIPI_AI_PATH}" commit -m "Update cask to v${version}"`);
     execSync(`git -C "${CAIPI_AI_PATH}" push`);
     console.log(`✓ Cask formula committed and pushed`);
   } catch (err) {
-    console.log(`Note: Cask formula commit skipped (maybe no changes or already committed)`);
+    // Cask doesn't exist or no changes - skip silently
   }
 
   console.log(`
 ✅ Release v${version} published!
 
 Download: https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg
-Homebrew: brew tap pietz/caipi https://github.com/pietz/caipi.ai && brew install --cask caipi
 `);
 }
 

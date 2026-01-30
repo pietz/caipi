@@ -126,6 +126,16 @@ fn read_sessions_index(project_dir: &PathBuf) -> Option<Vec<SessionInfo>> {
 
 #[tauri::command]
 pub async fn get_all_sessions() -> Result<Vec<ProjectSessions>, String> {
+    // Delegate to get_recent_sessions with a high limit for backwards compatibility
+    get_recent_sessions(1000).await
+}
+
+/// Get recent sessions, filtered to existing folders and limited to top N
+/// This is more efficient than get_all_sessions as it:
+/// 1. Filters out non-existent folders in one pass (no IPC overhead)
+/// 2. Only returns the top N sessions instead of everything
+#[tauri::command]
+pub async fn get_recent_sessions(limit: u32) -> Result<Vec<ProjectSessions>, String> {
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let projects_dir = home_dir.join(".claude").join("projects");
 
@@ -136,40 +146,58 @@ pub async fn get_all_sessions() -> Result<Vec<ProjectSessions>, String> {
     let entries = fs::read_dir(&projects_dir)
         .map_err(|e| format!("Failed to read projects directory: {}", e))?;
 
-    let mut projects: Vec<ProjectSessions> = entries
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let sessions = read_sessions_index(&entry.path())?;
+    // Collect all sessions from all projects, filtering out non-existent folders
+    let mut all_sessions: Vec<(SessionInfo, String)> = Vec::new(); // (session, folder_path)
 
-            // Get folder_path from the first session (all sessions in this dir share the same project path)
-            let folder_path = sessions.first()?.folder_path.clone();
-            let folder_name = get_folder_name(&folder_path);
+    for entry in entries.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+        if let Some(sessions) = read_sessions_index(&entry.path()) {
+            if let Some(first) = sessions.first() {
+                let folder_path = first.folder_path.clone();
 
-            // Get the latest modified time from sessions
-            let latest_modified = sessions
-                .iter()
-                .map(|s| s.modified.as_str())
-                .max()
-                .unwrap_or("")
-                .to_string();
+                // Check if folder still exists - skip if not
+                if !std::path::Path::new(&folder_path).exists() {
+                    continue;
+                }
 
-            Some(ProjectSessions {
-                folder_path,
-                folder_name,
-                sessions,
-                latest_modified,
-            })
-        })
-        .collect();
-
-    // Sort projects by latest_modified (most recent first)
-    projects.sort_by(|a, b| b.latest_modified.cmp(&a.latest_modified));
-
-    // Sort sessions within each project by modified date (most recent first)
-    for project in &mut projects {
-        project.sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
+                for session in sessions {
+                    all_sessions.push((session, folder_path.clone()));
+                }
+            }
+        }
     }
+
+    // Sort all sessions by modified date (most recent first)
+    all_sessions.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
+
+    // Take top N sessions
+    all_sessions.truncate(limit as usize);
+
+    // Regroup by project, preserving order of first appearance
+    let mut project_map: std::collections::HashMap<String, ProjectSessions> =
+        std::collections::HashMap::new();
+    let mut project_order: Vec<String> = Vec::new();
+
+    for (session, folder_path) in all_sessions {
+        if !project_map.contains_key(&folder_path) {
+            project_order.push(folder_path.clone());
+            project_map.insert(
+                folder_path.clone(),
+                ProjectSessions {
+                    folder_path: folder_path.clone(),
+                    folder_name: get_folder_name(&folder_path),
+                    sessions: Vec::new(),
+                    latest_modified: session.modified.clone(),
+                },
+            );
+        }
+        project_map.get_mut(&folder_path).unwrap().sessions.push(session);
+    }
+
+    // Convert to Vec preserving insertion order
+    let projects: Vec<ProjectSessions> = project_order
+        .into_iter()
+        .filter_map(|path| project_map.remove(&path))
+        .collect();
 
     Ok(projects)
 }

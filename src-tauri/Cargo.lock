@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "caipi"
-version = "0.1.11"
+version = "0.1.13"
 dependencies = [
  "chrono",
  "claude-agent-sdk-rs",
@@ -369,6 +369,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

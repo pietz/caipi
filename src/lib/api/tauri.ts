@@ -26,6 +26,7 @@ export const api = {
 
   // Sessions
   getAllSessions: () => invoke<ProjectSessions[]>('get_all_sessions'),
+  getRecentSessions: (limit: number) => invoke<ProjectSessions[]>('get_recent_sessions', { limit }),
   getProjectSessions: (folderPath: string) =>
     invoke<SessionInfo[]>('get_project_sessions', { folderPath }),
   getSessionHistory: (folderPath: string, sessionId: string) =>
@@ -54,6 +55,7 @@ export const api = {
     invoke<LicenseValidationResult>('validate_license', { licenseKey }),
   getLicenseStatus: () => invoke<LicenseStatus>('get_license_status'),
   clearLicense: () => invoke<void>('clear_license'),
+  revalidateLicenseBackground: () => invoke<void>('revalidate_license_background'),
 
   // CLI Path
   getCliPath: () => invoke<string | null>('get_cli_path'),

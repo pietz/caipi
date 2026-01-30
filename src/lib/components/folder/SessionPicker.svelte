@@ -22,35 +22,8 @@
   async function loadSessions() {
     try {
       loading = true;
-      const allProjects = await api.getAllSessions();
-
-      // Flatten all sessions with their project info, take top 50, regroup
-      const allSessions = allProjects.flatMap(p =>
-        p.sessions.map(s => ({ ...s, project: p }))
-      );
-
-      // Sort by modified (most recent first) and take top 100
-      allSessions.sort((a, b) => b.modified.localeCompare(a.modified));
-      const top100 = allSessions.slice(0, 100);
-
-      // Regroup by project, preserving the order of first appearance
-      const projectMap = new Map<string, ProjectSessions>();
-      for (const session of top100) {
-        const key = session.project.folderPath;
-        if (!projectMap.has(key)) {
-          projectMap.set(key, {
-            folderPath: session.project.folderPath,
-            folderName: session.project.folderName,
-            sessions: [],
-            latestModified: session.modified,
-          });
-        }
-        projectMap.get(key)!.sessions.push(session);
-      }
-
-      projects = Array.from(projectMap.values());
-
-      // Accordions closed by default
+      // Backend handles: filtering non-existent folders, sorting, limiting to 100
+      projects = await api.getRecentSessions(100);
       expandedFolders = new Set();
     } catch (e) {
       console.error('Failed to load sessions:', e);
@@ -224,29 +197,40 @@
               {@const isExpanded = expandedFolders.has(project.folderPath)}
               <div class="rounded-lg overflow-hidden">
                 <!-- Folder header -->
-                <button
-                  type="button"
-                  class="flex items-center justify-between w-full py-2.5 px-3 hover:bg-muted/50 transition-colors text-left rounded-md"
-                  onclick={() => toggleFolder(project.folderPath)}
-                  disabled={validating}
-                >
-                  <div class="flex items-center gap-2">
-                    <span class="text-muted-foreground">
-                      {#if isExpanded}
-                        <ChevronDown size={16} />
-                      {:else}
-                        <ChevronRight size={16} />
-                      {/if}
-                    </span>
-                    <span class="text-muted-foreground">
-                      <Folder size={16} />
-                    </span>
-                    <span class="text-sm font-medium text-foreground">{project.folderName}</span>
-                  </div>
-                  <span class="text-xs text-muted-foreground/50">
-                    {project.sessions.length} session{project.sessions.length !== 1 ? 's' : ''}
-                  </span>
-                </button>
+                <div class="flex items-center w-full">
+                  <button
+                    type="button"
+                    class="flex items-center flex-1 py-2.5 px-3 hover:bg-muted transition-colors text-left rounded-l-md"
+                    onclick={() => toggleFolder(project.folderPath)}
+                    disabled={validating}
+                  >
+                    <div class="flex items-center gap-2">
+                      <span class="text-muted-foreground">
+                        {#if isExpanded}
+                          <ChevronDown size={16} />
+                        {:else}
+                          <ChevronRight size={16} />
+                        {/if}
+                      </span>
+                      <span class="text-muted-foreground">
+                        <Folder size={16} />
+                      </span>
+                      <span class="text-sm font-medium text-foreground">{project.folderName}</span>
+                      <span class="text-xs text-muted-foreground/50">
+                        ({project.sessions.length})
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    class="py-2.5 px-3 hover:bg-muted transition-colors rounded-r-md"
+                    onclick={() => startNewSession(project.folderPath)}
+                    disabled={validating}
+                    title="New session"
+                  >
+                    <Plus size={16} class="text-muted-foreground" />
+                  </button>
+                </div>
 
                 <!-- Sessions list (collapsible) -->
                 {#if isExpanded}
@@ -254,7 +238,7 @@
                     {#each project.sessions as session}
                       <button
                         type="button"
-                        class="flex items-center justify-between w-full py-2 px-3 hover:bg-muted/50 transition-colors text-left"
+                        class="flex items-center justify-between w-full py-2 px-3 hover:bg-muted transition-colors text-left"
                         onclick={() => resumeSession(session)}
                         disabled={validating}
                       >
@@ -280,7 +264,7 @@
       <div class="mt-6 pt-4 border-t border-border">
         <button
           type="button"
-          class="flex items-center gap-2 w-full py-2.5 px-3 rounded-md hover:bg-muted/50 transition-colors text-left"
+          class="flex items-center gap-2 w-full py-2.5 px-3 rounded-md hover:bg-muted transition-colors text-left"
           onclick={selectNewFolder}
           disabled={validating}
         >

@@ -145,6 +145,22 @@ fn check_legacy_credentials(home_dir: &std::path::Path) -> bool {
     creds_path.exists()
 }
 
+/// Test authentication by running a simple claude prompt
+fn test_claude_auth(claude_path: &str) -> bool {
+    // Run claude with a simple "hi" prompt using --print mode and haiku (fastest, no thinking)
+    // If authenticated, it will respond. If not, it will fail.
+    match Command::new(claude_path)
+        .args(["-p", "hi", "--model", "haiku"])
+        .output()
+    {
+        Ok(output) => {
+            // If exit code is 0 and we got some output, auth is working
+            output.status.success() && !output.stdout.is_empty()
+        }
+        Err(_) => false,
+    }
+}
+
 #[tauri::command]
 pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
     // Check environment variable first (for API key users)
@@ -160,6 +176,15 @@ pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
 
         // Check legacy credentials file location
         if check_legacy_credentials(&home) {
+            return Ok(CliAuthStatus { authenticated: true });
+        }
+    }
+
+    // Fall back to actually testing claude with a simple prompt
+    // This handles cases where auth is stored in unexpected locations
+    let install_status = check_cli_installed().await?;
+    if let Some(claude_path) = install_status.path {
+        if test_claude_auth(&claude_path) {
             return Ok(CliAuthStatus { authenticated: true });
         }
     }

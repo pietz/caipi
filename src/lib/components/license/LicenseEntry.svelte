@@ -10,6 +10,7 @@
   let licenseKey = $state('');
   let validating = $state(false);
   let error = $state<string | null>(null);
+  let errorHint = $state<string | null>(null);
   let success = $state(false);
 
   const currentTheme = $derived($resolvedTheme);
@@ -18,14 +19,68 @@
     themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
   }
 
+  /**
+   * Converts API error messages to user-friendly messages with optional hints
+   */
+  function getErrorMessage(apiError: string, key: string): { message: string; hint: string | null } {
+    const trimmedKey = key.trim();
+
+    // Check if this might be a coupon code (8 characters)
+    if (trimmedKey.length === 8) {
+      return {
+        message: 'This doesn\'t look like a valid license key',
+        hint: 'Could this be a coupon code? Coupon codes should be redeemed at caipi.ai during checkout, not here.',
+      };
+    }
+
+    // Handle common Lemon Squeezy errors
+    const lowerError = apiError.toLowerCase();
+
+    if (lowerError.includes('not found') || lowerError.includes('does not exist')) {
+      return {
+        message: 'License key not found',
+        hint: 'Please check for typos. Your license key was sent to your email after purchase.',
+      };
+    }
+
+    if (lowerError.includes('disabled') || lowerError.includes('expired')) {
+      return {
+        message: 'This license has been disabled or expired',
+        hint: 'Please contact support if you believe this is an error.',
+      };
+    }
+
+    if (lowerError.includes('limit') || lowerError.includes('activation')) {
+      return {
+        message: 'Activation limit reached',
+        hint: 'This license has been activated on too many devices. Deactivate it on another device or contact support.',
+      };
+    }
+
+    if (lowerError.includes('connect') || lowerError.includes('network') || lowerError.includes('timeout')) {
+      return {
+        message: 'Could not connect to the license server',
+        hint: 'Please check your internet connection and try again.',
+      };
+    }
+
+    // Default fallback
+    return {
+      message: apiError,
+      hint: null,
+    };
+  }
+
   async function validateLicense() {
     if (!licenseKey.trim()) {
       error = 'Please enter a license key';
+      errorHint = null;
       return;
     }
 
     validating = true;
     error = null;
+    errorHint = null;
 
     try {
       const result = await api.validateLicense(licenseKey.trim());
@@ -44,10 +99,15 @@
           app.setScreen('onboarding');
         }, 800);
       } else {
-        error = result.error || 'Invalid license key';
+        const { message, hint } = getErrorMessage(result.error || 'Invalid license key', licenseKey);
+        error = message;
+        errorHint = hint;
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to validate license';
+      const rawError = e instanceof Error ? e.message : 'Failed to validate license';
+      const { message, hint } = getErrorMessage(rawError, licenseKey);
+      error = message;
+      errorHint = hint;
     } finally {
       validating = false;
     }
@@ -105,9 +165,14 @@
       />
 
       {#if error}
-        <div class="flex items-center gap-2 text-xs text-red-500">
-          <AlertCircle size={14} />
-          <span>{error}</span>
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-2 text-xs text-red-500">
+            <AlertCircle size={14} class="flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+          {#if errorHint}
+            <p class="text-xs text-muted-foreground ml-[22px]">{errorHint}</p>
+          {/if}
         </div>
       {/if}
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { Loader2 } from 'lucide-svelte';
   import SetupWizard from '$lib/components/onboarding/SetupWizard.svelte';
   import SessionPicker from '$lib/components/folder/SessionPicker.svelte';
@@ -8,7 +9,15 @@
   import { LicenseEntry } from '$lib/components/license';
   import { app } from '$lib/stores/app.svelte';
 
+  let unlistenLicenseInvalid: UnlistenFn | null = null;
+
   onMount(async () => {
+    // Listen for license:invalid event from background revalidation
+    // If license is revoked on Lemon Squeezy, user will be kicked to license screen
+    unlistenLicenseInvalid = await listen('license:invalid', () => {
+      app.setScreen('license');
+      app.setLicense({ valid: false });
+    });
     try {
       // Fetch license and startup info in parallel
       const [licenseStatus, startupInfo] = await Promise.all([
@@ -29,6 +38,12 @@
         licenseKey: licenseStatus.licenseKey,
         activatedAt: licenseStatus.activatedAt,
         email: licenseStatus.email,
+      });
+
+      // Trigger background license revalidation with Lemon Squeezy API
+      // This is fire-and-forget - if license was revoked, we'll get a license:invalid event
+      api.revalidateLicenseBackground().catch(() => {
+        // Silently ignore errors - network issues shouldn't block the user
       });
 
       // Set CLI path if available (for custom Claude CLI location)
@@ -70,6 +85,12 @@
       // Fallback to license check on error (most secure default)
       app.setScreen('license');
       app.setLoading(false);
+    }
+  });
+
+  onDestroy(() => {
+    if (unlistenLicenseInvalid) {
+      unlistenLicenseInvalid();
     }
   });
 </script>

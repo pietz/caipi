@@ -1,6 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { watchImmediate, type UnwatchFn } from '@tauri-apps/plugin-fs';
+  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { Bug } from 'lucide-svelte';
   import FileTreeItem from './FileTreeItem.svelte';
   import { files, type FileEntry } from '$lib/stores/files.svelte';
 
@@ -88,4 +90,13 @@
       {/each}
     {/if}
   </div>
+
+  <!-- Footer -->
+  <button
+    class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer border-t border-border"
+    onclick={() => openUrl('https://github.com/pietz/caipi.ai/issues')}
+  >
+    <Bug size={12} />
+    <span>Report an issue</span>
+  </button>
 </div>

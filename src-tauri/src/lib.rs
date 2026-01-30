@@ -64,6 +64,7 @@ pub fn run() {
             commands::save_recent_folder,
             // Session commands
             commands::get_all_sessions,
+            commands::get_recent_sessions,
             commands::get_project_sessions,
             commands::get_session_history,
             // File commands
@@ -81,6 +82,7 @@ pub fn run() {
             commands::validate_license,
             commands::get_license_status,
             commands::clear_license,
+            commands::revalidate_license_background,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

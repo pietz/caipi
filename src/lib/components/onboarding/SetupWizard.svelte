@@ -228,7 +228,7 @@
     <div>
       <div class="text-sm font-medium text-foreground mb-2">Default Project Folder</div>
       <p class="text-xs text-muted-foreground mb-3">
-        Choose where you usually work. You can always open other projects later.
+        Choose where you usually work. The Desktop is a solid choice.
       </p>
 
       {#if selectedFolder}

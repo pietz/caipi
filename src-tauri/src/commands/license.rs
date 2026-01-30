@@ -1,6 +1,7 @@
 use crate::storage;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter};
 
 // Lemon Squeezy store and product IDs for validation
 const EXPECTED_STORE_ID: u64 = 280713;
@@ -257,6 +258,64 @@ fn mask_license_key(key: &str) -> String {
     }
     let visible = &key[key.len() - 4..];
     format!("...{}", visible)
+}
+
+/// Background license revalidation with Lemon Squeezy API
+/// Called on app startup to verify license hasn't been revoked.
+/// On success or network error: does nothing (silently continues)
+/// On invalid/expired/disabled license: emits "license:invalid" event
+#[tauri::command]
+pub async fn revalidate_license_background(app: AppHandle) -> Result<(), String> {
+    // Get stored license - if none, nothing to revalidate
+    let license_data = match storage::get_license() {
+        Ok(Some(data)) => data,
+        Ok(None) => return Ok(()),
+        Err(_) => return Ok(()), // Storage error - silently continue
+    };
+
+    // Build HTTP client with timeout
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return Ok(()), // Client build error - silently continue
+    };
+
+    // Call Lemon Squeezy validate endpoint
+    let response = match client
+        .post(LEMON_SQUEEZY_VALIDATE_URL)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(&[("license_key", license_data.license_key.as_str())])
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(_) => return Ok(()), // Network error - silently continue
+    };
+
+    // Parse response
+    let validate_response: LemonSqueezyValidateResponse = match response.json().await {
+        Ok(resp) => resp,
+        Err(_) => return Ok(()), // Parse error - silently continue
+    };
+
+    // Check if license is still valid
+    let license_invalid = !validate_response.valid
+        || validate_response.error.is_some()
+        || validate_response
+            .license_key
+            .as_ref()
+            .map(|lk| lk.status != "active")
+            .unwrap_or(false);
+
+    if license_invalid {
+        // License has been revoked/expired/disabled - emit event to kick user to license screen
+        let _ = app.emit("license:invalid", ());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
