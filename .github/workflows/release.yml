@@ -1,0 +1,216 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.1.16)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (build only, no publish)"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Validate version in package.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG_VERSION=$(jq -r '.version' package.json)
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "::error::Version mismatch in package.json: expected $VERSION, got $PKG_VERSION"
+            exit 1
+          fi
+          echo "package.json version matches: $PKG_VERSION"
+
+      - name: Validate version in tauri.conf.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAURI_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          if [ "$TAURI_VERSION" != "$VERSION" ]; then
+            echo "::error::Version mismatch in tauri.conf.json: expected $VERSION, got $TAURI_VERSION"
+            exit 1
+          fi
+          echo "tauri.conf.json version matches: $TAURI_VERSION"
+
+      - name: Validate version in Cargo.toml
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CARGO_VERSION=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::Version mismatch in Cargo.toml: expected $VERSION, got $CARGO_VERSION"
+            exit 1
+          fi
+          echo "Cargo.toml version matches: $CARGO_VERSION"
+
+  build:
+    needs: validate
+    runs-on: macos-14
+    strategy:
+      matrix:
+        include:
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            artifact_suffix: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:all
+
+      - name: Import Apple certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $CERTIFICATE_PATH
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Tauri app (signed + notarized)
+        run: npm run tauri build
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Rename artifacts
+        run: node scripts/release-rename.js
+
+      - name: Generate latest.json
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          SIGNATURE=$(cat src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig)
+          cat > src-tauri/target/release/bundle/latest.json << EOF
+          {
+            "version": "$VERSION",
+            "notes": "",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$SIGNATURE",
+                "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi.app.tar.gz"
+              }
+            }
+          }
+          EOF
+          cat src-tauri/target/release/bundle/latest.json
+
+      - name: Calculate DMG SHA256
+        id: sha256
+        run: |
+          SHA256=$(shasum -a 256 src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg | cut -d' ' -f1)
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256: $SHA256"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ matrix.artifact_suffix }}
+          path: |
+            src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg
+            src-tauri/target/release/bundle/macos/caipi.app.tar.gz
+            src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig
+            src-tauri/target/release/bundle/latest.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+
+  publish:
+    needs: [validate, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    # Uncomment for manual approval gate:
+    # environment: production
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-aarch64
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.CAIPI_AI_PAT }}
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+
+          # Delete existing release if it exists (for re-runs)
+          gh release delete "v$VERSION" --repo pietz/caipi.ai --yes 2>/dev/null || true
+
+          # Create release with all artifacts
+          gh release create "v$VERSION" \
+            artifacts/src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg \
+            artifacts/src-tauri/target/release/bundle/macos/caipi.app.tar.gz \
+            artifacts/src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig \
+            artifacts/src-tauri/target/release/bundle/latest.json \
+            --repo pietz/caipi.ai \
+            --title "v$VERSION" \
+            --notes "Release v$VERSION"
+
+          echo "Release created: https://github.com/pietz/caipi.ai/releases/tag/v$VERSION"
