@@ -139,7 +139,7 @@
             <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground tool-label-animate shrink-0">
               {currentConfig.label}
             </span>
-            <span class="text-xs text-muted-foreground/70 truncate tool-label-animate min-w-0">
+            <span class="text-xs text-muted-foreground/70 truncate tool-label-animate min-w-0 flex-1">
               {currentTool.target}
             </span>
           {/key}

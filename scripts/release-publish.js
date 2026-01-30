@@ -64,6 +64,7 @@ async function publish() {
     });
 
     // Create release and upload files
+    const releaseNotes = process.env.RELEASE_NOTES || `Release v${version}`;
     execSync(
       `gh release create v${version} \
         "${dmgFile}" \
@@ -72,7 +73,7 @@ async function publish() {
         "${latestPath}" \
         --repo pietz/caipi.ai \
         --title "v${version}" \
-        --notes "Release v${version}"`,
+        --notes "${releaseNotes.replace(/"/g, '\\"')}"`,
       { stdio: "inherit" }
     );
     console.log(`\n✓ GitHub release created`);

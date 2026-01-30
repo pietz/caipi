@@ -21,8 +21,8 @@
     <div class="w-5 h-5 flex items-center justify-center {config.iconColor}">
       <ToolIcon size={14} />
     </div>
-    <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{config.label}</span>
-    <span class="text-xs text-muted-foreground/70 truncate">{tool.target}</span>
+    <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground shrink-0">{config.label}</span>
+    <span class="text-xs text-muted-foreground/70 truncate min-w-0 flex-1">{tool.target}</span>
   </div>
 
   <div class="flex items-center gap-1.5 h-6">
