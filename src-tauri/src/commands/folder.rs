@@ -52,3 +52,42 @@ pub async fn save_recent_folder(path: String) -> Result<(), String> {
 
     storage::save_recent_folder(folder).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validate_folder;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn validate_folder_returns_true_for_directory() {
+        let dir = tempdir().expect("tempdir");
+        let result = validate_folder(dir.path().to_string_lossy().to_string())
+            .await
+            .expect("validate_folder");
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn validate_folder_returns_false_for_missing_path() {
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("missing");
+
+        let result = validate_folder(missing.to_string_lossy().to_string())
+            .await
+            .expect("validate_folder");
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn validate_folder_returns_false_for_file() {
+        let dir = tempdir().expect("tempdir");
+        let file_path = dir.path().join("file.txt");
+        fs::write(&file_path, "content").expect("write file");
+
+        let result = validate_folder(file_path.to_string_lossy().to_string())
+            .await
+            .expect("validate_folder");
+        assert!(!result);
+    }
+}

@@ -29,6 +29,7 @@ describe('AppState Store', () => {
   beforeEach(async () => {
     // Reset module cache to get a fresh instance
     vi.resetModules();
+    vi.clearAllMocks();
 
     // Create a fresh localStorage mock for each test
     mockLocalStorage = {};
@@ -369,6 +370,45 @@ describe('AppState Store', () => {
       app.setAuthType(null);
       expect(app.authType).toBe(null);
     });
+
+    it('setCliPath updates cliPath state', async () => {
+      const { app } = await import('./app.svelte');
+
+      expect(app.cliPath).toBe(null);
+
+      app.setCliPath('/usr/local/bin/claude');
+      expect(app.cliPath).toBe('/usr/local/bin/claude');
+
+      app.setCliPath(null);
+      expect(app.cliPath).toBe(null);
+    });
+
+    it('setLicense updates license state', async () => {
+      const { app } = await import('./app.svelte');
+
+      expect(app.license).toBe(null);
+
+      const license = {
+        valid: true,
+        licenseKey: 'test-key',
+        activatedAt: 1700000000,
+        email: 'test@example.com',
+      };
+
+      app.setLicense(license);
+      expect(app.license).toEqual(license);
+
+      app.setLicense(null);
+      expect(app.license).toBe(null);
+    });
+
+    it('toggleExtendedThinking flips extendedThinking state', async () => {
+      const { app } = await import('./app.svelte');
+
+      const initial = app.extendedThinking;
+      app.toggleExtendedThinking();
+      expect(app.extendedThinking).toBe(!initial);
+    });
   });
 
   describe('Derived properties', () => {
@@ -423,11 +463,14 @@ describe('AppState Store', () => {
 
       await app.startSession('/test/project');
 
-      expect(invoke).toHaveBeenCalledWith('create_session', {
-        folderPath: '/test/project',
-        permissionMode: 'acceptEdits',
-        model: 'opus',
-      });
+      expect(invoke).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          folderPath: '/test/project',
+          permissionMode: 'acceptEdits',
+          model: 'opus',
+        })
+      );
 
       expect(app.folder).toBe('/test/project');
       expect(app.sessionId).toBe('session-789');
@@ -445,11 +488,55 @@ describe('AppState Store', () => {
 
       await app.startSession('/another/folder');
 
-      expect(invoke).toHaveBeenCalledWith('create_session', {
-        folderPath: '/another/folder',
-        permissionMode: 'bypassPermissions',
-        model: 'haiku',
+      expect(invoke).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          folderPath: '/another/folder',
+          permissionMode: 'bypassPermissions',
+          model: 'haiku',
+        })
+      );
+    });
+  });
+
+  describe('resumeSession', () => {
+    it('resumeSession loads history after successful session creation', async () => {
+      const { app } = await import('./app.svelte');
+      const { chat } = await import('./chat.svelte');
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      const history = [
+        {
+          id: 'msg-1',
+          role: 'assistant',
+          content: 'Hello',
+          timestamp: 1700000000,
+          tools: [],
+        },
+      ];
+
+      vi.spyOn(chat, 'loadHistory').mockImplementation(() => {});
+      vi.mocked(invoke)
+        .mockResolvedValueOnce('session-resume')
+        .mockResolvedValueOnce(history);
+
+      await app.resumeSession('/test/project', 'session-abc');
+
+      expect(invoke).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          folderPath: '/test/project',
+          permissionMode: app.permissionMode,
+          model: app.model,
+          resumeSessionId: 'session-abc',
+        })
+      );
+      expect(invoke).toHaveBeenCalledWith('get_session_history', {
+        folderPath: '/test/project',
+        sessionId: 'session-abc',
       });
+      expect(chat.loadHistory).toHaveBeenCalledWith(history);
+      expect(app.screen).toBe('chat');
     });
   });
 });

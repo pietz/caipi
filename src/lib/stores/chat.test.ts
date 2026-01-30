@@ -580,4 +580,96 @@ describe('ChatState', () => {
       expect(chat.sessionDuration).toBe(0);
     });
   });
+
+  describe('History', () => {
+    it('merges tool-only assistant messages into previous assistant message', () => {
+      const history = [
+        {
+          id: 'msg-1',
+          role: 'assistant',
+          content: 'Hello',
+          timestamp: 1700000000,
+          tools: [],
+        },
+        {
+          id: 'msg-2',
+          role: 'assistant',
+          content: '   ',
+          timestamp: 1700000001,
+          tools: [
+            { id: 'tool-1', toolType: 'Read', target: 'file.txt' },
+          ],
+        },
+      ];
+
+      chat.loadHistory(history);
+
+      expect(chat.messages).toHaveLength(1);
+      expect(chat.messages[0].content).toBe('Hello');
+      expect(chat.messages[0].tools).toHaveLength(1);
+      expect(chat.messages[0].tools?.[0]).toMatchObject({
+        id: 'tool-1',
+        toolType: 'Read',
+        target: 'file.txt',
+        status: 'history',
+      });
+    });
+
+    it('does not merge tool-only assistant messages after a user message', () => {
+      const history = [
+        {
+          id: 'msg-1',
+          role: 'user',
+          content: 'Hi',
+          timestamp: 1700000000,
+          tools: [],
+        },
+        {
+          id: 'msg-2',
+          role: 'assistant',
+          content: '',
+          timestamp: 1700000001,
+          tools: [
+            { id: 'tool-1', toolType: 'Bash', target: 'ls' },
+          ],
+        },
+      ];
+
+      chat.loadHistory(history);
+
+      expect(chat.messages).toHaveLength(2);
+      expect(chat.messages[1].tools).toHaveLength(1);
+      expect(chat.messages[1].tools?.[0].status).toBe('history');
+    });
+
+    it('assigns increasing insertionIndex values across history tools', () => {
+      const history = [
+        {
+          id: 'msg-1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1700000000,
+          tools: [
+            { id: 'tool-1', toolType: 'Read', target: 'a.txt' },
+          ],
+        },
+        {
+          id: 'msg-2',
+          role: 'assistant',
+          content: '',
+          timestamp: 1700000001,
+          tools: [
+            { id: 'tool-2', toolType: 'Write', target: 'b.txt' },
+          ],
+        },
+      ];
+
+      chat.loadHistory(history);
+
+      const tools = chat.messages.flatMap(m => m.tools ?? []);
+      expect(tools).toHaveLength(2);
+      expect(tools[0].insertionIndex).toBe(0);
+      expect(tools[1].insertionIndex).toBe(1);
+    });
+  });
 });

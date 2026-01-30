@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "caipi"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "claude-agent-sdk-rs",

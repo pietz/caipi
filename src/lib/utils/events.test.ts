@@ -3,6 +3,7 @@ import {
   handleClaudeEvent,
   resetEventState,
   respondToPermission,
+  setOnContentChange,
   type ChatEvent,
   type EventHandlerOptions,
 } from './events';
@@ -51,6 +52,7 @@ describe('handleClaudeEvent', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    setOnContentChange(null);
   });
 
   describe('Text events', () => {
@@ -171,6 +173,37 @@ describe('handleClaudeEvent', () => {
       handleClaudeEvent(event);
 
       expect(chat.appendText).not.toHaveBeenCalled();
+    });
+
+    it('should notify onContentChange when a full line is appended', () => {
+      const onChange = vi.fn();
+      setOnContentChange(onChange);
+
+      const event: ChatEvent = {
+        type: 'Text',
+        content: 'Hello\n',
+      };
+
+      handleClaudeEvent(event);
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      setOnContentChange(null);
+    });
+
+    it('should notify onContentChange on timer-based flush', () => {
+      const onChange = vi.fn();
+      setOnContentChange(onChange);
+
+      const event: ChatEvent = {
+        type: 'Text',
+        content: 'No newline',
+      };
+
+      handleClaudeEvent(event);
+      vi.advanceTimersByTime(150);
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      setOnContentChange(null);
     });
   });
 
@@ -842,6 +875,51 @@ describe('handleClaudeEvent', () => {
 
       expect(() => handleClaudeEvent(event)).not.toThrow();
       expect(chat.addErrorMessage).toHaveBeenCalledWith('Error without callback');
+    });
+  });
+
+  describe('Thinking events', () => {
+    it('should flush buffered text before adding thinking tool', () => {
+      const textEvent: ChatEvent = {
+        type: 'Text',
+        content: 'Buffered text',
+      };
+      handleClaudeEvent(textEvent);
+
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-1',
+        content: 'This is a long thought',
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      expect(chat.appendText).toHaveBeenCalledWith('Buffered text');
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'think-1',
+          toolType: 'Thinking',
+          status: 'completed',
+          input: { content: 'This is a long thought' },
+        })
+      );
+    });
+
+    it('should truncate thinking preview to 50 chars', () => {
+      const longText = 'a'.repeat(60);
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-2',
+        content: longText,
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: `${'a'.repeat(50)}...`,
+        })
+      );
     });
   });
 

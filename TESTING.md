@@ -18,6 +18,13 @@ npm run test:watch
 cd src-tauri && cargo test
 ```
 
+## Shared Fixtures (Frontend)
+
+Reusable fixtures live under `src/tests/fixtures`:
+- `license.ts` for license states
+- `startup.ts` for startup info payloads
+- `history.ts` for session history payloads
+
 ## Frontend Testing
 
 - **Framework**: Vitest with @testing-library/svelte

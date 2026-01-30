@@ -59,3 +59,12 @@ Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.
 1. Run `npm run test:all`
 2. Test manually with `npm run tauri dev`
 3. App flow: Onboarding → Folder Picker → Chat
+
+## Release Notes
+
+When publishing a release to `pietz/caipi.ai`, include a brief high-level changelog in the GitHub release notes. Focus on user-facing changes:
+- New features or UI improvements
+- Bug fixes
+- Performance changes
+
+Keep it concise (3-5 bullet points). No need for file-level details.

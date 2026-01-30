@@ -98,7 +98,13 @@
           onclick={isStreaming && !hasContent ? onAbort : handleSubmit}
         >
           {#if isStreaming && !hasContent}
-            <Square class="w-5 h-5" />
+            <div class="relative flex items-center justify-center">
+              <svg class="absolute w-7 h-7 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" class="opacity-20" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <div class="w-2.5 h-2.5 bg-current"></div>
+            </div>
           {:else}
             <ArrowUp class="w-5 h-5" />
           {/if}
