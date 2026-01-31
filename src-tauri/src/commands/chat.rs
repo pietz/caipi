@@ -4,10 +4,11 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::claude::agent::{AgentSession, AgentEvent, PermissionChannels, PermissionResponse};
+use crate::backends::BackendSession;
+use crate::claude::agent::{PermissionChannels, PermissionResponse};
 
-// Global session store
-pub type SessionStore = Arc<Mutex<HashMap<String, AgentSession>>>;
+// Global session store - now uses Arc<dyn BackendSession> for polymorphism
+pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
@@ -80,13 +81,42 @@ pub async fn create_session(
     model: Option<String>,
     resume_session_id: Option<String>,
     cli_path: Option<String>,
+    backend: Option<String>,
     app: AppHandle,
 ) -> Result<String, String> {
+    use crate::backends::{BackendKind, BackendRegistry, SessionConfig};
+
     let sessions: tauri::State<'_, SessionStore> = app.state();
-    let mode = permission_mode.unwrap_or_else(|| "default".to_string());
-    let model = model.unwrap_or_else(|| "sonnet".to_string());
-    let session = AgentSession::new(folder_path, mode, model, resume_session_id, cli_path, app.clone()).await.map_err(|e| e.to_string())?;
-    let session_id = session.id.clone();
+    let registry: tauri::State<'_, Arc<BackendRegistry>> = app.state();
+
+    // Parse backend kind (defaults to Claude)
+    let backend_kind = backend
+        .map(|s| s.parse::<BackendKind>())
+        .transpose()
+        .map_err(|e| e.to_string())?
+        .unwrap_or(BackendKind::Claude);
+
+    // Get the backend from registry
+    let backend_impl = registry
+        .get(backend_kind)
+        .ok_or_else(|| format!("Backend '{}' not available", backend_kind))?;
+
+    // Create session config
+    let config = SessionConfig {
+        folder_path,
+        permission_mode,
+        model,
+        resume_session_id,
+        cli_path,
+    };
+
+    // Create session via backend
+    let session = backend_impl
+        .create_session(config, app.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session_id = session.session_id().to_string();
 
     let mut store = sessions.lock().await;
     store.insert(session_id.clone(), session);
@@ -102,31 +132,15 @@ pub async fn send_message(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
     // Lock is now released!
 
-    // Clone what we need for the async task
-    let app_handle = app.clone();
-
-    // Send message and stream events
-    // Note: ToolStart/ToolEnd events are emitted directly from hooks
-    match session.send_message(&message, move |event| {
-        let chat_event = match event {
-            AgentEvent::Text(content) => ChatEvent::Text { content },
-            AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
-            AgentEvent::TokenUsage { total_tokens } => {
-                ChatEvent::TokenUsage { total_tokens }
-            }
-            AgentEvent::Complete => ChatEvent::Complete,
-            AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
-        };
-
-        let _ = app_handle.emit("claude:event", &chat_event);
-    }).await {
+    // Send message - events are emitted via app_handle inside the session
+    match session.send_message(&message).await {
         Ok(_) => Ok(()),
         Err(e) => {
             let _ = app.emit("claude:event", &ChatEvent::Error { message: e.to_string() });
@@ -166,8 +180,8 @@ pub async fn get_session_messages(
 ) -> Result<Vec<Message>, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
@@ -182,8 +196,8 @@ pub async fn abort_session(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
@@ -199,8 +213,8 @@ pub async fn set_permission_mode(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
@@ -226,8 +240,8 @@ pub async fn set_model(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
@@ -253,8 +267,8 @@ pub async fn set_extended_thinking(
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
-    // Clone the session, releasing the lock immediately
-    let session = {
+    // Clone the Arc, releasing the lock immediately
+    let session: Arc<dyn BackendSession> = {
         let store = sessions.lock().await;
         store.get(&session_id).ok_or("Session not found")?.clone()
     };

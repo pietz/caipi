@@ -360,6 +360,7 @@ dependencies = [
 name = "caipi"
 version = "0.1.16"
 dependencies = [
+ "async-trait",
  "chrono",
  "claude-agent-sdk-rs",
  "dirs 5.0.1",

@@ -1,9 +1,12 @@
-mod commands;
+mod backends;
 mod claude;
+mod commands;
 mod storage;
 
+use backends::claude::ClaudeBackend;
+use backends::{BackendRegistry, BackendSession};
+use claude::agent::PermissionChannels;
 use commands::chat::SessionStore;
-use claude::agent::{AgentSession, PermissionChannels};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Manager;
@@ -14,6 +17,11 @@ pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
 
+    // Initialize backend registry with Claude backend
+    let mut backend_registry = BackendRegistry::new();
+    backend_registry.register(Arc::new(ClaudeBackend::new()));
+    let backend_registry = Arc::new(backend_registry);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -22,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(session_store)
         .manage(permission_channels)
+        .manage(backend_registry)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let app_handle = window.app_handle().clone();
@@ -31,7 +40,7 @@ pub fn run() {
                     let sessions: tauri::State<'_, SessionStore> = app_handle.state();
 
                     // Drain sessions from store while holding lock briefly
-                    let sessions_to_cleanup: Vec<(String, AgentSession)> = {
+                    let sessions_to_cleanup: Vec<(String, Arc<dyn BackendSession>)> = {
                         let mut store = sessions.lock().await;
                         store.drain().collect()
                     };
