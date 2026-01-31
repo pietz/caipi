@@ -4,15 +4,15 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
-use crate::claude::agent::AgentSession;
-use crate::commands::chat::Message;
+use crate::claude::agent::{AgentEvent, AgentSession};
+use crate::commands::chat::{ChatEvent, Message};
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
 /// Claude Code backend implementation.
@@ -93,7 +93,7 @@ impl Backend for ClaudeBackend {
             model,
             config.resume_session_id,
             config.cli_path,
-            app_handle,
+            app_handle.clone(),
         )
         .await
         .map_err(|e| BackendError {
@@ -101,18 +101,22 @@ impl Backend for ClaudeBackend {
             recoverable: false,
         })?;
 
-        Ok(Arc::new(ClaudeSession::new(session)))
+        Ok(Arc::new(ClaudeSession::new(session, app_handle)))
     }
 }
 
 /// Claude session wrapper implementing BackendSession.
 pub struct ClaudeSession {
     inner: AgentSession,
+    app_handle: AppHandle,
 }
 
 impl ClaudeSession {
-    pub fn new(session: AgentSession) -> Self {
-        Self { inner: session }
+    pub fn new(session: AgentSession, app_handle: AppHandle) -> Self {
+        Self {
+            inner: session,
+            app_handle,
+        }
     }
 }
 
@@ -131,11 +135,23 @@ impl BackendSession for ClaudeSession {
     }
 
     async fn send_message(&self, message: &str) -> Result<(), BackendError> {
-        // Note: The AgentSession::send_message takes a callback for events,
-        // but events are emitted directly via app_handle in the session.
-        // We pass an empty callback since events go through the app's event system.
+        // Clone app_handle for the callback closure
+        let app_handle = self.app_handle.clone();
+
         self.inner
-            .send_message(message, |_| {})
+            .send_message(message, move |event| {
+                // Convert AgentEvent to ChatEvent and emit
+                let chat_event = match event {
+                    AgentEvent::Text(content) => ChatEvent::Text { content },
+                    AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
+                    AgentEvent::TokenUsage { total_tokens } => {
+                        ChatEvent::TokenUsage { total_tokens }
+                    }
+                    AgentEvent::Complete => ChatEvent::Complete,
+                    AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
+                };
+                let _ = app_handle.emit("claude:event", &chat_event);
+            })
             .await
             .map_err(|e| BackendError {
                 message: e.to_string(),
