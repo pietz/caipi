@@ -5,6 +5,7 @@ import { chat } from './chat.svelte';
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 export type Model = 'opus' | 'sonnet' | 'haiku';
+export type Backend = 'claude' | 'codex';
 
 export interface LicenseInfo {
   valid: boolean;
@@ -59,6 +60,9 @@ class AppState {
 
   // CLI Path (custom path to Claude CLI)
   cliPath = $state<string | null>(null);
+
+  // Backend selection (claude or codex)
+  backend = $state<Backend>('claude');
 
   // Derived
   get folderName(): string {
@@ -125,6 +129,10 @@ class AppState {
     }
   }
 
+  setBackend(backend: Backend) {
+    this.backend = backend;
+  }
+
   cycleModel() {
     const models: Model[] = ['opus', 'sonnet', 'haiku'];
     const next = (models.indexOf(this.model) + 1) % models.length;
@@ -153,7 +161,7 @@ class AppState {
 
   async startSession(folder: string): Promise<void> {
     this.folder = folder;
-    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined);
+    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined, this.backend);
     this.screen = 'chat';
   }
 
@@ -166,7 +174,8 @@ class AppState {
       this.permissionMode,
       this.model,
       sessionId,
-      this.cliPath ?? undefined
+      this.cliPath ?? undefined,
+      this.backend
     );
 
     // Only load history after successful session creation

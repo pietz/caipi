@@ -4,6 +4,7 @@ mod commands;
 mod storage;
 
 use backends::claude::ClaudeBackend;
+use backends::codex::CodexBackend;
 use backends::{BackendRegistry, BackendSession};
 use claude::agent::PermissionChannels;
 use commands::chat::SessionStore;
@@ -17,9 +18,10 @@ pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
 
-    // Initialize backend registry with Claude backend
+    // Initialize backend registry with available backends
     let mut backend_registry = BackendRegistry::new();
     backend_registry.register(Arc::new(ClaudeBackend::new()));
+    backend_registry.register(Arc::new(CodexBackend::new()));
     let backend_registry = Arc::new(backend_registry);
 
     tauri::Builder::default()

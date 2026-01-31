@@ -7,6 +7,7 @@ mod session;
 mod types;
 
 pub mod claude;
+pub mod codex;
 
 pub use session::BackendSession;
 pub use types::{
