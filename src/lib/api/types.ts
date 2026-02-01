@@ -76,3 +76,11 @@ export interface LicenseValidationResult {
   error?: string;
   email?: string;
 }
+
+// Backends
+export interface BackendStatus {
+  kind: 'claude' | 'codex';
+  installed: boolean;
+  version: string | null;
+  authenticated: boolean;
+}

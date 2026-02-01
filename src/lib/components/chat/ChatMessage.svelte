@@ -36,7 +36,7 @@
     return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
   };
 
-  marked.use({ renderer });
+  marked.use({ renderer, breaks: true });
 
   const isUser = $derived(message.role === 'user');
   const isError = $derived(message.role === 'error');

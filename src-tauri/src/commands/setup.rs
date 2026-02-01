@@ -1,7 +1,10 @@
+use crate::backends::BackendRegistry;
 use crate::storage;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Manager};
 
 const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
 
@@ -302,6 +305,40 @@ pub async fn get_cli_path() -> Result<Option<String>, String> {
 pub async fn set_cli_path(path: Option<String>) -> Result<(), String> {
     storage::set_cli_path(path).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Status for a single backend
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendStatus {
+    pub kind: String,
+    pub installed: bool,
+    pub version: Option<String>,
+    pub authenticated: bool,
+}
+
+/// Check installation and authentication status for all registered backends
+#[tauri::command]
+pub async fn check_backends_status(app: AppHandle) -> Result<Vec<BackendStatus>, String> {
+    let registry: tauri::State<'_, Arc<BackendRegistry>> = app.state();
+
+    let mut statuses = Vec::new();
+
+    for kind in registry.available_backends() {
+        if let Some(backend) = registry.get(kind) {
+            let install_status = backend.check_installed().await.map_err(|e| e.to_string())?;
+            let auth_status = backend.check_authenticated().await.map_err(|e| e.to_string())?;
+
+            statuses.push(BackendStatus {
+                kind: kind.to_string(),
+                installed: install_status.installed,
+                version: install_status.version,
+                authenticated: auth_status.authenticated,
+            });
+        }
+    }
+
+    Ok(statuses)
 }
 
 #[cfg(test)]

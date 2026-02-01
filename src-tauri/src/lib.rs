@@ -63,6 +63,7 @@ pub fn run() {
             commands::check_cli_status,
             commands::check_cli_installed,
             commands::check_cli_authenticated,
+            commands::check_backends_status,
             commands::get_startup_info,
             commands::complete_onboarding,
             commands::reset_onboarding,

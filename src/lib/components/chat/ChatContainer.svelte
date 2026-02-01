@@ -4,6 +4,9 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+
+  // Configure marked to treat newlines as <br> for consistent rendering
+  marked.use({ breaks: true });
   import { PanelLeft, PanelRight, Settings, Menu } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';

@@ -3,6 +3,7 @@
 //! Implements the Backend and BackendSession traits for OpenAI Codex CLI.
 
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,7 +21,83 @@ use crate::commands::chat::{ChatEvent, Message};
 
 use super::events::{translate_event, CodexEvent};
 
-const CODEX_PATH: &str = "/opt/homebrew/bin/codex";
+/// Try to find codex by running a command in a shell
+fn try_shell_which(shell: &str, args: &[&str]) -> Option<String> {
+    std::process::Command::new(shell)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Get codex version by running the binary directly
+fn get_codex_version(codex_path: &str) -> Option<String> {
+    std::process::Command::new(codex_path)
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .replace("codex-cli ", "")
+        })
+}
+
+/// Find the Codex CLI path dynamically.
+/// Checks common installation paths first, then falls back to shell-based detection.
+fn find_codex_path() -> Option<String> {
+    // Check common installation paths first (fastest)
+    if let Some(home) = dirs::home_dir() {
+        let common_paths = [
+            PathBuf::from("/opt/homebrew/bin/codex"),
+            PathBuf::from("/usr/local/bin/codex"),
+            home.join(".local/bin/codex"),
+            home.join(".npm-global/bin/codex"),
+        ];
+
+        for path in common_paths {
+            if path.is_file() {
+                let path_str = path.to_string_lossy().to_string();
+                // Verify it's actually executable
+                if get_codex_version(&path_str).is_some() {
+                    return Some(path_str);
+                }
+            }
+        }
+    }
+
+    // Determine user's shell
+    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let is_zsh = user_shell.contains("zsh");
+
+    // Try sourcing interactive shell config
+    let source_cmd = if is_zsh {
+        "source ~/.zshrc 2>/dev/null; which codex"
+    } else {
+        "source ~/.bashrc 2>/dev/null; which codex"
+    };
+
+    if let Some(codex_path) = try_shell_which(&user_shell, &["-c", source_cmd]) {
+        return Some(codex_path);
+    }
+
+    // Try login shell
+    if let Some(codex_path) = try_shell_which(&user_shell, &["-l", "-c", "which codex"]) {
+        return Some(codex_path);
+    }
+
+    // Final fallback: try both common shells with login flag
+    for shell in ["/bin/zsh", "/bin/bash"] {
+        if let Some(codex_path) = try_shell_which(shell, &["-l", "-c", "which codex"]) {
+            return Some(codex_path);
+        }
+    }
+
+    None
+}
 
 /// Codex CLI backend implementation.
 pub struct CodexBackend;
@@ -48,7 +125,7 @@ impl Backend for CodexBackend {
             permission_model: PermissionModel::SessionLevel,
             supports_streaming: true,
             supports_abort: true,
-            supports_resume: false,
+            supports_resume: true,
             supports_extended_thinking: true,
             available_models: vec![ModelInfo {
                 id: "gpt-5.2-codex".to_string(),
@@ -59,30 +136,20 @@ impl Backend for CodexBackend {
     }
 
     async fn check_installed(&self) -> Result<InstallStatus, BackendError> {
-        let output = Command::new(CODEX_PATH)
-            .arg("--version")
-            .output()
-            .await
-            .map_err(|e| BackendError {
-                message: format!("Failed to check Codex installation: {}", e),
-                recoverable: true,
-            })?;
-
-        if output.status.success() {
-            let version = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .replace("codex-cli ", "");
-            Ok(InstallStatus {
-                installed: true,
-                version: Some(version),
-                path: Some(CODEX_PATH.to_string()),
-            })
-        } else {
-            Ok(InstallStatus {
+        match find_codex_path() {
+            Some(path) => {
+                let version = get_codex_version(&path);
+                Ok(InstallStatus {
+                    installed: true,
+                    version,
+                    path: Some(path),
+                })
+            }
+            None => Ok(InstallStatus {
                 installed: false,
                 version: None,
                 path: None,
-            })
+            }),
         }
     }
 
@@ -103,8 +170,15 @@ impl Backend for CodexBackend {
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
         let permission_mode = config.permission_mode.unwrap_or_else(|| "default".to_string());
 
+        // Find Codex CLI path
+        let cli_path = find_codex_path().ok_or_else(|| BackendError {
+            message: "Codex CLI not found. Please install it first.".to_string(),
+            recoverable: true,
+        })?;
+
         let session = CodexSession::new(
             config.folder_path,
+            cli_path,
             permission_mode,
             app_handle,
         );
@@ -117,29 +191,35 @@ impl Backend for CodexBackend {
 pub struct CodexSession {
     id: String,
     folder_path: String,
+    cli_path: String,
     app_handle: AppHandle,
     child_process: Arc<Mutex<Option<Child>>>,
     abort_flag: Arc<AtomicBool>,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
     messages: Arc<Mutex<Vec<Message>>>,
+    /// Codex's thread ID for multi-turn conversations
+    codex_thread_id: Arc<RwLock<Option<String>>>,
 }
 
 impl CodexSession {
     pub fn new(
         folder_path: String,
+        cli_path: String,
         permission_mode: String,
         app_handle: AppHandle,
     ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             folder_path,
+            cli_path,
             app_handle,
             child_process: Arc::new(Mutex::new(None)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(String::new())), // Not used for Codex
             messages: Arc::new(Mutex::new(Vec::new())),
+            codex_thread_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -185,24 +265,43 @@ impl BackendSession for CodexSession {
         let permission_mode = self.permission_mode.read().await.clone();
         let sandbox = self.get_sandbox_mode(&permission_mode);
 
+        // Check if we have an existing thread_id for resume
+        let existing_thread_id = self.codex_thread_id.read().await.clone();
+
         // Build command (let Codex use its default model)
-        let mut cmd = Command::new(CODEX_PATH);
-        cmd.arg("exec")
-            .arg("--json")
-            .arg("--skip-git-repo-check")
-            .arg("-C")
-            .arg(&self.folder_path)
-            .arg("-s")
-            .arg(&sandbox)
-            .arg(message)
-            .stdout(Stdio::piped())
+        let mut cmd = Command::new(&self.cli_path);
+        cmd.arg("exec");
+
+        // Use resume subcommand if we have a thread_id from a previous turn
+        // Note: resume doesn't support -C or -s flags, so we set current_dir instead
+        if let Some(ref thread_id) = existing_thread_id {
+            cmd.arg("resume")
+                .arg("--json")
+                .arg("--skip-git-repo-check")
+                .arg(thread_id)
+                .arg(message)
+                .current_dir(&self.folder_path);
+            eprintln!(
+                "[codex] Resuming thread {} in {}: codex exec resume --json --skip-git-repo-check {} \"{}\"",
+                thread_id, &self.folder_path, thread_id, message
+            );
+        } else {
+            cmd.arg("--json")
+                .arg("--skip-git-repo-check")
+                .arg("-C")
+                .arg(&self.folder_path)
+                .arg("-s")
+                .arg(&sandbox)
+                .arg(message);
+            eprintln!(
+                "[codex] Starting new thread: codex exec --json -C {} -s {}",
+                &self.folder_path, sandbox
+            );
+        }
+
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-
-        eprintln!(
-            "[codex] Spawning: codex exec --json -C {} -s {}",
-            &self.folder_path, sandbox
-        );
 
         let mut child = cmd.spawn().map_err(|e| BackendError {
             message: format!("Failed to spawn Codex process: {}", e),
@@ -226,6 +325,7 @@ impl BackendSession for CodexSession {
         let app_handle = self.app_handle.clone();
         let abort_flag = self.abort_flag.clone();
         let messages = self.messages.clone();
+        let codex_thread_id = self.codex_thread_id.clone();
 
         // Accumulate assistant response
         let mut assistant_content = String::new();
@@ -247,6 +347,13 @@ impl BackendSession for CodexSession {
             // Parse the event
             match serde_json::from_str::<CodexEvent>(&line) {
                 Ok(event) => {
+                    // Capture thread_id from ThreadStarted event
+                    if let CodexEvent::ThreadStarted { ref thread_id } = event {
+                        let mut tid = codex_thread_id.write().await;
+                        *tid = Some(thread_id.clone());
+                        eprintln!("[codex] Captured thread_id: {}", thread_id);
+                    }
+
                     let chat_events = translate_event(&event);
                     for chat_event in chat_events {
                         // Accumulate text for message history

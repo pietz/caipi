@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { api, type CliInstallStatus, type CliAuthStatus } from '$lib/api';
+  import { api, type BackendStatus } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import { Check, Folder, Loader2, Sun, Moon, Copy, AlertTriangle } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
   import { themeStore, resolvedTheme } from '$lib/stores/theme';
-  import { app } from '$lib/stores/app.svelte';
+  import { app, type Backend } from '$lib/stores/app.svelte';
 
-  let cliStatus = $state<CliInstallStatus | null>(null);
-  let authStatus = $state<CliAuthStatus | null>(null);
-  let checkingCli = $state(true);
+  let backends = $state<BackendStatus[]>([]);
+  let checkingBackends = $state(true);
+  let selectedBackend = $state<Backend | null>(null);
   let selectedFolder = $state<string | null>(null);
   let folderName = $state<string>('');
   let completing = $state(false);
@@ -18,37 +18,57 @@
 
   const currentTheme = $derived($resolvedTheme);
 
-  const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
-  let copied = $state(false);
+  const claudeInstallCommand = 'npm install -g @anthropic-ai/claude-code';
+  const codexInstallCommand = 'npm install -g @openai/codex';
+  let copiedCommand = $state<string | null>(null);
+
+  // Backend display info
+  const backendInfo: Record<Backend, { name: string; description: string; installCmd: string }> = {
+    claude: {
+      name: 'Claude Code',
+      description: 'Anthropic',
+      installCmd: claudeInstallCommand,
+    },
+    codex: {
+      name: 'Codex CLI',
+      description: 'OpenAI',
+      installCmd: codexInstallCommand,
+    },
+  };
 
   function toggleTheme() {
     themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
   }
 
   onMount(async () => {
-    await checkCliStatus();
+    await checkBackends();
   });
 
-  async function checkCliStatus() {
-    checkingCli = true;
+  async function checkBackends() {
+    checkingBackends = true;
     try {
-      const status = await api.checkCliInstalled();
-      cliStatus = status;
-
-      // Only check auth if CLI is installed
-      if (status.installed) {
-        const auth = await api.checkCliAuthenticated();
-        authStatus = auth;
-      } else {
-        authStatus = { authenticated: false };
-      }
+      backends = await api.checkBackendsStatus();
     } catch (e) {
-      console.error('Failed to check CLI:', e);
-      cliStatus = { installed: false };
-      authStatus = { authenticated: false };
+      console.error('Failed to check backends:', e);
+      backends = [];
     } finally {
-      checkingCli = false;
+      checkingBackends = false;
     }
+  }
+
+  function getBackendStatus(kind: Backend): BackendStatus | undefined {
+    return backends.find((b) => b.kind === kind);
+  }
+
+  function isBackendReady(kind: Backend): boolean {
+    const status = getBackendStatus(kind);
+    return !!status?.installed && !!status?.authenticated;
+  }
+
+  function selectBackend(kind: Backend) {
+    if (!isBackendReady(kind)) return;
+    selectedBackend = kind;
+    error = null;
   }
 
   async function selectFolder() {
@@ -74,12 +94,12 @@
     }
   }
 
-  async function copyToClipboard() {
+  async function copyToClipboard(command: string) {
     try {
-      await navigator.clipboard.writeText(installCommand);
-      copied = true;
+      await navigator.clipboard.writeText(command);
+      copiedCommand = command;
       setTimeout(() => {
-        copied = false;
+        copiedCommand = null;
       }, 2000);
     } catch (e) {
       console.error('Failed to copy:', e);
@@ -87,25 +107,30 @@
   }
 
   async function completeSetup() {
-    if (!cliStatus?.installed || !selectedFolder) return;
+    if (!selectedBackend || !selectedFolder) return;
 
     completing = true;
     error = null;
 
     try {
+      // Set the default backend
+      app.setBackend(selectedBackend);
+
       // Complete onboarding with default folder
       await api.completeOnboarding(selectedFolder);
 
       // Save to recent folders
       await api.saveRecentFolder(selectedFolder);
 
-      // Update app state
-      app.setCliStatus({
-        installed: true,
-        version: cliStatus.version,
-        authenticated: authStatus?.authenticated ?? false,
-        path: cliStatus.path,
-      });
+      // Update app state with CLI status from selected backend
+      const status = getBackendStatus(selectedBackend);
+      if (status) {
+        app.setCliStatus({
+          installed: status.installed,
+          version: status.version ?? undefined,
+          authenticated: status.authenticated,
+        });
+      }
 
       // Start session
       await app.startSession(selectedFolder);
@@ -116,10 +141,14 @@
     }
   }
 
-  const canProceed = $derived(cliStatus?.installed && authStatus?.authenticated && selectedFolder && !completing);
+  const canProceed = $derived(selectedBackend && selectedFolder && !completing);
+  const anyBackendReady = $derived(backends.some((b) => b.installed && b.authenticated));
 </script>
 
-<div class="flex flex-col items-center justify-center h-full gap-6 pt-12 px-10 pb-10 relative" data-tauri-drag-region>
+<div
+  class="flex flex-col items-center justify-center h-full gap-6 pt-12 px-10 pb-10 relative"
+  data-tauri-drag-region
+>
   <!-- Top right controls -->
   <div class="absolute top-3 right-4 flex items-center gap-1">
     <Button
@@ -139,85 +168,116 @@
   <!-- Logo and Title -->
   <div class="flex flex-col items-center text-center">
     <CaipiIcon size={64} />
-    <h1 class="text-lg font-semibold mt-4 text-foreground">
-      Welcome to Caipi
-    </h1>
-    <p class="text-xs text-muted-foreground mt-1">
-      A friendly UI for Claude Code
-    </p>
+    <h1 class="text-lg font-semibold mt-4 text-foreground">Welcome to Caipi</h1>
+    <p class="text-xs text-muted-foreground mt-1">A friendly UI for AI coding assistants</p>
   </div>
 
   <!-- Setup Card -->
-  <div class="w-[380px] rounded-lg border border-border bg-card p-5">
-    <!-- CLI Status -->
+  <div class="w-[420px] rounded-lg border border-border bg-card p-5">
+    <!-- Backend Selection -->
     <div class="mb-5">
-      <div class="flex items-center gap-2 mb-2">
-        <span class="text-sm font-medium text-foreground">Claude Code CLI</span>
-        {#if checkingCli}
-          <Loader2 size={14} class="animate-spin text-muted-foreground" />
-        {:else if cliStatus?.installed && authStatus?.authenticated}
-          <Check size={14} class="text-green-500" />
-        {:else if cliStatus?.installed && !authStatus?.authenticated}
-          <AlertTriangle size={14} class="text-yellow-500" />
-        {:else}
-          <span class="w-2 h-2 rounded-full bg-red-500"></span>
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-foreground">Choose your assistant</span>
+        {#if !checkingBackends && !anyBackendReady}
+          <button type="button" onclick={checkBackends} class="text-xs text-primary hover:underline">
+            Recheck
+          </button>
         {/if}
       </div>
 
-      {#if checkingCli}
-        <p class="text-xs text-muted-foreground">Checking installation...</p>
-      {:else if cliStatus?.installed && authStatus?.authenticated}
-        <p class="text-xs text-muted-foreground">
-          Installed {cliStatus.version ? `(${cliStatus.version})` : ''}
-        </p>
-      {:else if cliStatus?.installed && !authStatus?.authenticated}
-        <p class="text-xs text-muted-foreground mb-3">
-          Installed but not authenticated. Run this in your terminal:
-        </p>
-        <div class="flex items-center gap-2 mb-2">
-          <code class="flex-1 text-xs px-3 py-2 rounded bg-muted border border-border text-muted-foreground">
-            claude
-          </code>
-        </div>
-        <p class="text-xs text-muted-foreground/70 mb-2">
-          Follow the prompts to log in to your Anthropic account.
-        </p>
-        <button
-          type="button"
-          onclick={checkCliStatus}
-          class="text-xs text-primary hover:underline"
-        >
-          Recheck authentication
-        </button>
-      {:else}
-        <p class="text-xs text-muted-foreground mb-3">
-          Required to use Caipi. Run this in your terminal:
-        </p>
-        <div class="flex items-center gap-2">
-          <code class="flex-1 text-xs px-3 py-2 rounded overflow-x-auto bg-muted border border-border text-muted-foreground">
-            {installCommand}
-          </code>
-          <Button
-            variant="outline"
-            size="icon"
-            class="shrink-0 h-8 w-8 {copied ? 'text-green-500' : ''}"
-            onclick={copyToClipboard}
-            title="Copy to clipboard"
+      <div class="grid grid-cols-2 gap-3">
+        {#each ['claude', 'codex'] as kind}
+          {@const status = getBackendStatus(kind as Backend)}
+          {@const info = backendInfo[kind as Backend]}
+          {@const isReady = isBackendReady(kind as Backend)}
+          {@const isSelected = selectedBackend === kind}
+          {@const isChecking = checkingBackends}
+
+          <button
+            type="button"
+            class="relative flex flex-col items-center p-4 rounded-lg border-2 transition-all {isSelected
+              ? 'border-primary bg-primary/5'
+              : isReady
+                ? 'border-border hover:border-muted-foreground cursor-pointer'
+                : 'border-border/50 opacity-50 cursor-not-allowed'}"
+            onclick={() => selectBackend(kind as Backend)}
+            disabled={!isReady || isChecking}
           >
-            {#if copied}
-              <Check size={14} />
-            {:else}
-              <Copy size={14} />
+            <!-- Backend name and provider -->
+            <span class="text-sm font-medium text-foreground {!isReady && 'opacity-50'}">
+              {info.name}
+            </span>
+            <span class="text-xs text-muted-foreground mt-0.5 {!isReady && 'opacity-50'}">
+              {info.description}
+            </span>
+
+            <!-- Status indicator -->
+            <div class="mt-3 flex items-center gap-1.5">
+              {#if isChecking}
+                <Loader2 size={12} class="animate-spin text-muted-foreground" />
+                <span class="text-xs text-muted-foreground">Checking...</span>
+              {:else if isReady}
+                <Check size={12} class="text-green-500" />
+                <span class="text-xs text-muted-foreground">Ready</span>
+              {:else if status?.installed && !status?.authenticated}
+                <AlertTriangle size={12} class="text-yellow-500" />
+                <span class="text-xs text-muted-foreground">Not authenticated</span>
+              {:else}
+                <span class="w-2 h-2 rounded-full bg-muted-foreground/30"></span>
+                <span class="text-xs text-muted-foreground">Not installed</span>
+              {/if}
+            </div>
+
+            <!-- Selected checkmark -->
+            {#if isSelected}
+              <div class="absolute top-2 right-2">
+                <Check size={14} class="text-primary" />
+              </div>
             {/if}
-          </Button>
+          </button>
+        {/each}
+      </div>
+
+      <!-- Install instructions for non-ready backends -->
+      {#if !checkingBackends && !anyBackendReady}
+        <div class="mt-4 p-3 rounded-md bg-muted/50 border border-border">
+          <p class="text-xs text-muted-foreground mb-2">
+            Install at least one CLI to continue:
+          </p>
+          <div class="space-y-2">
+            {#each ['claude', 'codex'] as kind}
+              {@const info = backendInfo[kind as Backend]}
+              {@const isCopied = copiedCommand === info.installCmd}
+              <div class="flex items-center gap-2">
+                <code
+                  class="flex-1 text-xs px-2 py-1.5 rounded bg-background border border-border text-muted-foreground overflow-x-auto"
+                >
+                  {info.installCmd}
+                </code>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  class="shrink-0 h-7 w-7 {isCopied ? 'text-green-500' : ''}"
+                  onclick={() => copyToClipboard(info.installCmd)}
+                  title="Copy to clipboard"
+                >
+                  {#if isCopied}
+                    <Check size={12} />
+                  {:else}
+                    <Copy size={12} />
+                  {/if}
+                </Button>
+              </div>
+            {/each}
+          </div>
+          <button
+            type="button"
+            onclick={checkBackends}
+            class="text-xs text-primary mt-3 hover:underline"
+          >
+            Recheck installation
+          </button>
         </div>
-        <button
-          type="button"
-          onclick={checkCliStatus}
-          class="text-xs text-primary mt-3 hover:underline"
-        >
-          Recheck installation
-        </button>
       {/if}
     </div>
 
@@ -264,11 +324,7 @@
   </div>
 
   <!-- Get Started Button -->
-  <Button
-    onclick={completeSetup}
-    disabled={!canProceed}
-    class="px-6"
-  >
+  <Button onclick={completeSetup} disabled={!canProceed} class="px-6">
     {#if completing}
       <span class="flex items-center gap-2">
         <Loader2 size={14} class="animate-spin" />
@@ -279,17 +335,11 @@
     {/if}
   </Button>
 
-  {#if !cliStatus?.installed && !checkingCli}
-    <p class="text-xs text-muted-foreground/50">
-      Install Claude Code CLI to continue
-    </p>
-  {:else if cliStatus?.installed && !authStatus?.authenticated && !checkingCli}
-    <p class="text-xs text-muted-foreground/50">
-      Authenticate Claude Code CLI to continue
-    </p>
+  {#if !anyBackendReady && !checkingBackends}
+    <p class="text-xs text-muted-foreground/50">Install a CLI to continue</p>
+  {:else if !selectedBackend}
+    <p class="text-xs text-muted-foreground/50">Select an assistant to continue</p>
   {:else if !selectedFolder}
-    <p class="text-xs text-muted-foreground/50">
-      Select a folder to continue
-    </p>
+    <p class="text-xs text-muted-foreground/50">Select a folder to continue</p>
   {/if}
 </div>

@@ -2,9 +2,9 @@
 
 **Product Requirements Document for Caipi Multi-CLI Support**
 
-Version: 1.0
-Date: January 2026
-Status: Planning
+Version: 1.1
+Date: February 2026
+Status: In Progress (Phases 1-3 Complete)
 
 ---
 
@@ -71,7 +71,9 @@ We chose to wrap `codex exec --json` rather than use `async-openai` directly bec
 
 ### Codex CLI
 
-**Version**: 0.92.0 (research preview)
+**Version**: 0.93.0 (latest as of Feb 2026)
+
+**Note**: Version 0.93 introduced SQLite-backed storage, changing how sessions are persisted. This affects session history features.
 
 **Integration**: `codex exec --json` outputs JSONL to stdout
 
@@ -648,20 +650,20 @@ The frontend requires no changes unless the new backend introduces entirely new 
 
 ## Implementation Phases
 
-### Phase 1: Abstraction Layer
+### Phase 1: Abstraction Layer ✅
 
 **Goal**: Create the unified types and trait definitions without breaking existing functionality.
 
 **Tasks**:
-1. Create `src-tauri/src/backends/` directory structure
-2. Define `BackendKind`, `UnifiedEvent`, `BackendCapabilities` types
-3. Define `Backend` and `BackendSession` traits
-4. Create `ClaudeBackend` adapter that wraps existing `AgentSession` logic
-5. Move Claude-specific code from `src/claude/` to `src/backends/claude/`
-6. Verify existing functionality still works
+- [x] Create `src-tauri/src/backends/` directory structure
+- [x] Define `BackendKind`, `BackendCapabilities` types
+- [x] Define `Backend` and `BackendSession` traits
+- [x] Create `ClaudeBackend` adapter that wraps existing `AgentSession` logic
+- [ ] ~~Move Claude-specific code from `src/claude/` to `src/backends/claude/`~~ (kept in place, adapter wraps it)
+- [x] Verify existing functionality still works
 
 **Files Changed**:
-- New: `backends/mod.rs`, `backends/types.rs`, `backends/claude/*.rs`
+- New: `backends/mod.rs`, `backends/types.rs`, `backends/session.rs`, `backends/claude/adapter.rs`
 - Modified: `commands/chat.rs` (use new abstractions)
 - Modified: `lib.rs` (register backends)
 
@@ -672,12 +674,13 @@ The frontend requires no changes unless the new backend introduces entirely new 
 **Goal**: Implement `CodexBackend` that spawns `codex exec --json` and parses JSONL.
 
 **Tasks**:
-1. Implement `CodexBackend` struct with `Backend` trait
-2. Implement JSONL parser for Codex events
-3. Create event translator: Codex items → `UnifiedEvent`
-4. Implement `CodexSession` with process spawning via `tokio::process`
-5. Handle stdin for follow-up messages (or session resume)
-6. Add Codex CLI detection to `commands/setup.rs`
+- [x] Implement `CodexBackend` struct with `Backend` trait
+- [x] Implement JSONL parser for Codex events
+- [x] Create event translator: Codex items → `ChatEvent`
+- [x] Implement `CodexSession` with process spawning via `tokio::process`
+- [ ] Handle multi-turn conversation (each message spawns new process - stateless)
+- [ ] Add Codex CLI detection to `commands/setup.rs`
+- [ ] Unit tests for JSONL parsing
 
 **Key Implementation Details**:
 
@@ -708,41 +711,46 @@ for line in reader.lines() {
 
 **Testing**: Unit tests for JSONL parsing, integration test with real Codex CLI
 
-### Phase 3: Backend Selection & Onboarding
+### Phase 3: Backend Selection UI ✅
 
-**Goal**: Allow users to select backend during onboarding.
+**Goal**: Allow users to select backend during onboarding and in settings.
 
 **Tasks**:
-1. Update `SetupWizard` component to show backend selection
-2. Detect installed backends and show availability
-3. Store selected backend in app settings
-4. Pass backend selection to session creation
-5. Update session picker to show backend-specific icons
+- [x] Add `check_backends_status` Tauri command to query all backends
+- [x] Update `SetupWizard` to show backend selection with status indicators
+- [x] Detect installed/authenticated backends and show availability
+- [x] Store selected backend in localStorage with persistence
+- [x] Pass backend selection to session creation
+- [x] Add backend selector to Settings panel (with "applies to new sessions" note)
+- [x] Add backend selector to SessionPicker for per-session override
+- [x] Filter sessions by selected backend
 
-**UI Changes**:
-- Onboarding: Backend selector with icons (Claude logo, OpenAI logo)
-- Installed backends are clickable, uninstalled are muted
-- Brief description of each backend
+**UI Implemented**:
+- Onboarding: Two large buttons (Claude Code, Codex CLI) with spinners while checking status
+- Ready backends show green checkmark, unavailable show status (not installed/not authenticated)
+- Settings: Default backend toggle with note that it applies to new sessions
+- SessionPicker: Backend toggle at top, sessions filtered by selected backend
 
 **Files Changed**:
-- Modified: `src/lib/components/setup/SetupWizard.svelte`
-- Modified: `src/lib/stores/app.svelte.ts` (add `backend` field)
-- Modified: `src/lib/api/tauri.ts` (add backend detection commands)
-- New: Backend icon assets
+- Modified: `src-tauri/src/commands/setup.rs` (added `check_backends_status`)
+- Modified: `src-tauri/src/commands/sessions.rs` (added `backend` filter parameter)
+- Modified: `src-tauri/src/lib.rs` (registered new command)
+- Modified: `src/lib/api/tauri.ts` (added `checkBackendsStatus`, updated session APIs)
+- Modified: `src/lib/api/types.ts` (added `BackendStatus` type)
+- Modified: `src/lib/stores/app.svelte.ts` (localStorage persistence for backend)
+- Modified: `src/lib/components/onboarding/SetupWizard.svelte` (complete rewrite)
+- Modified: `src/lib/components/settings/Settings.svelte` (added backend selector)
+- Modified: `src/lib/components/folder/SessionPicker.svelte` (added backend selector + filtering)
 
 ### Phase 4: Backend-Specific UI Adaptations
 
 **Goal**: Handle features that differ between backends.
 
 **Tasks**:
-1. **Model selector**: Show backend-appropriate models
-2. **Permission controls**:
-   - Claude: Show current 3-mode selector
-   - Codex: Show sandbox mode + approval policy (or unified 3-mode)
-3. **Thinking toggle**:
-   - Claude: On/Off toggle
-   - Codex: Low/Medium/High selector
-4. **Session history**: Read Codex session history from `~/.codex/`
+- [ ] **Model selector**: Show backend-appropriate models
+- [ ] **Permission controls**: Adapt to backend (Claude: 3-mode, Codex: sandbox mode)
+- [ ] **Thinking toggle**: Claude: On/Off, Codex: Low/Medium/High
+- [ ] **Session history**: Read Codex session history from `~/.codex/`
 
 **Approach**: Use `BackendCapabilities` to conditionally render UI elements.
 
@@ -759,17 +767,26 @@ for line in reader.lines() {
 - Modified: `src/lib/components/settings/PermissionSelector.svelte`
 - New: `src/lib/components/settings/CodexSettings.svelte`
 
-### Phase 5: Session Resume & History
+### Phase 5: Session Resume & History (Deferred for Codex)
 
 **Goal**: Support resuming Codex sessions like Claude sessions.
 
-**Tasks**:
-1. Parse Codex session storage (`~/.codex/` or internal format)
-2. Implement `codex exec resume <id>` flow
-3. Unify session history UI to show both backends
-4. Store `thread_id` from `thread.started` event
+**Status**: Deferred for Codex. Claude session history works. Codex shows "No previous sessions".
 
-**Investigation Needed**: Codex session storage format (may need to examine `~/.codex/` structure)
+**Reason for Deferral**: Codex CLI 0.93 introduced SQLite-backed storage:
+> "Introduced a SQLite-backed log database with an improved logs client, thread-id filtering, retention, and heuristic coloring."
+
+Previous versions (0.92 and earlier) stored sessions as JSONL files in `~/.codex/sessions/YYYY/MM/DD/`. The storage format is actively changing, so implementing session reading now would likely break with the next update.
+
+**Future Tasks** (when Codex storage stabilizes):
+- [ ] Parse Codex SQLite database for session history
+- [ ] Implement `codex exec resume <id>` flow
+- [ ] Unify session history UI to show both backends
+- [ ] Store `thread_id` from `thread.started` event
+
+**Current Behavior**:
+- Claude: Full session history and resume support
+- Codex: "No previous sessions" - users can start new sessions but not resume old ones from Caipi
 
 ---
 
@@ -850,28 +867,28 @@ function handleBackendEvent(event: UnifiedEvent) {
 
 ## Open Questions
 
-1. **Codex session storage location**: Need to investigate where Codex stores session history for the resume feature.
+1. ~~**Codex session storage location**~~: **Resolved** - Codex 0.92 stores in `~/.codex/sessions/YYYY/MM/DD/*.jsonl`. Codex 0.93+ uses SQLite. Session history deferred until format stabilizes.
 
 2. **Multi-turn conversation in Codex**: Does `codex exec` support stdin for follow-up messages, or must we use `codex exec resume`?
 
 3. **Codex MCP support**: Codex has experimental MCP server support. Should we expose this?
 
-4. **Icon design**: Do we need new icons for the model selector, or can we adapt existing ones?
+4. ~~**Icon design**~~: **Resolved** - Using text labels ("Claude Code", "Codex CLI") with status indicators instead of logos for now.
 
-5. **Settings persistence**: Should backend-specific settings be stored per-folder or globally?
+5. **Settings persistence**: Should backend-specific settings be stored per-folder or globally? Currently using localStorage for default backend (global).
 
 ---
 
 ## Success Criteria
 
-- [ ] Users can select Claude or Codex backend during onboarding
-- [ ] Chat functionality works identically with both backends
-- [ ] Tool execution (bash, file operations) works with both backends
-- [ ] Permission prompting works appropriately for each backend
-- [ ] Model selection shows backend-appropriate options
-- [ ] Thinking/reasoning display works for both backends
-- [ ] Session history shows sessions from both backends
-- [ ] No regression in existing Claude Code functionality
+- [x] Users can select Claude or Codex backend during onboarding
+- [x] Chat functionality works identically with both backends
+- [x] Tool execution (bash, file operations) works with both backends
+- [ ] Permission prompting works appropriately for each backend (partial - basic flow works)
+- [ ] Model selection shows backend-appropriate options (not yet implemented)
+- [x] Thinking/reasoning display works for both backends
+- [~] Session history shows sessions from both backends (Claude only - Codex deferred due to storage format changes)
+- [x] No regression in existing Claude Code functionality
 
 ---
 

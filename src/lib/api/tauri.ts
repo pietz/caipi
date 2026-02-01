@@ -9,6 +9,7 @@ import type {
   SessionInfo,
   ProjectSessions,
   HistoryMessage,
+  BackendStatus,
 } from './types';
 
 export const api = {
@@ -25,8 +26,8 @@ export const api = {
   getRecentFolders: () => invoke<RecentFolder[]>('get_recent_folders'),
 
   // Sessions
-  getAllSessions: () => invoke<ProjectSessions[]>('get_all_sessions'),
-  getRecentSessions: (limit: number) => invoke<ProjectSessions[]>('get_recent_sessions', { limit }),
+  getAllSessions: (backend?: string) => invoke<ProjectSessions[]>('get_all_sessions', { backend }),
+  getRecentSessions: (limit: number, backend?: string) => invoke<ProjectSessions[]>('get_recent_sessions', { limit, backend }),
   getProjectSessions: (folderPath: string) =>
     invoke<SessionInfo[]>('get_project_sessions', { folderPath }),
   getSessionHistory: (folderPath: string, sessionId: string) =>
@@ -60,4 +61,7 @@ export const api = {
   // CLI Path
   getCliPath: () => invoke<string | null>('get_cli_path'),
   setCliPath: (path?: string) => invoke<void>('set_cli_path', { path }),
+
+  // Backends
+  checkBackendsStatus: () => invoke<BackendStatus[]>('check_backends_status'),
 };

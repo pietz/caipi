@@ -125,19 +125,28 @@ fn read_sessions_index(project_dir: &PathBuf) -> Option<Vec<SessionInfo>> {
 }
 
 #[tauri::command]
-pub async fn get_all_sessions() -> Result<Vec<ProjectSessions>, String> {
+pub async fn get_all_sessions(backend: Option<String>) -> Result<Vec<ProjectSessions>, String> {
     // Delegate to get_recent_sessions with a high limit for backwards compatibility
-    get_recent_sessions(1000).await
+    get_recent_sessions(1000, backend).await
 }
 
 /// Get recent sessions, filtered to existing folders and limited to top N
 /// This is more efficient than get_all_sessions as it:
 /// 1. Filters out non-existent folders in one pass (no IPC overhead)
 /// 2. Only returns the top N sessions instead of everything
+/// 3. Optionally filters by backend type
 #[tauri::command]
-pub async fn get_recent_sessions(limit: u32) -> Result<Vec<ProjectSessions>, String> {
+pub async fn get_recent_sessions(limit: u32, backend: Option<String>) -> Result<Vec<ProjectSessions>, String> {
+    let backend = backend.unwrap_or_else(|| "claude".to_string());
+
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let projects_dir = home_dir.join(".claude").join("projects");
+
+    // Different backends store sessions in different locations
+    let projects_dir = match backend.as_str() {
+        "claude" => home_dir.join(".claude").join("projects"),
+        "codex" => home_dir.join(".codex").join("projects"),
+        _ => return Err(format!("Unknown backend: {}", backend)),
+    };
 
     if !projects_dir.exists() {
         return Ok(Vec::new());

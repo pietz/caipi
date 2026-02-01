@@ -29,6 +29,14 @@ function getPersistedModel(): Model {
   return 'sonnet';
 }
 
+function getPersistedBackend(): Backend {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('caipi:backend');
+    if (saved === 'claude' || saved === 'codex') return saved;
+  }
+  return 'claude';
+}
+
 class AppState {
   // Navigation
   screen = $state<Screen>('loading');
@@ -62,7 +70,7 @@ class AppState {
   cliPath = $state<string | null>(null);
 
   // Backend selection (claude or codex)
-  backend = $state<Backend>('claude');
+  backend = $state<Backend>(getPersistedBackend());
 
   // Derived
   get folderName(): string {
@@ -131,6 +139,9 @@ class AppState {
 
   setBackend(backend: Backend) {
     this.backend = backend;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('caipi:backend', backend);
+    }
   }
 
   cycleModel() {

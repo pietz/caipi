@@ -4,8 +4,8 @@
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui';
   import { themeStore, type ThemePreference } from '$lib/stores/theme';
-  import { app } from '$lib/stores/app.svelte';
-  import { api } from '$lib/api';
+  import { app, type Backend } from '$lib/stores/app.svelte';
+  import { api, type BackendStatus } from '$lib/api';
 
   interface Props {
     onClose: () => void;
@@ -17,6 +17,14 @@
   let deactivating = $state(false);
   let cliPathInput = $state(app.cliPath ?? '');
   let savingCliPath = $state(false);
+  let backends = $state<BackendStatus[]>([]);
+  let loadingBackends = $state(true);
+
+  // Backend display names
+  const backendNames: Record<Backend, string> = {
+    claude: 'Claude',
+    codex: 'Codex',
+  };
 
   // Strip "(Claude Code)" or similar suffixes from version string
   const cliVersion = $derived(() => {
@@ -38,7 +46,26 @@
     } catch (e) {
       console.error('Failed to get app version:', e);
     }
+
+    // Load backend status
+    try {
+      backends = await api.checkBackendsStatus();
+    } catch (e) {
+      console.error('Failed to check backends:', e);
+    } finally {
+      loadingBackends = false;
+    }
   });
+
+  function isBackendAvailable(kind: Backend): boolean {
+    const status = backends.find((b) => b.kind === kind);
+    return !!status?.installed && !!status?.authenticated;
+  }
+
+  function selectBackend(kind: Backend) {
+    if (!isBackendAvailable(kind)) return;
+    app.setBackend(kind);
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
@@ -112,7 +139,39 @@
 
     <!-- Main Settings -->
     <div class="mb-6 space-y-4">
-      <div class="flex gap-1 p-1 bg-muted rounded-lg">
+      <!-- Default Backend -->
+      <div>
+        <span class="text-xs text-muted-foreground">Default Backend</span>
+        <p class="text-[10px] text-muted-foreground/70 mt-0.5">Applies to new sessions</p>
+        <div class="mt-1 flex gap-1 p-1 bg-muted rounded-lg">
+          {#each ['claude', 'codex'] as kind}
+            {@const isAvailable = isBackendAvailable(kind as Backend)}
+            {@const isSelected = app.backend === kind}
+            <button
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {isSelected
+                ? 'bg-background shadow-sm'
+                : isAvailable
+                  ? 'hover:bg-background/50'
+                  : 'opacity-50 cursor-not-allowed'}"
+              onclick={() => selectBackend(kind as Backend)}
+              disabled={!isAvailable || loadingBackends}
+            >
+              {#if loadingBackends}
+                <Loader2 size={12} class="animate-spin" />
+              {/if}
+              {backendNames[kind as Backend]}
+              {#if !loadingBackends && !isAvailable}
+                <span class="text-muted-foreground/50">(unavailable)</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Theme -->
+      <div>
+        <span class="text-xs text-muted-foreground">Theme</span>
+        <div class="mt-1 flex gap-1 p-1 bg-muted rounded-lg">
         <button
           class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {currentPreference === 'light' ? 'bg-background shadow-sm' : 'hover:bg-background/50'}"
           onclick={() => setTheme('light')}
@@ -134,6 +193,7 @@
           <Moon size={12} />
           Dark
         </button>
+        </div>
       </div>
 
       <label class="block">

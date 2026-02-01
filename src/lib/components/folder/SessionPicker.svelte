@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { api, type ProjectSessions, type SessionInfo } from '$lib/api';
+  import { api, type ProjectSessions, type SessionInfo, type BackendStatus } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
   import { Folder, Loader2, X, ChevronRight, ChevronDown, Plus } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
-  import { app } from '$lib/stores/app.svelte';
+  import { app, type Backend } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { resetEventState } from '$lib/utils/events';
+  import { onMount } from 'svelte';
 
   interface Props {
     showClose?: boolean;
@@ -18,12 +19,45 @@
   let loading = $state(true);
   let validating = $state(false);
   let error = $state<string | null>(null);
+  let backends = $state<BackendStatus[]>([]);
+  let loadingBackends = $state(true);
+  let selectedBackend = $state<Backend>(app.backend);
+
+  // Backend display names
+  const backendNames: Record<Backend, string> = {
+    claude: 'Claude',
+    codex: 'Codex',
+  };
+
+  onMount(async () => {
+    // Load backend status
+    try {
+      backends = await api.checkBackendsStatus();
+    } catch (e) {
+      console.error('Failed to check backends:', e);
+    } finally {
+      loadingBackends = false;
+    }
+  });
+
+  function isBackendAvailable(kind: Backend): boolean {
+    const status = backends.find((b) => b.kind === kind);
+    return !!status?.installed && !!status?.authenticated;
+  }
+
+  function selectBackend(kind: Backend) {
+    if (!isBackendAvailable(kind)) return;
+    selectedBackend = kind;
+    // Reload sessions for new backend
+    loadSessions();
+  }
 
   async function loadSessions() {
     try {
       loading = true;
       // Backend handles: filtering non-existent folders, sorting, limiting to 100
-      projects = await api.getRecentSessions(100);
+      // Pass the selected backend to filter sessions
+      projects = await api.getRecentSessions(100, selectedBackend);
       expandedFolders = new Set();
     } catch (e) {
       console.error('Failed to load sessions:', e);
@@ -57,6 +91,10 @@
       // Reset state before loading different session
       chat.reset();
       resetEventState();
+
+      // Set the backend for this session (sessions are filtered by backend, so this matches)
+      app.setBackend(selectedBackend);
+
       await app.resumeSession(session.folderPath, session.sessionId);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to resume session';
@@ -99,6 +137,9 @@
       // Reset state before starting new session
       chat.reset();
       resetEventState();
+
+      // Set the backend for this session (might be different from default)
+      app.setBackend(selectedBackend);
 
       // Start session
       await app.startSession(path);
@@ -167,13 +208,41 @@
 
   <div class="w-full max-w-lg mx-auto flex flex-col h-full">
     <!-- Header -->
-    <div class="mb-6">
+    <div class="mb-4">
       <h2 class="text-sm font-semibold text-foreground mb-1">
         Recent Sessions
       </h2>
       <p class="text-xs text-muted-foreground">
         Resume a previous conversation or start a new one
       </p>
+    </div>
+
+    <!-- Backend Selector -->
+    <div class="mb-4">
+      <div class="flex gap-1 p-1 bg-muted rounded-lg">
+        {#each ['claude', 'codex'] as kind}
+          {@const isAvailable = isBackendAvailable(kind as Backend)}
+          {@const isSelected = selectedBackend === kind}
+          <button
+            type="button"
+            class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {isSelected
+              ? 'bg-background shadow-sm'
+              : isAvailable
+                ? 'hover:bg-background/50'
+                : 'opacity-50 cursor-not-allowed'}"
+            onclick={() => selectBackend(kind as Backend)}
+            disabled={!isAvailable || loadingBackends}
+          >
+            {#if loadingBackends}
+              <Loader2 size={12} class="animate-spin" />
+            {/if}
+            {backendNames[kind as Backend]}
+            {#if !loadingBackends && !isAvailable}
+              <span class="text-muted-foreground/50 text-[10px]">(unavailable)</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
     </div>
 
     {#if error}

@@ -89,12 +89,12 @@ pub async fn create_session(
     let sessions: tauri::State<'_, SessionStore> = app.state();
     let registry: tauri::State<'_, Arc<BackendRegistry>> = app.state();
 
-    // Parse backend kind (defaults to Claude)
+    // Parse backend kind - frontend always passes the selected backend, so this default is just a safety fallback
     let backend_kind = backend
         .map(|s| s.parse::<BackendKind>())
         .transpose()
         .map_err(|e| e.to_string())?
-        .unwrap_or(BackendKind::Claude);
+        .unwrap_or(BackendKind::Claude);  // Default to Claude (matches frontend's getPersistedBackend default)
 
     // Get the backend from registry
     let backend_impl = registry
