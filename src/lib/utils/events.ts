@@ -3,25 +3,20 @@ import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 
-export interface ChatEvent {
-  type: string;
-  content?: string;
-  toolUseId?: string;
-  toolType?: string;
-  target?: string;
-  status?: string;
-  input?: Record<string, unknown>;
-  permissionRequestId?: string;
-  id?: string;  // For ToolEnd (legacy field name)
-  message?: string;
-  authType?: string;
-  permissionMode?: string;
-  model?: string;
-  totalTokens?: number;
-  sessionId?: string;
-  // Thinking events
-  thinkingId?: string;
-}
+// Discriminated union matching Rust ChatEvent enum (serde tag = "type")
+export type ChatEvent =
+  | { type: 'Text'; content: string }
+  | { type: 'ToolStart'; toolUseId: string; toolType: string; target: string; status: string; input?: Record<string, unknown> }
+  | { type: 'ToolStatusUpdate'; toolUseId: string; status: string; permissionRequestId?: string }
+  | { type: 'ToolEnd'; id: string; status: string }
+  | { type: 'SessionInit'; auth_type: string }
+  | { type: 'StateChanged'; permissionMode: string; model: string }
+  | { type: 'TokenUsage'; totalTokens: number }
+  | { type: 'Complete' }
+  | { type: 'AbortComplete'; sessionId: string }
+  | { type: 'Error'; message: string }
+  | { type: 'ThinkingStart'; thinkingId: string; content: string }
+  | { type: 'ThinkingEnd'; thinkingId: string };
 
 export interface EventHandlerOptions {
   onComplete?: () => void;
@@ -99,9 +94,7 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + '...';
 }
 
-function handleTextEvent(event: ChatEvent) {
-  if (!event.content) return;
-
+function handleTextEvent(event: Extract<ChatEvent, { type: 'Text' }>) {
   lineBuffer += event.content;
 
   // Split by newlines, keeping incomplete line in buffer
@@ -129,9 +122,7 @@ function handleTextEvent(event: ChatEvent) {
   }
 }
 
-function handleToolStartEvent(event: ChatEvent) {
-  if (!event.toolUseId || !event.toolType) return;
-
+function handleToolStartEvent(event: Extract<ChatEvent, { type: 'ToolStart' }>) {
   // Flush buffered text before tool to preserve ordering
   if (lineBuffer) {
     chat.appendText(lineBuffer);
@@ -141,16 +132,14 @@ function handleToolStartEvent(event: ChatEvent) {
   chat.addTool({
     id: event.toolUseId,
     toolType: event.toolType,
-    target: event.target || '',
+    target: event.target,
     status: (event.status as ToolStatus) || 'pending',
     input: event.input,
-    timestamp: Date.now() / 1000,
+    timestamp: Math.floor(Date.now() / 1000),
   });
 }
 
-function handleToolStatusUpdateEvent(event: ChatEvent) {
-  if (!event.toolUseId || !event.status) return;
-
+function handleToolStatusUpdateEvent(event: Extract<ChatEvent, { type: 'ToolStatusUpdate' }>) {
   // Pass null to clear permissionRequestId when not provided (backend sent None)
   chat.updateToolStatus(
     event.toolUseId,
@@ -159,16 +148,12 @@ function handleToolStatusUpdateEvent(event: ChatEvent) {
   );
 }
 
-function handleToolEndEvent(event: ChatEvent) {
-  // ToolEnd uses 'id' field (legacy from PostToolUse hook)
-  const toolId = event.id;
-  if (!toolId || !event.status) return;
-
-  chat.updateToolStatus(toolId, event.status as ToolStatus);
+function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
+  chat.updateToolStatus(event.id, event.status as ToolStatus);
 
   // Track skill activation and handle special tools
   if (event.status === 'completed') {
-    const tool = chat.getTool(toolId);
+    const tool = chat.getTool(event.id);
 
     if (tool?.toolType === 'Skill' && tool.target) {
       chat.addActiveSkill(tool.target);
@@ -220,9 +205,7 @@ function handleToolEndEvent(event: ChatEvent) {
   }
 }
 
-function handleThinkingStartEvent(event: ChatEvent) {
-  if (!event.thinkingId || !event.content) return;
-
+function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingStart' }>) {
   // Flush buffered text before thinking to preserve ordering
   if (lineBuffer) {
     chat.appendText(lineBuffer);
@@ -235,7 +218,7 @@ function handleThinkingStartEvent(event: ChatEvent) {
     target: truncate(event.content, 50),  // Preview of thinking
     status: 'completed',  // Thinking arrives complete
     input: { content: event.content },  // Store full content
-    timestamp: Date.now() / 1000,
+    timestamp: Math.floor(Date.now() / 1000),
   });
 }
 
@@ -261,28 +244,22 @@ function handleAbortCompleteEvent() {
   chat.clearPendingPermissions();
 }
 
-function handleSessionInitEvent(event: ChatEvent) {
-  if (event.authType) {
-    app.setAuthType(event.authType);
-  }
+function handleSessionInitEvent(event: Extract<ChatEvent, { type: 'SessionInit' }>) {
+  app.setAuthType(event.auth_type);
 }
 
-function handleStateChangedEvent(event: ChatEvent) {
-  if (event.permissionMode && event.model) {
-    app.syncState(
-      event.permissionMode as PermissionMode,
-      event.model as Model
-    );
-  }
+function handleStateChangedEvent(event: Extract<ChatEvent, { type: 'StateChanged' }>) {
+  app.syncState(
+    event.permissionMode as PermissionMode,
+    event.model as Model
+  );
 }
 
-function handleTokenUsageEvent(event: ChatEvent) {
-  if (event.totalTokens !== undefined) {
-    chat.tokenCount = event.totalTokens;
-  }
+function handleTokenUsageEvent(event: Extract<ChatEvent, { type: 'TokenUsage' }>) {
+  chat.tokenCount = event.totalTokens;
 }
 
-function handleErrorEvent(event: ChatEvent, onError?: (message: string) => void) {
+function handleErrorEvent(event: Extract<ChatEvent, { type: 'Error' }>, onError?: (message: string) => void) {
   // Flush buffered text and finalize before clearing
   if (lineBuffer) {
     chat.appendText(lineBuffer);
@@ -290,8 +267,8 @@ function handleErrorEvent(event: ChatEvent, onError?: (message: string) => void)
   }
   chat.finalize();
 
-  chat.addErrorMessage(event.message || 'An unknown error occurred');
-  onError?.(event.message || 'Unknown error');
+  chat.addErrorMessage(event.message);
+  onError?.(event.message);
 }
 
 // Permission response helper

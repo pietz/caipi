@@ -178,6 +178,11 @@ class AppState {
   }
 
   async startSession(folder: string): Promise<void> {
+    // Clean up previous session to prevent memory leaks
+    if (this.sessionId) {
+      await api.destroySession(this.sessionId).catch(() => {});
+    }
+
     this.folder = folder;
     this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined, this.backend);
     // Sync persisted thinking level to the new session
@@ -186,6 +191,11 @@ class AppState {
   }
 
   async resumeSession(folderPath: string, sessionId: string): Promise<void> {
+    // Clean up previous session to prevent memory leaks
+    if (this.sessionId) {
+      await api.destroySession(this.sessionId).catch(() => {});
+    }
+
     this.folder = folderPath;
 
     // Create session first - if this fails, don't pollute chat state

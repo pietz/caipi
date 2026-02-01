@@ -119,6 +119,27 @@ pub async fn create_session(
 }
 
 #[tauri::command]
+pub async fn destroy_session(
+    session_id: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let sessions: tauri::State<'_, SessionStore> = app.state();
+
+    // Remove session from store and get it for cleanup
+    let session = {
+        let mut store = sessions.lock().await;
+        store.remove(&session_id)
+    };
+
+    // Clean up the session if it existed
+    if let Some(session) = session {
+        session.cleanup().await;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn send_message(
     session_id: String,
     message: String,

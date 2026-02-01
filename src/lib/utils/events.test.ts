@@ -165,15 +165,8 @@ describe('handleClaudeEvent', () => {
       expect(chat.appendText).toHaveBeenCalledTimes(2);
     });
 
-    it('should ignore events without content', () => {
-      const event: ChatEvent = {
-        type: 'Text',
-      };
-
-      handleClaudeEvent(event);
-
-      expect(chat.appendText).not.toHaveBeenCalled();
-    });
+    // Note: "should ignore events without content" test removed
+    // With discriminated union types, Text events require content at compile time
 
     it('should notify onContentChange when a full line is appended', () => {
       const onChange = vi.fn();
@@ -241,55 +234,7 @@ describe('handleClaudeEvent', () => {
       });
     });
 
-    it('should use default status if not provided', () => {
-      const event: ChatEvent = {
-        type: 'ToolStart',
-        toolUseId: 'tool-456',
-        toolType: 'Edit',
-      };
-
-      handleClaudeEvent(event);
-
-      expect(chat.addTool).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'pending',
-        })
-      );
-    });
-
-    it('should use empty string for missing target', () => {
-      const event: ChatEvent = {
-        type: 'ToolStart',
-        toolUseId: 'tool-789',
-        toolType: 'Bash',
-      };
-
-      handleClaudeEvent(event);
-
-      expect(chat.addTool).toHaveBeenCalledWith(
-        expect.objectContaining({
-          target: '',
-        })
-      );
-    });
-
-    it('should ignore events without required fields', () => {
-      const event1: ChatEvent = {
-        type: 'ToolStart',
-        toolType: 'Read',
-      };
-
-      handleClaudeEvent(event1);
-      expect(chat.addTool).not.toHaveBeenCalled();
-
-      const event2: ChatEvent = {
-        type: 'ToolStart',
-        toolUseId: 'tool-123',
-      };
-
-      handleClaudeEvent(event2);
-      expect(chat.addTool).not.toHaveBeenCalled();
-    });
+    // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time
   });
 
   describe('Tool events - ToolStatusUpdate', () => {
@@ -326,23 +271,7 @@ describe('handleClaudeEvent', () => {
       );
     });
 
-    it('should ignore events without required fields', () => {
-      const event1: ChatEvent = {
-        type: 'ToolStatusUpdate',
-        status: 'running',
-      };
-
-      handleClaudeEvent(event1);
-      expect(chat.updateToolStatus).not.toHaveBeenCalled();
-
-      const event2: ChatEvent = {
-        type: 'ToolStatusUpdate',
-        toolUseId: 'tool-123',
-      };
-
-      handleClaudeEvent(event2);
-      expect(chat.updateToolStatus).not.toHaveBeenCalled();
-    });
+    // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time
   });
 
   describe('Tool events - ToolEnd', () => {
@@ -741,23 +670,7 @@ describe('handleClaudeEvent', () => {
       expect(chat.addActiveSkill).not.toHaveBeenCalled();
     });
 
-    it('should ignore events without required fields', () => {
-      const event1: ChatEvent = {
-        type: 'ToolEnd',
-        status: 'completed',
-      };
-
-      handleClaudeEvent(event1);
-      expect(chat.updateToolStatus).not.toHaveBeenCalled();
-
-      const event2: ChatEvent = {
-        type: 'ToolEnd',
-        id: 'tool-123',
-      };
-
-      handleClaudeEvent(event2);
-      expect(chat.updateToolStatus).not.toHaveBeenCalled();
-    });
+    // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time
   });
 
   describe('Lifecycle events - Complete', () => {
@@ -814,6 +727,7 @@ describe('handleClaudeEvent', () => {
 
       const abortEvent: ChatEvent = {
         type: 'AbortComplete',
+        sessionId: 'session-123',
       };
 
       handleClaudeEvent(abortEvent);
@@ -828,6 +742,7 @@ describe('handleClaudeEvent', () => {
     it('should work with empty buffer', () => {
       const event: ChatEvent = {
         type: 'AbortComplete',
+        sessionId: 'session-123',
       };
 
       handleClaudeEvent(event);
@@ -854,18 +769,8 @@ describe('handleClaudeEvent', () => {
       expect(onError).toHaveBeenCalledWith('Something went wrong');
     });
 
-    it('should use default error message if none provided', () => {
-      const onError = vi.fn();
-
-      const event: ChatEvent = {
-        type: 'Error',
-      };
-
-      handleClaudeEvent(event, { onError });
-
-      expect(chat.addErrorMessage).toHaveBeenCalledWith('An unknown error occurred');
-      expect(onError).toHaveBeenCalledWith('Unknown error');
-    });
+    // Note: "should use default error message if none provided" test removed
+    // With discriminated union types, Error events require message at compile time
 
     it('should work without onError callback', () => {
       const event: ChatEvent = {
@@ -927,7 +832,7 @@ describe('handleClaudeEvent', () => {
     it('should handle SessionInit event', () => {
       const event: ChatEvent = {
         type: 'SessionInit',
-        authType: 'api_key',
+        auth_type: 'api_key',
       };
 
       handleClaudeEvent(event);
@@ -958,23 +863,7 @@ describe('handleClaudeEvent', () => {
       expect(chat.tokenCount).toBe(1234);
     });
 
-    it('should ignore StateChanged without required fields', () => {
-      const event1: ChatEvent = {
-        type: 'StateChanged',
-        permissionMode: 'default',
-      };
-
-      handleClaudeEvent(event1);
-      expect(app.syncState).not.toHaveBeenCalled();
-
-      const event2: ChatEvent = {
-        type: 'StateChanged',
-        model: 'sonnet',
-      };
-
-      handleClaudeEvent(event2);
-      expect(app.syncState).not.toHaveBeenCalled();
-    });
+    // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time
   });
 
   describe('resetEventState', () => {

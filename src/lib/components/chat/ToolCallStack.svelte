@@ -13,6 +13,7 @@
   let { tools, onPermissionResponse }: Props = $props();
 
   let expanded = $state(false);
+  let pendingPermission = $state(false);
 
   // Maximum number of visible icons in the stack
   const MAX_VISIBLE_ICONS = 5;
@@ -116,7 +117,11 @@
   );
 
   function handlePermissionResponse(toolId: string, allowed: boolean) {
+    if (pendingPermission) return;
+    pendingPermission = true;
     onPermissionResponse?.(toolId, allowed);
+    // Reset after a short delay to allow the UI to update
+    setTimeout(() => pendingPermission = false, 500);
   }
 </script>
 

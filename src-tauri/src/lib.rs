@@ -80,6 +80,7 @@ pub fn run() {
             commands::list_directory,
             // Chat commands
             commands::create_session,
+            commands::destroy_session,
             commands::send_message,
             commands::respond_permission,
             commands::get_session_messages,

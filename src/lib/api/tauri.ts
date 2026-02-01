@@ -35,6 +35,8 @@ export const api = {
   // Session
   createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string, cliPath?: string, backend?: string) =>
     invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId, cliPath, backend }),
+  destroySession: (sessionId: string) =>
+    invoke<void>('destroy_session', { sessionId }),
   sendMessage: (sessionId: string, message: string) =>
     invoke<void>('send_message', { sessionId, message }),
   abortSession: (sessionId: string) =>
