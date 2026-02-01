@@ -59,7 +59,7 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
     if let Some(home) = dirs::home_dir() {
         let common_paths = [
             home.join(".local/bin/claude"),
-            home.join(".claude/local/bin/claude"),
+            home.join(".claude/bin/claude"),
             std::path::PathBuf::from("/usr/local/bin/claude"),
             std::path::PathBuf::from("/opt/homebrew/bin/claude"),
         ];

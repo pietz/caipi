@@ -99,6 +99,13 @@
       // Save to recent folders
       await api.saveRecentFolder(selectedFolder);
 
+      // Save detected CLI path to storage and app state
+      // This ensures the detected path is used for session creation
+      if (cliStatus.path) {
+        await api.setCliPath(cliStatus.path);
+        app.setCliPath(cliStatus.path);
+      }
+
       // Update app state
       app.setCliStatus({
         installed: true,

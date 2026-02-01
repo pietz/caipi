@@ -47,8 +47,13 @@
       });
 
       // Set CLI path if available (for custom Claude CLI location)
+      // Also use cached cliStatus.path as fallback for users who completed onboarding before path persistence was added
       if (startupInfo.cliPath) {
         app.setCliPath(startupInfo.cliPath);
+      } else if (startupInfo.cliStatus?.path) {
+        app.setCliPath(startupInfo.cliStatus.path);
+        // Persist for future sessions
+        api.setCliPath(startupInfo.cliStatus.path).catch(() => {});
       }
 
       // If onboarding is completed and we have a default folder, go directly to chat
