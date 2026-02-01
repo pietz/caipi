@@ -89,7 +89,7 @@ pub fn run() {
             commands::abort_session,
             commands::set_permission_mode,
             commands::set_model,
-            commands::set_extended_thinking,
+            commands::set_thinking_level,
             // License commands
             commands::validate_license,
             commands::get_license_status,

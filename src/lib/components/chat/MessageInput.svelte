@@ -1,9 +1,10 @@
 <script lang="ts">
   import { api } from '$lib/api';
+  import { backendConfigs } from '$lib/config/backends';
   import { Shield, Pencil, AlertTriangle, ArrowUp, Square, Brain } from 'lucide-svelte';
   import { Button, ContextIndicator, Tooltip } from '$lib/components/ui';
   import ModelSizeIcon from '$lib/components/icons/ModelSizeIcon.svelte';
-  import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
+  import { app, type PermissionMode } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { cn } from '$lib/utils';
 
@@ -24,14 +25,11 @@
     bypassPermissions: { label: 'Allow All', icon: AlertTriangle, danger: true },
   };
 
-  const modelConfig: Record<Model, { label: string; size: 'large' | 'medium' | 'small' }> = {
-    opus: { label: 'Opus 4.5', size: 'large' },
-    sonnet: { label: 'Sonnet 4.5', size: 'medium' },
-    haiku: { label: 'Haiku 4.5', size: 'small' },
-  };
-
-  // Calculate context percentage (200k token limit)
-  const contextPercentage = $derived(Math.round((chat.tokenCount / 200000) * 100));
+  // Calculate context percentage based on backend's context limit
+  const contextPercentage = $derived(() => {
+    const limit = backendConfigs[app.backend].contextLimit;
+    return Math.round((chat.tokenCount / limit) * 100);
+  });
 
   function handleModeClick() {
     // Optimistic update - backend will confirm via StateChanged event
@@ -73,8 +71,20 @@
 
   const hasContent = $derived(value.trim().length > 0);
   const currentMode = $derived(modeConfig[app.permissionMode]);
-  const currentModel = $derived(modelConfig[app.model]);
   const ModeIcon = $derived(currentMode.icon);
+
+  // Get current model config from backend configs
+  const currentModelConfig = $derived(() => {
+    const config = backendConfigs[app.backend];
+    return config.models.find(m => m.id === app.model) ?? config.models[0];
+  });
+
+  // Get current thinking label from backend configs
+  const thinkingLabel = $derived(() => {
+    const config = backendConfigs[app.backend];
+    const option = config.thinkingOptions.find(o => o.value === app.thinkingLevel);
+    return option?.label ?? config.thinkingOptions[0].label;
+  });
 </script>
 
 <div class="border-t border-border p-4">
@@ -114,15 +124,15 @@
       <!-- Footer -->
       <div class="flex items-center p-1 border-t border-border">
         <div class="flex items-center gap-2">
-          <Tooltip text="Claude Model">
+          <Tooltip text="Model">
             <Button
               variant="ghost"
               size="sm"
-              class="w-28 justify-start gap-2 h-8 text-xs"
+              class="gap-2 h-8 text-xs"
               onclick={handleModelClick}
             >
-              <ModelSizeIcon size={currentModel.size} />
-              {currentModel.label}
+              <ModelSizeIcon size={currentModelConfig().rings === 3 ? 'large' : currentModelConfig().rings === 2 ? 'medium' : 'small'} />
+              {currentModelConfig().label}
             </Button>
           </Tooltip>
 
@@ -131,7 +141,7 @@
               variant="ghost"
               size="sm"
               class={cn(
-                'w-24 justify-start gap-2 h-8 text-xs',
+                'gap-2 h-8 text-xs',
                 currentMode.danger && 'text-red-500 hover:text-red-500'
               )}
               onclick={handleModeClick}
@@ -141,28 +151,26 @@
             </Button>
           </Tooltip>
 
-          <Tooltip text="Extended Thinking">
+          <Tooltip text="Thinking">
             <Button
-              variant={app.extendedThinking ? 'outline' : 'ghost'}
-              size="icon"
-              class={cn(
-                'h-8 w-8',
-                app.extendedThinking && 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-              )}
+              variant="ghost"
+              size="sm"
+              class="gap-2 h-8 text-xs"
               onclick={() => {
-                app.toggleExtendedThinking();
+                app.cycleThinking();
                 if (app.sessionId) {
-                  api.setExtendedThinking(app.sessionId, app.extendedThinking);
+                  api.setThinkingLevel(app.sessionId, app.thinkingLevel);
                 }
               }}
             >
               <Brain size={14} />
+              {thinkingLabel()}
             </Button>
           </Tooltip>
         </div>
 
         <Tooltip text="Context Usage" class="ml-auto">
-          <ContextIndicator percentage={contextPercentage} />
+          <ContextIndicator percentage={contextPercentage()} />
         </Tooltip>
       </div>
     </div>

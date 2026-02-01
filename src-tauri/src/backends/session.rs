@@ -41,8 +41,8 @@ pub trait BackendSession: Send + Sync {
     /// Sets the model.
     async fn set_model(&self, model: String) -> Result<(), BackendError>;
 
-    /// Sets extended thinking mode.
-    async fn set_extended_thinking(&self, enabled: bool) -> Result<(), BackendError>;
+    /// Sets thinking level (e.g., "off"/"on" for Claude, "low"/"medium"/"high" for Codex).
+    async fn set_thinking_level(&self, level: String) -> Result<(), BackendError>;
 
     /// Gets the messages in this session.
     async fn get_messages(&self) -> Vec<Message>;

@@ -55,21 +55,23 @@ describe('AppState Store', () => {
   });
 
   describe('Model persistence', () => {
-    it('setModel saves to localStorage', async () => {
+    it('setModel saves to localStorage per backend', async () => {
       const { app } = await import('./app.svelte');
 
+      // Default backend is 'claude'
       app.setModel('opus');
-      expect(mockLocalStorage['caipi:model']).toBe('opus');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('opus');
 
       app.setModel('haiku');
-      expect(mockLocalStorage['caipi:model']).toBe('haiku');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('haiku');
 
       app.setModel('sonnet');
-      expect(mockLocalStorage['caipi:model']).toBe('sonnet');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('sonnet');
     });
 
     it('initial model loaded from localStorage if valid', async () => {
-      mockLocalStorage['caipi:model'] = 'opus';
+      // Default backend is 'claude'
+      mockLocalStorage['caipi:model:claude'] = 'opus';
       vi.resetModules();
 
       const { app } = await import('./app.svelte');
@@ -77,7 +79,7 @@ describe('AppState Store', () => {
     });
 
     it('defaults to sonnet if localStorage invalid', async () => {
-      mockLocalStorage['caipi:model'] = 'invalid-model';
+      mockLocalStorage['caipi:model:claude'] = 'invalid-model';
       vi.resetModules();
 
       const { app } = await import('./app.svelte');
@@ -92,7 +94,7 @@ describe('AppState Store', () => {
     });
 
     it('loads haiku from localStorage', async () => {
-      mockLocalStorage['caipi:model'] = 'haiku';
+      mockLocalStorage['caipi:model:claude'] = 'haiku';
       vi.resetModules();
 
       const { app } = await import('./app.svelte');
@@ -100,7 +102,7 @@ describe('AppState Store', () => {
     });
 
     it('loads sonnet from localStorage', async () => {
-      mockLocalStorage['caipi:model'] = 'sonnet';
+      mockLocalStorage['caipi:model:claude'] = 'sonnet';
       vi.resetModules();
 
       const { app } = await import('./app.svelte');
@@ -212,24 +214,24 @@ describe('AppState Store', () => {
     it('cycleModel cycles through opus -> sonnet -> haiku -> opus', async () => {
       const { app } = await import('./app.svelte');
 
-      // Start at default (sonnet)
+      // Start at default (sonnet for claude backend)
       expect(app.model).toBe('sonnet');
 
       app.cycleModel();
       expect(app.model).toBe('haiku');
-      expect(mockLocalStorage['caipi:model']).toBe('haiku');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('haiku');
 
       app.cycleModel();
       expect(app.model).toBe('opus');
-      expect(mockLocalStorage['caipi:model']).toBe('opus');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('opus');
 
       app.cycleModel();
       expect(app.model).toBe('sonnet');
-      expect(mockLocalStorage['caipi:model']).toBe('sonnet');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('sonnet');
 
       app.cycleModel();
       expect(app.model).toBe('haiku');
-      expect(mockLocalStorage['caipi:model']).toBe('haiku');
+      expect(mockLocalStorage['caipi:model:claude']).toBe('haiku');
     });
 
     it('cycleModel from opus goes to sonnet', async () => {
@@ -402,12 +404,18 @@ describe('AppState Store', () => {
       expect(app.license).toBe(null);
     });
 
-    it('toggleExtendedThinking flips extendedThinking state', async () => {
+    it('cycleThinking cycles through thinking levels', async () => {
       const { app } = await import('./app.svelte');
 
-      const initial = app.extendedThinking;
-      app.toggleExtendedThinking();
-      expect(app.extendedThinking).toBe(!initial);
+      // Default backend is claude with options: off, on
+      app.setBackend('claude');
+      app.setThinkingLevel('off');
+
+      app.cycleThinking();
+      expect(app.thinkingLevel).toBe('on');
+
+      app.cycleThinking();
+      expect(app.thinkingLevel).toBe('off');
     });
   });
 

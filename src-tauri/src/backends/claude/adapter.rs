@@ -195,7 +195,9 @@ impl BackendSession for ClaudeSession {
         })
     }
 
-    async fn set_extended_thinking(&self, enabled: bool) -> Result<(), BackendError> {
+    async fn set_thinking_level(&self, level: String) -> Result<(), BackendError> {
+        // Map string level to boolean: "on" -> true, everything else -> false
+        let enabled = level == "on";
         self.inner
             .set_extended_thinking(enabled)
             .await

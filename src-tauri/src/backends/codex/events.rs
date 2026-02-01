@@ -1,4 +1,10 @@
 //! Codex JSONL event types and translation to ChatEvent.
+//!
+//! ## Known Limitations
+//!
+//! - **Web Search**: Codex web search results are embedded in `agent_message` text,
+//!   not as separate events. This means web search doesn't show in the tool UI,
+//!   though the results still appear in the response text.
 
 use serde::Deserialize;
 

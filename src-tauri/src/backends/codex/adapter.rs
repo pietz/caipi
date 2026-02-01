@@ -169,6 +169,7 @@ impl Backend for CodexBackend {
         app_handle: AppHandle,
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
         let permission_mode = config.permission_mode.unwrap_or_else(|| "default".to_string());
+        let model = config.model.unwrap_or_else(|| "gpt-5.2".to_string());
 
         // Find Codex CLI path
         let cli_path = find_codex_path().ok_or_else(|| BackendError {
@@ -180,6 +181,7 @@ impl Backend for CodexBackend {
             config.folder_path,
             cli_path,
             permission_mode,
+            model,
             app_handle,
         );
 
@@ -197,6 +199,7 @@ pub struct CodexSession {
     abort_flag: Arc<AtomicBool>,
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
+    thinking_level: Arc<RwLock<String>>,
     messages: Arc<Mutex<Vec<Message>>>,
     /// Codex's thread ID for multi-turn conversations
     codex_thread_id: Arc<RwLock<Option<String>>>,
@@ -207,6 +210,7 @@ impl CodexSession {
         folder_path: String,
         cli_path: String,
         permission_mode: String,
+        model: String,
         app_handle: AppHandle,
     ) -> Self {
         Self {
@@ -217,7 +221,8 @@ impl CodexSession {
             child_process: Arc::new(Mutex::new(None)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             permission_mode: Arc::new(RwLock::new(permission_mode)),
-            model: Arc::new(RwLock::new(String::new())), // Not used for Codex
+            model: Arc::new(RwLock::new(model)),
+            thinking_level: Arc::new(RwLock::new("high".to_string())), // Default reasoning effort
             messages: Arc::new(Mutex::new(Vec::new())),
             codex_thread_id: Arc::new(RwLock::new(None)),
         }
@@ -264,26 +269,46 @@ impl BackendSession for CodexSession {
 
         let permission_mode = self.permission_mode.read().await.clone();
         let sandbox = self.get_sandbox_mode(&permission_mode);
+        let model = self.model.read().await.clone();
+        let thinking_level = self.thinking_level.read().await.clone();
+
+        // Map thinking level to Codex reasoning_effort
+        let reasoning_effort = match thinking_level.as_str() {
+            "low" => "low",
+            "medium" => "medium",
+            _ => "high", // default to high
+        };
 
         // Check if we have an existing thread_id for resume
         let existing_thread_id = self.codex_thread_id.read().await.clone();
 
-        // Build command (let Codex use its default model)
+        // Build command
         let mut cmd = Command::new(&self.cli_path);
         cmd.arg("exec");
 
         // Use resume subcommand if we have a thread_id from a previous turn
         // Note: resume doesn't support -C or -s flags, so we set current_dir instead
+        // We pass -m to ensure the same model is used (Codex CLI warns about model mismatch otherwise)
         if let Some(ref thread_id) = existing_thread_id {
             cmd.arg("resume")
                 .arg("--json")
-                .arg("--skip-git-repo-check")
-                .arg(thread_id)
+                .arg("--skip-git-repo-check");
+
+            // Pass model to avoid mismatch warning
+            if !model.is_empty() {
+                cmd.arg("-m").arg(&model);
+            }
+
+            // Pass reasoning effort for resume (can be changed mid-conversation)
+            cmd.arg("-c")
+                .arg(format!("reasoning_effort={}", reasoning_effort));
+
+            cmd.arg(thread_id)
                 .arg(message)
                 .current_dir(&self.folder_path);
             eprintln!(
-                "[codex] Resuming thread {} in {}: codex exec resume --json --skip-git-repo-check {} \"{}\"",
-                thread_id, &self.folder_path, thread_id, message
+                "[codex] Resuming thread {} in {}: codex exec resume --json --skip-git-repo-check -m {} -c reasoning_effort={} {} \"{}\"",
+                thread_id, &self.folder_path, model, reasoning_effort, thread_id, message
             );
         } else {
             cmd.arg("--json")
@@ -291,11 +316,20 @@ impl BackendSession for CodexSession {
                 .arg("-C")
                 .arg(&self.folder_path)
                 .arg("-s")
-                .arg(&sandbox)
-                .arg(message);
+                .arg(&sandbox);
+
+            // Add model flag if not empty
+            if !model.is_empty() {
+                cmd.arg("-m").arg(&model);
+            }
+
+            // Add reasoning effort config
+            cmd.arg("-c").arg(format!("reasoning_effort={}", reasoning_effort));
+
+            cmd.arg(message);
             eprintln!(
-                "[codex] Starting new thread: codex exec --json -C {} -s {}",
-                &self.folder_path, sandbox
+                "[codex] Starting new thread: codex exec --json -C {} -s {} -m {} -c reasoning_effort={}",
+                &self.folder_path, sandbox, model, reasoning_effort
             );
         }
 
@@ -440,9 +474,9 @@ impl BackendSession for CodexSession {
         Ok(())
     }
 
-    async fn set_extended_thinking(&self, _enabled: bool) -> Result<(), BackendError> {
-        // Codex uses reasoning automatically based on model config
-        // We could potentially use -c reasoning_effort=... but for now no-op
+    async fn set_thinking_level(&self, level: String) -> Result<(), BackendError> {
+        let mut tl = self.thinking_level.write().await;
+        *tl = level;
         Ok(())
     }
 

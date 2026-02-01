@@ -2,9 +2,9 @@
 
 **Product Requirements Document for Caipi Multi-CLI Support**
 
-Version: 1.1
+Version: 1.2
 Date: February 2026
-Status: In Progress (Phases 1-3 Complete)
+Status: In Progress (Phases 1-4 Complete)
 
 ---
 
@@ -94,7 +94,8 @@ We chose to wrap `codex exec --json` rather than use `async-openai` directly bec
 | `agent_message` | Text response from the model |
 | `reasoning` | Thinking/reasoning summary |
 | `command_execution` | Shell command with output |
-| `file_change` | File creation/modification |
+| `file_write` | File creation/modification |
+| `file_read` | File reading |
 | `error` | Error or warning message |
 
 **Sandbox Modes** (`-s, --sandbox`):
@@ -159,8 +160,11 @@ pub enum BackendKind {
 }
 ```
 
-#### Unified Event Enum
+#### Event Types
 
+> **Implementation Note**: Rather than creating a separate `UnifiedEvent` enum, the actual implementation uses `ChatEvent` from `commands/chat.rs` directly. Each backend's event translator converts native events to `ChatEvent` variants, which are then emitted to the frontend via the `claude:event` channel.
+
+**Proposed design** (for reference):
 ```rust
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -464,12 +468,12 @@ Note: Claude only has binary thinking, so `Off`/`Low`/`Medium` all map to `false
 | Unified Tool | Claude | Codex | Notes |
 |--------------|--------|-------|-------|
 | `bash` | `Bash` | `command_execution` | Direct mapping |
-| `file_read` | `Read` | - | Codex may not emit separate read events |
-| `file_write` | `Write` | `file_change` (new file) | Detect via file existence |
-| `file_edit` | `Edit` | `file_change` (existing) | Detect via file existence |
+| `file_read` | `Read` | `file_read` | Direct mapping |
+| `file_write` | `Write` | `file_write` | Direct mapping |
+| `file_edit` | `Edit` | - | Claude-specific (Codex uses file_write) |
 | `file_search` | `Glob` | - | Claude-specific |
 | `content_search` | `Grep` | - | Claude-specific |
-| `web_search` | `WebSearch` | `web_search` | Direct mapping |
+| `web_search` | `WebSearch` | - | See Known Limitations (no tool events) |
 | `web_fetch` | `WebFetch` | - | Claude-specific |
 | `agent_spawn` | `Task` | - | Claude-specific |
 
@@ -669,7 +673,7 @@ The frontend requires no changes unless the new backend introduces entirely new 
 
 **Testing**: Run `npm run test:all`, manual test with `npm run tauri dev`
 
-### Phase 2: Codex Backend Implementation
+### Phase 2: Codex Backend Implementation ✅
 
 **Goal**: Implement `CodexBackend` that spawns `codex exec --json` and parses JSONL.
 
@@ -678,30 +682,43 @@ The frontend requires no changes unless the new backend introduces entirely new 
 - [x] Implement JSONL parser for Codex events
 - [x] Create event translator: Codex items → `ChatEvent`
 - [x] Implement `CodexSession` with process spawning via `tokio::process`
-- [ ] Handle multi-turn conversation (each message spawns new process - stateless)
-- [ ] Add Codex CLI detection to `commands/setup.rs`
-- [ ] Unit tests for JSONL parsing
+- [x] Handle multi-turn conversation via `codex exec resume <thread_id>`
+- [x] Codex CLI detection via `CodexBackend::check_installed()` (used by `check_backends_status`)
+- [x] Unit tests for JSONL parsing (28 tests in `events.rs`)
 
 **Key Implementation Details**:
 
 ```rust
-// Spawning Codex CLI
-let mut child = Command::new("codex")
-    .args(["exec", "--json", "--skip-git-repo-check", "-C", &folder_path])
-    .args(["-s", &sandbox_mode])
-    .args(["-a", &approval_policy])
-    .args(["-m", &model])
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .spawn()?;
+// Spawning Codex CLI (new conversation)
+let mut cmd = Command::new(&self.cli_path);
+cmd.arg("exec")
+    .arg("--json")
+    .arg("--skip-git-repo-check")
+    .arg("-C").arg(&self.folder_path)
+    .arg("-s").arg(&sandbox)       // read-only, workspace-write, or danger-full-access
+    .arg("-m").arg(&model)
+    .arg("-c").arg(format!("reasoning_effort={}", reasoning_effort));
+cmd.arg(message);
+
+// Resume existing conversation
+cmd.arg("exec")
+    .arg("resume")
+    .arg("--json")
+    .arg("--skip-git-repo-check")
+    .arg("-m").arg(&model)
+    .arg("-c").arg(format!("reasoning_effort={}", reasoning_effort))
+    .arg(thread_id)
+    .arg(message)
+    .current_dir(&self.folder_path);
 
 // Parse JSONL stream
 let reader = BufReader::new(stdout);
-for line in reader.lines() {
-    let event: CodexEvent = serde_json::from_str(&line?)?;
-    let unified = translate_codex_event(event);
-    event_tx.send(unified)?;
+while let Ok(Some(line)) = lines.next_line().await {
+    let event: CodexEvent = serde_json::from_str(&line)?;
+    let chat_events = translate_event(&event);
+    for chat_event in chat_events {
+        app_handle.emit("claude:event", &chat_event);
+    }
 }
 ```
 
@@ -742,30 +759,35 @@ for line in reader.lines() {
 - Modified: `src/lib/components/settings/Settings.svelte` (added backend selector)
 - Modified: `src/lib/components/folder/SessionPicker.svelte` (added backend selector + filtering)
 
-### Phase 4: Backend-Specific UI Adaptations
+### Phase 4: Backend-Specific UI Adaptations ✅
 
 **Goal**: Handle features that differ between backends.
 
 **Tasks**:
-- [ ] **Model selector**: Show backend-appropriate models
-- [ ] **Permission controls**: Adapt to backend (Claude: 3-mode, Codex: sandbox mode)
-- [ ] **Thinking toggle**: Claude: On/Off, Codex: Low/Medium/High
-- [ ] **Session history**: Read Codex session history from `~/.codex/`
+- [x] **Model selector**: Show backend-appropriate models (Claude: Opus/Sonnet/Haiku, Codex: GPT-5.2/GPT-5.2 Codex/GPT-5.1 Mini)
+- [x] **Thinking toggle**: Claude: Off/On (binary), Codex: Low/Medium/High (no off state)
+- [x] **Permission controls**: Works via unified mode (maps to sandbox levels for Codex)
+- [~] **Session history**: Deferred for Codex (SQLite format still changing)
 
-**Approach**: Use `BackendCapabilities` to conditionally render UI elements.
-
-```svelte
-{#if capabilities.permission_model === 'per_tool'}
-  <ClaudePermissionSelector />
-{:else if capabilities.permission_model === 'sandbox'}
-  <CodexSandboxSelector />
-{/if}
-```
+**Implementation**:
+- Created `src/lib/config/backends.ts` with `BackendConfig` defining models and thinking options per backend
+- Updated `app.svelte.ts` store to use backend-aware model and thinking state with per-backend persistence
+- Updated `MessageInput.svelte` to dynamically render model selector and thinking button based on current backend
+- Changed Rust trait from `set_extended_thinking(bool)` to `set_thinking_level(String)` for flexibility
+- Codex adapter now passes `-m` (model) and `-c reasoning_effort=...` flags to CLI
 
 **Files Changed**:
-- Modified: `src/lib/components/chat/ChatHeader.svelte`
-- Modified: `src/lib/components/settings/PermissionSelector.svelte`
-- New: `src/lib/components/settings/CodexSettings.svelte`
+- New: `src/lib/config/backends.ts`
+- Modified: `src/lib/stores/app.svelte.ts`
+- Modified: `src/lib/components/chat/MessageInput.svelte`
+- Modified: `src/lib/api/tauri.ts`
+- Modified: `src-tauri/src/backends/session.rs`
+- Modified: `src-tauri/src/backends/claude/adapter.rs`
+- Modified: `src-tauri/src/backends/codex/adapter.rs`
+- Modified: `src-tauri/src/commands/chat.rs`
+- Modified: `src-tauri/src/lib.rs`
+
+**Future Consideration**: The 3-ring model size icon metaphor works well for Claude (Opus > Sonnet > Haiku) but may not scale to other backends where model relationships are different. Consider a more flexible icon system or per-backend icon configuration in future iterations.
 
 ### Phase 5: Session Resume & History (Deferred for Codex)
 
@@ -780,9 +802,9 @@ Previous versions (0.92 and earlier) stored sessions as JSONL files in `~/.codex
 
 **Future Tasks** (when Codex storage stabilizes):
 - [ ] Parse Codex SQLite database for session history
-- [ ] Implement `codex exec resume <id>` flow
+- [x] ~~Implement `codex exec resume <id>` flow~~ (done - works for multi-turn within a session)
 - [ ] Unify session history UI to show both backends
-- [ ] Store `thread_id` from `thread.started` event
+- [x] ~~Store `thread_id` from `thread.started` event~~ (done - captured in `CodexSession`)
 
 **Current Behavior**:
 - Claude: Full session history and resume support
@@ -832,6 +854,18 @@ function handleBackendEvent(event: UnifiedEvent) {
 
 ---
 
+## Known Limitations
+
+### Codex Backend
+
+| Feature | Limitation | Workaround |
+|---------|------------|------------|
+| **Web Search** | Web search results are embedded in `agent_message` text, not as separate events. No tool UI indicator appears. | Results still appear in the response text - the feature works, just without visual tool feedback. |
+| **Session History** | Codex 0.93+ uses SQLite storage, previous versions used JSONL. Format is still changing. | Users can start new sessions but not resume old ones from Caipi. Use Codex CLI directly for session history. |
+| **Approval Policies** | Caipi maps permission modes to sandbox levels only, not full approval policies (`-a` flag). | Current mapping is pragmatic: Default=read-only, Edit=workspace-write, Danger=full-access. |
+
+---
+
 ## Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -869,7 +903,7 @@ function handleBackendEvent(event: UnifiedEvent) {
 
 1. ~~**Codex session storage location**~~: **Resolved** - Codex 0.92 stores in `~/.codex/sessions/YYYY/MM/DD/*.jsonl`. Codex 0.93+ uses SQLite. Session history deferred until format stabilizes.
 
-2. **Multi-turn conversation in Codex**: Does `codex exec` support stdin for follow-up messages, or must we use `codex exec resume`?
+2. ~~**Multi-turn conversation in Codex**~~: **Resolved** - We use `codex exec resume <thread_id>` for follow-up messages. The `thread_id` is captured from the `thread.started` event and stored in the session.
 
 3. **Codex MCP support**: Codex has experimental MCP server support. Should we expose this?
 
@@ -884,8 +918,8 @@ function handleBackendEvent(event: UnifiedEvent) {
 - [x] Users can select Claude or Codex backend during onboarding
 - [x] Chat functionality works identically with both backends
 - [x] Tool execution (bash, file operations) works with both backends
-- [ ] Permission prompting works appropriately for each backend (partial - basic flow works)
-- [ ] Model selection shows backend-appropriate options (not yet implemented)
+- [x] Permission modes work appropriately for each backend (maps to sandbox levels for Codex)
+- [x] Model selection shows backend-appropriate options
 - [x] Thinking/reasoning display works for both backends
 - [~] Session history shows sessions from both backends (Claude only - Codex deferred due to storage format changes)
 - [x] No regression in existing Claude Code functionality
@@ -908,11 +942,12 @@ function handleBackendEvent(event: UnifiedEvent) {
 
 | Type | Fields | Maps To |
 |------|--------|---------|
-| `agent_message` | `text` | `UnifiedEvent::Text` |
-| `reasoning` | `text` | `UnifiedEvent::ThinkingEnd` |
-| `command_execution` | `command`, `aggregated_output`, `exit_code`, `status` | `ToolStart` → `ToolEnd` |
-| `file_change` | `path`, `content`, `status` | `ToolStart` → `ToolEnd` |
-| `error` | `message` | `UnifiedEvent::Error` |
+| `agent_message` | `id`, `text` | `ChatEvent::Text` |
+| `reasoning` | `id`, `text` | `ChatEvent::ThinkingStart` + `ThinkingEnd` |
+| `command_execution` | `id`, `command`, `aggregated_output`, `exit_code`, `status` | `ToolStart` → `ToolEnd` |
+| `file_write` | `id`, `path`, `content` | `ToolStart` → `ToolEnd` |
+| `file_read` | `id`, `path` | `ToolStart` → `ToolEnd` |
+| `error` | `id`, `message` | `ChatEvent::Error` (filtered for unstable feature warnings) |
 
 ---
 
@@ -936,20 +971,22 @@ claude --version
 which codex
 codex --version
 
-# Non-interactive with JSON output
+# Non-interactive with JSON output (new conversation)
 codex exec --json --skip-git-repo-check \
     -C /path/to/folder \
     -m gpt-5.2-codex \
     -s workspace-write \
-    -a on-request \
+    -c reasoning_effort=high \
     "Your prompt here"
 
-# Resume session
-codex exec resume <thread_id>
-codex exec resume --last
+# Resume existing conversation
+codex exec resume --json --skip-git-repo-check \
+    -m gpt-5.2-codex \
+    -c reasoning_effort=high \
+    <thread_id> "Follow-up message"
 
-# Check auth
-codex login --status  # (if available)
+# Check auth (via ChatGPT login)
+# Codex uses ChatGPT authentication, checked by running a test command
 ```
 
 ---

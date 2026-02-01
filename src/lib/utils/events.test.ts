@@ -921,6 +921,71 @@ describe('handleClaudeEvent', () => {
         })
       );
     });
+
+    it('should extract bold title from thinking content (Codex format)', () => {
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-3',
+        content: '**Checking weather**\nLooking at the forecast for today...',
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: 'Checking weather',  // Just the title, no ** markers
+        })
+      );
+    });
+
+    it('should handle bold title at start without trailing content', () => {
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-4',
+        content: '**Analyzing code**',
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: 'Analyzing code',
+        })
+      );
+    });
+
+    it('should fall back to truncation if no bold title', () => {
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-5',
+        content: 'Just some regular thinking text without bold formatting',
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: 'Just some regular thinking text without bold forma...',
+        })
+      );
+    });
+
+    it('should not match bold in the middle of content', () => {
+      const thinkingEvent: ChatEvent = {
+        type: 'ThinkingStart',
+        thinkingId: 'think-6',
+        content: 'First some text then **bold** in middle',
+      };
+
+      handleClaudeEvent(thinkingEvent);
+
+      // Should truncate since bold is not at start
+      expect(chat.addTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: 'First some text then **bold** in middle',
+        })
+      );
+    });
   });
 
   describe('Other events', () => {

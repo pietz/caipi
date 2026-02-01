@@ -63,6 +63,20 @@ Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.
 - Forest green: `#439c3a`
 - Acid green: `#a9d80d`
 
+## Resetting for Testing
+
+Data is stored at `~/Library/Application Support/caipi/data.json`
+
+- **"Reset onboarding"**: Only reset `onboarding_completed` flag, KEEP license data intact
+  ```bash
+  # Use jq to reset only the onboarding flag
+  jq '.onboarding_completed = false' ~/Library/Application\ Support/caipi/data.json > /tmp/data.json && mv /tmp/data.json ~/Library/Application\ Support/caipi/data.json
+  ```
+- **"Reset everything"** or **"reset license"**: Delete the entire data.json file
+  ```bash
+  rm ~/Library/Application\ Support/caipi/data.json
+  ```
+
 ## After Changes
 
 1. Run `npm run test:all`

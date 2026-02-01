@@ -99,6 +99,21 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + '...';
 }
 
+/**
+ * Extract title from thinking content.
+ * Codex thinking often starts with a bold markdown title like "**Checking weather**\n..."
+ * This extracts just the title text for display.
+ */
+function extractThinkingTitle(content: string): string {
+  // Check if content starts with bold markdown: **Title**
+  const match = content.match(/^\*\*([^*]+)\*\*/);
+  if (match) {
+    return match[1];  // Return just the title text without **
+  }
+  // Fallback to first 50 chars
+  return truncate(content, 50);
+}
+
 function handleTextEvent(event: ChatEvent) {
   if (!event.content) return;
 
@@ -232,7 +247,7 @@ function handleThinkingStartEvent(event: ChatEvent) {
   chat.addTool({
     id: event.thinkingId,
     toolType: 'Thinking',
-    target: truncate(event.content, 50),  // Preview of thinking
+    target: extractThinkingTitle(event.content),  // Extract title or preview
     status: 'completed',  // Thinking arrives complete
     input: { content: event.content },  // Store full content
     timestamp: Date.now() / 1000,

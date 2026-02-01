@@ -260,9 +260,9 @@ pub async fn set_model(
 }
 
 #[tauri::command]
-pub async fn set_extended_thinking(
+pub async fn set_thinking_level(
     session_id: String,
-    enabled: bool,
+    level: String,
     app: AppHandle,
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
@@ -273,7 +273,7 @@ pub async fn set_extended_thinking(
         store.get(&session_id).ok_or("Session not found")?.clone()
     };
 
-    session.set_extended_thinking(enabled).await.map_err(|e| e.to_string())
+    session.set_thinking_level(level).await.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

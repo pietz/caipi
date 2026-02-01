@@ -1,10 +1,11 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
+import { backendConfigs } from '$lib/config/backends';
 import { chat } from './chat.svelte';
 
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
-export type Model = 'opus' | 'sonnet' | 'haiku';
+export type Model = string; // Now backend-specific, validated against backendConfigs
 export type Backend = 'claude' | 'codex';
 
 export interface LicenseInfo {
@@ -21,12 +22,22 @@ export interface CliStatus {
   path?: string;
 }
 
-function getPersistedModel(): Model {
+function getPersistedModel(backend: Backend): Model {
   if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem('caipi:model');
-    if (saved === 'opus' || saved === 'sonnet' || saved === 'haiku') return saved;
+    const saved = localStorage.getItem(`caipi:model:${backend}`);
+    const config = backendConfigs[backend];
+    if (saved && config.models.some(m => m.id === saved)) return saved;
   }
-  return 'sonnet';
+  return backendConfigs[backend].defaultModel;
+}
+
+function getPersistedThinkingLevel(backend: Backend): string {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem(`caipi:thinking:${backend}`);
+    const config = backendConfigs[backend];
+    if (saved && config.thinkingOptions.some(o => o.value === saved)) return saved;
+  }
+  return backendConfigs[backend].defaultThinking;
 }
 
 function getPersistedBackend(): Backend {
@@ -57,8 +68,8 @@ class AppState {
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
-  model = $state<Model>(getPersistedModel());
-  extendedThinking = $state(true);
+  model = $state<Model>(getPersistedModel(getPersistedBackend()));
+  thinkingLevel = $state<string>(getPersistedThinkingLevel(getPersistedBackend()));
 
   // Auth info
   authType = $state<string | null>(null);
@@ -131,23 +142,64 @@ class AppState {
   }
 
   setModel(model: Model) {
-    this.model = model;
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('caipi:model', model);
+    const config = backendConfigs[this.backend];
+    if (config.models.some(m => m.id === model)) {
+      this.model = model;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`caipi:model:${this.backend}`, model);
+      }
+    }
+  }
+
+  setThinkingLevel(level: string) {
+    const config = backendConfigs[this.backend];
+    if (config.thinkingOptions.some(o => o.value === level)) {
+      this.thinkingLevel = level;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`caipi:thinking:${this.backend}`, level);
+      }
     }
   }
 
   setBackend(backend: Backend) {
     this.backend = backend;
+    const config = backendConfigs[backend];
+
+    // Load saved or use default for model
+    const savedModel = typeof localStorage !== 'undefined'
+      ? localStorage.getItem(`caipi:model:${backend}`)
+      : null;
+    this.model = (savedModel && config.models.some(m => m.id === savedModel))
+      ? savedModel
+      : config.defaultModel;
+
+    // Load saved or use default for thinking level
+    const savedThinking = typeof localStorage !== 'undefined'
+      ? localStorage.getItem(`caipi:thinking:${backend}`)
+      : null;
+    this.thinkingLevel = (savedThinking && config.thinkingOptions.some(o => o.value === savedThinking))
+      ? savedThinking
+      : config.defaultThinking;
+
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem('caipi:backend', backend);
     }
   }
 
   cycleModel() {
-    const models: Model[] = ['opus', 'sonnet', 'haiku'];
-    const next = (models.indexOf(this.model) + 1) % models.length;
-    this.setModel(models[next]);
+    const config = backendConfigs[this.backend];
+    const models = config.models;
+    const currentIndex = models.findIndex(m => m.id === this.model);
+    const nextIndex = (currentIndex + 1) % models.length;
+    this.setModel(models[nextIndex].id);
+  }
+
+  cycleThinking() {
+    const config = backendConfigs[this.backend];
+    const options = config.thinkingOptions;
+    const currentIndex = options.findIndex(o => o.value === this.thinkingLevel);
+    const nextIndex = (currentIndex + 1) % options.length;
+    this.setThinkingLevel(options[nextIndex].value);
   }
 
   setPermissionMode(mode: PermissionMode) {
@@ -158,10 +210,6 @@ class AppState {
     const modes: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
     const next = (modes.indexOf(this.permissionMode) + 1) % modes.length;
     this.permissionMode = modes[next];
-  }
-
-  toggleExtendedThinking() {
-    this.extendedThinking = !this.extendedThinking;
   }
 
   // Sync state from backend events
