@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from '$lib/api';
-  import { Shield, Pencil, AlertTriangle, ArrowUp, Square, Brain } from 'lucide-svelte';
+  import { Shield, Pencil, AlertTriangle, ArrowUp, Brain } from 'lucide-svelte';
   import { Button, ContextIndicator, Tooltip } from '$lib/components/ui';
   import ModelSizeIcon from '$lib/components/icons/ModelSizeIcon.svelte';
   import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
@@ -33,6 +33,11 @@
   // Calculate context percentage (200k token limit)
   const contextPercentage = $derived(Math.round((chat.tokenCount / 200000) * 100));
 
+  // Get current thinking option label
+  const thinkingLabel = $derived(
+    app.backendConfig.thinkingOptions.find(opt => opt.value === app.thinkingLevel)?.label ?? 'Off'
+  );
+
   function handleModeClick() {
     // Optimistic update - backend will confirm via StateChanged event
     app.cyclePermissionMode();
@@ -46,6 +51,13 @@
     app.cycleModel();
     if (app.sessionId) {
       api.setModel(app.sessionId, app.model);
+    }
+  }
+
+  function handleThinkingClick() {
+    app.cycleThinking();
+    if (app.sessionId) {
+      api.setThinkingLevel(app.sessionId, app.thinkingLevel);
     }
   }
 
@@ -143,20 +155,13 @@
 
           <Tooltip text="Extended Thinking">
             <Button
-              variant={app.extendedThinking ? 'outline' : 'ghost'}
-              size="icon"
-              class={cn(
-                'h-8 w-8',
-                app.extendedThinking && 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-              )}
-              onclick={() => {
-                app.toggleExtendedThinking();
-                if (app.sessionId) {
-                  api.setExtendedThinking(app.sessionId, app.extendedThinking);
-                }
-              }}
+              variant="ghost"
+              size="sm"
+              class="w-16 justify-start gap-2 h-8 text-xs"
+              onclick={handleThinkingClick}
             >
               <Brain size={14} />
+              {thinkingLabel}
             </Button>
           </Tooltip>
         </div>

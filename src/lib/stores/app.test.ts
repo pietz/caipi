@@ -402,12 +402,29 @@ describe('AppState Store', () => {
       expect(app.license).toBe(null);
     });
 
-    it('toggleExtendedThinking flips extendedThinking state', async () => {
+    it('cycleThinking cycles through thinking levels', async () => {
       const { app } = await import('./app.svelte');
 
-      const initial = app.extendedThinking;
-      app.toggleExtendedThinking();
-      expect(app.extendedThinking).toBe(!initial);
+      // Default is 'on' for Claude
+      expect(app.thinkingLevel).toBe('on');
+
+      app.cycleThinking();
+      expect(app.thinkingLevel).toBe('off');
+
+      app.cycleThinking();
+      expect(app.thinkingLevel).toBe('on');
+    });
+
+    it('setThinkingLevel updates and persists thinking level', async () => {
+      const { app } = await import('./app.svelte');
+
+      app.setThinkingLevel('off');
+      expect(app.thinkingLevel).toBe('off');
+      expect(mockLocalStorage['caipi:thinking:claude']).toBe('off');
+
+      app.setThinkingLevel('on');
+      expect(app.thinkingLevel).toBe('on');
+      expect(mockLocalStorage['caipi:thinking:claude']).toBe('on');
     });
   });
 
@@ -517,8 +534,9 @@ describe('AppState Store', () => {
 
       vi.spyOn(chat, 'loadHistory').mockImplementation(() => {});
       vi.mocked(invoke)
-        .mockResolvedValueOnce('session-resume')
-        .mockResolvedValueOnce(history);
+        .mockResolvedValueOnce('session-resume')  // create_session
+        .mockResolvedValueOnce(undefined)         // set_thinking_level
+        .mockResolvedValueOnce(history);          // get_session_history
 
       await app.resumeSession('/test/project', 'session-abc');
 
@@ -531,6 +549,10 @@ describe('AppState Store', () => {
           resumeSessionId: 'session-abc',
         })
       );
+      expect(invoke).toHaveBeenCalledWith('set_thinking_level', {
+        sessionId: 'session-resume',
+        level: app.thinkingLevel,
+      });
       expect(invoke).toHaveBeenCalledWith('get_session_history', {
         folderPath: '/test/project',
         sessionId: 'session-abc',

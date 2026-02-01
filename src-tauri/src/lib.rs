@@ -1,9 +1,12 @@
+mod backends;
 mod commands;
 mod claude;
 mod storage;
 
+use backends::{BackendRegistry, BackendSession};
+use backends::claude::ClaudeBackend;
 use commands::chat::SessionStore;
-use claude::agent::{AgentSession, PermissionChannels};
+use claude::agent::PermissionChannels;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Manager;
@@ -14,6 +17,11 @@ pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
 
+    // Initialize backend registry with Claude backend
+    let mut registry = BackendRegistry::new();
+    registry.register(Arc::new(ClaudeBackend::new()));
+    let registry = Arc::new(registry);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -22,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(session_store)
         .manage(permission_channels)
+        .manage(registry)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let app_handle = window.app_handle().clone();
@@ -31,7 +40,7 @@ pub fn run() {
                     let sessions: tauri::State<'_, SessionStore> = app_handle.state();
 
                     // Drain sessions from store while holding lock briefly
-                    let sessions_to_cleanup: Vec<(String, AgentSession)> = {
+                    let sessions_to_cleanup: Vec<(String, Arc<dyn BackendSession>)> = {
                         let mut store = sessions.lock().await;
                         store.drain().collect()
                     };
@@ -77,7 +86,7 @@ pub fn run() {
             commands::abort_session,
             commands::set_permission_mode,
             commands::set_model,
-            commands::set_extended_thinking,
+            commands::set_thinking_level,
             // License commands
             commands::validate_license,
             commands::get_license_status,

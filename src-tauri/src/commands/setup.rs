@@ -48,8 +48,9 @@ fn get_claude_version(claude_path: &str) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
-#[tauri::command]
-pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
+/// Internal function for checking if Claude CLI is installed.
+/// Used by both the Tauri command and the Claude backend adapter.
+pub async fn check_cli_installed_internal() -> CliInstallStatus {
     // Strategy:
     // 1. Check common installation paths directly (fastest, most reliable)
     // 2. Try user's shell with interactive config sourced (.zshrc/.bashrc)
@@ -68,11 +69,11 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
             if path.is_file() {
                 let path_str = path.to_string_lossy().to_string();
                 if let Some(version) = get_claude_version(&path_str) {
-                    return Ok(CliInstallStatus {
+                    return CliInstallStatus {
                         installed: true,
                         version: Some(version),
                         path: Some(path_str),
-                    });
+                    };
                 }
             }
         }
@@ -91,40 +92,45 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
 
     if let Some(claude_path) = try_shell_which(&user_shell, &["-c", source_cmd]) {
         let version = get_claude_version(&claude_path);
-        return Ok(CliInstallStatus {
+        return CliInstallStatus {
             installed: true,
             version,
             path: Some(claude_path),
-        });
+        };
     }
 
     // Try login shell with user's preferred shell
     if let Some(claude_path) = try_shell_which(&user_shell, &["-l", "-c", "which claude"]) {
         let version = get_claude_version(&claude_path);
-        return Ok(CliInstallStatus {
+        return CliInstallStatus {
             installed: true,
             version,
             path: Some(claude_path),
-        });
+        };
     }
 
     // Final fallback: try both common shells with login flag
     for shell in ["/bin/zsh", "/bin/bash"] {
         if let Some(claude_path) = try_shell_which(shell, &["-l", "-c", "which claude"]) {
             let version = get_claude_version(&claude_path);
-            return Ok(CliInstallStatus {
+            return CliInstallStatus {
                 installed: true,
                 version,
                 path: Some(claude_path),
-            });
+            };
         }
     }
 
-    Ok(CliInstallStatus {
+    CliInstallStatus {
         installed: false,
         version: None,
         path: None,
-    })
+    }
+}
+
+#[tauri::command]
+pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
+    Ok(check_cli_installed_internal().await)
 }
 
 /// Check if OAuth token exists in Claude Desktop's config
@@ -161,35 +167,41 @@ fn test_claude_auth(claude_path: &str) -> bool {
     }
 }
 
-#[tauri::command]
-pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
+/// Internal function for checking if Claude CLI is authenticated.
+/// Used by both the Tauri command and the Claude backend adapter.
+pub async fn check_cli_authenticated_internal() -> CliAuthStatus {
     // Check environment variable first (for API key users)
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-        return Ok(CliAuthStatus { authenticated: true });
+        return CliAuthStatus { authenticated: true };
     }
 
     if let Some(home) = dirs::home_dir() {
         // Check Claude Desktop's OAuth token (most common for Pro/Max users)
         if check_oauth_token(&home) {
-            return Ok(CliAuthStatus { authenticated: true });
+            return CliAuthStatus { authenticated: true };
         }
 
         // Check legacy credentials file location
         if check_legacy_credentials(&home) {
-            return Ok(CliAuthStatus { authenticated: true });
+            return CliAuthStatus { authenticated: true };
         }
     }
 
     // Fall back to actually testing claude with a simple prompt
     // This handles cases where auth is stored in unexpected locations
-    let install_status = check_cli_installed().await?;
+    let install_status = check_cli_installed_internal().await;
     if let Some(claude_path) = install_status.path {
         if test_claude_auth(&claude_path) {
-            return Ok(CliAuthStatus { authenticated: true });
+            return CliAuthStatus { authenticated: true };
         }
     }
 
-    Ok(CliAuthStatus { authenticated: false })
+    CliAuthStatus { authenticated: false }
+}
+
+#[tauri::command]
+pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
+    Ok(check_cli_authenticated_internal().await)
 }
 
 #[tauri::command]

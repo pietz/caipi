@@ -1,6 +1,7 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
 import { chat } from './chat.svelte';
+import { getBackendConfig, type Backend } from '$lib/config/backends';
 
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
@@ -28,6 +29,14 @@ function getPersistedModel(): Model {
   return 'sonnet';
 }
 
+function getPersistedThinkingLevel(backend: Backend): string {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem(`caipi:thinking:${backend}`);
+    if (saved) return saved;
+  }
+  return getBackendConfig(backend).defaultThinking;
+}
+
 class AppState {
   // Navigation
   screen = $state<Screen>('loading');
@@ -46,10 +55,13 @@ class AppState {
   rightSidebar = $state(false);
   settingsOpen = $state(false);
 
+  // Backend (fixed to 'claude' for now)
+  backend = $state<Backend>('claude');
+
   // Settings
   permissionMode = $state<PermissionMode>('default');
   model = $state<Model>(getPersistedModel());
-  extendedThinking = $state(true);
+  thinkingLevel = $state<string>(getPersistedThinkingLevel('claude'));
 
   // Auth info
   authType = $state<string | null>(null);
@@ -63,6 +75,10 @@ class AppState {
   // Derived
   get folderName(): string {
     return this.folder?.split('/').pop() ?? '';
+  }
+
+  get backendConfig() {
+    return getBackendConfig(this.backend);
   }
 
   // Methods
@@ -141,8 +157,18 @@ class AppState {
     this.permissionMode = modes[next];
   }
 
-  toggleExtendedThinking() {
-    this.extendedThinking = !this.extendedThinking;
+  setThinkingLevel(level: string) {
+    this.thinkingLevel = level;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`caipi:thinking:${this.backend}`, level);
+    }
+  }
+
+  cycleThinking() {
+    const options = this.backendConfig.thinkingOptions;
+    const currentIndex = options.findIndex(opt => opt.value === this.thinkingLevel);
+    const nextIndex = (currentIndex + 1) % options.length;
+    this.setThinkingLevel(options[nextIndex].value);
   }
 
   // Sync state from backend events
@@ -153,7 +179,9 @@ class AppState {
 
   async startSession(folder: string): Promise<void> {
     this.folder = folder;
-    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined);
+    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined, this.backend);
+    // Sync persisted thinking level to the new session
+    await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
     this.screen = 'chat';
   }
 
@@ -166,8 +194,12 @@ class AppState {
       this.permissionMode,
       this.model,
       sessionId,
-      this.cliPath ?? undefined
+      this.cliPath ?? undefined,
+      this.backend
     );
+
+    // Sync persisted thinking level to the resumed session
+    await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
 
     // Only load history after successful session creation
     const history = await api.getSessionHistory(folderPath, sessionId);
