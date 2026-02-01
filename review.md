@@ -83,19 +83,12 @@ Each screen duplicates the same steps:
 
 ---
 
-### 6. Theme subscription leaks in SetupWizard and FolderPicker *(Bug)*
-**Files:** `src/lib/components/onboarding/SetupWizard.svelte:27-29`, `src/lib/components/folder/FolderPicker.svelte:31-33`
+### ~~6. Theme subscription leaks in SetupWizard and FolderPicker~~ ✅ FIXED
+**Files:** `src/lib/components/onboarding/SetupWizard.svelte`, `src/lib/components/folder/FolderPicker.svelte`
 
-Both components call `.subscribe()` without cleanup:
-```typescript
-resolvedTheme.subscribe((theme) => {
-  currentTheme = theme;
-});
-```
+~~Both components call `.subscribe()` without cleanup.~~
 
-If screens are re-entered, subscriptions accumulate and cause memory leaks.
-
-**Fix:** Either use `$derived()` (Svelte 5 pattern) or store unsubscribe and call in `onDestroy`.
+**Resolution:** Theme store migrated to Svelte 5 runes (`theme.svelte.ts`). Components now use `$derived(theme.resolved)` — no subscriptions needed.
 
 ---
 
@@ -200,7 +193,7 @@ Long lines without newlines appear "stuck" until a newline arrives.
 | **P1** | Chat store facade over-engineering | Architecture |
 | **P2** | Stringly-typed frontend events | Type Safety |
 | **P2** | Session start flow duplicated 3x | Duplication |
-| **P2** | Theme subscription leaks | Bug |
+| ~~**P2**~~ | ~~Theme subscription leaks~~ | ~~Bug~~ ✅ |
 | **P2** | Unused events.rs module | Dead Code |
 | **P3** | SkillsList subscription leak | Bug |
 | **P3** | Stub suggestDesktopFolder() | Dead Code |
@@ -215,7 +208,7 @@ Long lines without newlines appear "stuck" until a newline arrives.
 ## Recommended Attack Order
 
 1. **P1 bugs first** — Model switching and session cleanup are functional issues users will hit
-2. **P2 subscription leaks** — Quick wins, prevent memory issues
+2. ~~**P2 subscription leaks** — Quick wins, prevent memory issues~~ ✅ Theme store done
 3. **P1 store architecture** — Biggest complexity reduction
 4. **P2 dead code** — events.rs deletion
 5. **P2 session flow duplication** — Consolidate

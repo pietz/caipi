@@ -4,7 +4,7 @@
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button, Input } from '$lib/components/ui';
-  import { themeStore, resolvedTheme } from '$lib/stores/theme';
+  import { theme } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
 
   let licenseKey = $state('');
@@ -13,10 +13,10 @@
   let errorHint = $state<string | null>(null);
   let success = $state(false);
 
-  const currentTheme = $derived($resolvedTheme);
+  const currentTheme = $derived(theme.resolved);
 
   function toggleTheme() {
-    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
+    theme.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
   }
 
   /**

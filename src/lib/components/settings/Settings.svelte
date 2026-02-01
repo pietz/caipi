@@ -3,7 +3,7 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui';
-  import { themeStore, type ThemePreference } from '$lib/stores/theme';
+  import { theme, type ThemePreference } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
   import { api } from '$lib/api';
 
@@ -25,7 +25,7 @@
     return version.replace(/\s*\(.*\)\s*$/, '').trim();
   });
 
-  const currentPreference = $derived($themeStore.preference);
+  const currentPreference = $derived(theme.preference);
 
   // License info
   const licenseKey = $derived(app.license?.licenseKey ?? null);
@@ -47,7 +47,7 @@
   }
 
   function setTheme(preference: ThemePreference) {
-    themeStore.setPreference(preference);
+    theme.setPreference(preference);
   }
 
   async function disconnectLicense() {

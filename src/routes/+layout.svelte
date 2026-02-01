@@ -1,7 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
-  import { resolvedTheme, applyTheme } from '$lib/stores';
+  import { theme, applyTheme } from '$lib/stores';
   import { updater } from '$lib/stores/updater.svelte';
   import UpdateBanner from '$lib/components/ui/UpdateBanner.svelte';
 
@@ -9,11 +9,7 @@
 
   // Apply theme whenever it changes
   $effect(() => {
-    const unsubscribe = resolvedTheme.subscribe(theme => {
-      applyTheme(theme);
-    });
-
-    return unsubscribe;
+    applyTheme(theme.resolved);
   });
 
   // Check for updates on startup (with a delay to not block initial load)

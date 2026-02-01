@@ -5,7 +5,7 @@
   import { Check, Folder, Loader2, Sun, Moon, Copy, AlertTriangle } from 'lucide-svelte';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
-  import { themeStore, resolvedTheme } from '$lib/stores/theme';
+  import { theme } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
 
   let cliStatus = $state<CliInstallStatus | null>(null);
@@ -16,13 +16,13 @@
   let completing = $state(false);
   let error = $state<string | null>(null);
 
-  const currentTheme = $derived($resolvedTheme);
+  const currentTheme = $derived(theme.resolved);
 
   const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
   let copied = $state(false);
 
   function toggleTheme() {
-    themeStore.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
+    theme.setPreference(currentTheme === 'dark' ? 'light' : 'dark');
   }
 
   onMount(async () => {

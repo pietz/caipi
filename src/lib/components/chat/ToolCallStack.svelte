@@ -24,6 +24,18 @@
     tools.filter(t => COMPLETED_STATUSES.includes(t.status)).map(t => t.id)
   );
 
+  // Sync revealedIds when tools prop changes (e.g., new completed tools from history)
+  $effect(() => {
+    const completedIds = tools
+      .filter(t => COMPLETED_STATUSES.includes(t.status))
+      .map(t => t.id);
+    for (const id of completedIds) {
+      if (!revealedIds.includes(id)) {
+        revealedIds = [...revealedIds, id];
+      }
+    }
+  });
+
   // Tools that have been revealed (preserving order from tools array)
   const revealedTools = $derived(
     tools.filter(t => revealedIds.includes(t.id))

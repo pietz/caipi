@@ -1,6 +1,6 @@
 use crate::storage;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 // Lemon Squeezy store and product IDs for validation
@@ -187,7 +187,7 @@ pub async fn validate_license(license_key: String) -> Result<LicenseValidationRe
     // Store the validated license
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or(Duration::ZERO)
         .as_secs();
 
     storage::set_license(trimmed_key, now, email.clone(), instance_id)

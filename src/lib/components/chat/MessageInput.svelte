@@ -105,6 +105,7 @@
         <!-- Floating Send/Stop Button -->
         <Button
           variant="ghost"
+          aria-label={isStreaming && !hasContent ? "Stop generation" : "Send message"}
           class="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 p-0 rounded-lg bg-foreground text-background hover:bg-foreground hover:text-primary disabled:opacity-100 disabled:bg-foreground/50"
           disabled={!hasContent && !isStreaming}
           onclick={isStreaming && !hasContent ? onAbort : handleSubmit}

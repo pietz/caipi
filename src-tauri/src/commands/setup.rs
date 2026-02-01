@@ -1,7 +1,7 @@
 use crate::storage;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
 
@@ -249,7 +249,7 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
         Some(cached) => {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(Duration::ZERO)
                 .as_secs();
             let age = now.saturating_sub(cached.cached_at);
             let fresh = age < CLI_CACHE_TTL_SECONDS;

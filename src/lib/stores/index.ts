@@ -2,8 +2,8 @@
 // Note: For .svelte.ts files, direct imports are recommended in components
 // This file provides compatibility for existing code
 
-// Theme store (standard Svelte store - works fine with barrel exports)
-export { themeStore, resolvedTheme, applyTheme, type ThemePreference, type ResolvedTheme } from './theme';
+// Theme store (Svelte 5 runes - direct import from .svelte.ts recommended in components)
+export { theme, applyTheme, type ThemePreference, type ResolvedTheme } from './theme.svelte';
 
 // Type exports from new stores (types work fine with barrel exports)
 export type { Screen, PermissionMode, Model, CliStatus } from './app.svelte';
