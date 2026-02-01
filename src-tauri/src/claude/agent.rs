@@ -230,7 +230,7 @@ impl AgentSession {
             ..Default::default()
         };
 
-        // Create client if needed (model changes are handled via set_model() control protocol)
+        // Create client if needed
         let mut client_guard = self.client.lock().await;
 
         if client_guard.is_none() {
@@ -241,6 +241,10 @@ impl AgentSession {
 
         // Connect if not connected
         client.connect().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+
+        // Always update the model before sending the query to ensure model changes take effect
+        // This handles the case where set_model() was called when client wasn't connected
+        client.set_model(Some(model_id)).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         // Send query
         client.query(message).await.map_err(|e| AgentError::Sdk(e.to_string()))?;

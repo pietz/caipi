@@ -4,8 +4,6 @@ pub mod chat;
 pub mod files;
 pub mod license;
 pub mod sessions;
-#[allow(unused)]
-pub mod events;
 
 pub use setup::*;
 pub use folder::*;

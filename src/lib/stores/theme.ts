@@ -33,11 +33,15 @@ function createThemeStore() {
 
   const { subscribe, set, update } = writable<ThemeState>(initialState);
 
+  // Store references for cleanup
+  let mediaQuery: MediaQueryList | null = null;
+  let handleChange: ((e: MediaQueryListEvent) => void) | null = null;
+
   // Listen for system theme changes
   if (browser) {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
-    const handleChange = (e: MediaQueryListEvent) => {
+    handleChange = (e: MediaQueryListEvent) => {
       update(state => ({
         ...state,
         systemTheme: e.matches ? 'dark' : 'light',
@@ -54,6 +58,13 @@ function createThemeStore() {
         localStorage.setItem(STORAGE_KEY, preference);
       }
       update(state => ({ ...state, preference }));
+    },
+    destroy: () => {
+      if (mediaQuery && handleChange) {
+        mediaQuery.removeEventListener('change', handleChange);
+        mediaQuery = null;
+        handleChange = null;
+      }
     },
   };
 }

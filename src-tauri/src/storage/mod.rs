@@ -5,7 +5,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -127,7 +128,7 @@ pub fn get_recent_folders() -> Result<Vec<RecentFolder>, StorageError> {
 }
 
 pub fn save_recent_folder(folder: RecentFolder) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
 
     // Remove if already exists
@@ -149,7 +150,7 @@ pub fn get_onboarding_completed() -> Result<bool, StorageError> {
 }
 
 pub fn set_onboarding_completed(completed: bool) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.onboarding_completed = completed;
     save_data(&data)?;
@@ -162,7 +163,7 @@ pub fn get_cli_status_cache() -> Result<Option<CliStatusCache>, StorageError> {
 }
 
 pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -177,7 +178,7 @@ pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
 }
 
 pub fn clear_cli_status_cache() -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.cli_status_cache = None;
     save_data(&data)?;
@@ -190,7 +191,7 @@ pub fn get_default_folder() -> Result<Option<String>, StorageError> {
 }
 
 pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.default_folder = path;
     save_data(&data)?;
@@ -215,7 +216,7 @@ pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
                 };
 
                 // Save the migrated license with checksum
-                let _guard = get_storage_lock().lock().unwrap();
+                let _guard = get_storage_lock().lock();
                 let mut app_data = load_data()?;
                 app_data.license = Some(migrated_license.clone());
                 save_data(&app_data)?;
@@ -240,7 +241,7 @@ pub fn set_license(
     instance_id: Option<String>,
 ) -> Result<(), StorageError> {
     let checksum = compute_license_checksum(&license_key);
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.license = Some(LicenseData {
         license_key,
@@ -254,7 +255,7 @@ pub fn set_license(
 }
 
 pub fn clear_license() -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.license = None;
     save_data(&data)?;
@@ -267,7 +268,7 @@ pub fn get_cli_path() -> Result<Option<String>, StorageError> {
 }
 
 pub fn set_cli_path(path: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock().unwrap();
+    let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     data.cli_path = path;
     save_data(&data)?;
