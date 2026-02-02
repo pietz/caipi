@@ -4,6 +4,7 @@
   import { Folder, Loader2, X } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
   import { app } from '$lib/stores/app.svelte';
+  import { getModifierKey } from '$lib/utils/platform';
 
   interface Props {
     showClose?: boolean;
@@ -168,7 +169,7 @@
           Drop a folder here or click to browse
         </p>
         <p class="text-xs text-muted-foreground/50">
-          <span class="opacity-70">&#8984;O</span> to open folder
+          <span class="opacity-70">{getModifierKey()}+O</span> to open folder
         </p>
       {/if}
     </button>

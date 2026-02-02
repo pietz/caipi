@@ -1,9 +1,147 @@
 use crate::storage;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
+
+// ============================================================================
+// Platform-specific CLI path detection
+// ============================================================================
+
+/// Get common installation paths for Claude CLI on macOS
+#[cfg(target_os = "macos")]
+fn get_common_cli_paths(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local/bin/claude"),
+        home.join(".claude/local/bin/claude"),
+        PathBuf::from("/usr/local/bin/claude"),
+        PathBuf::from("/opt/homebrew/bin/claude"),
+    ]
+}
+
+/// Get common installation paths for Claude CLI on Linux
+#[cfg(target_os = "linux")]
+fn get_common_cli_paths(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local/bin/claude"),
+        home.join(".claude/local/bin/claude"),
+        PathBuf::from("/usr/local/bin/claude"),
+    ]
+}
+
+/// Get common installation paths for Claude CLI on Windows
+#[cfg(target_os = "windows")]
+fn get_common_cli_paths(home: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![
+        home.join(".claude\\local\\claude.exe"),
+        home.join(".local\\bin\\claude.exe"),
+    ];
+
+    // Add %LOCALAPPDATA%\Claude paths
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let local_path = PathBuf::from(local_app_data);
+        paths.push(local_path.join("Claude\\claude.exe"));
+        paths.push(local_path.join("Programs\\Claude\\claude.exe"));
+    }
+
+    // Add %PROGRAMFILES% paths
+    if let Some(program_files) = std::env::var_os("PROGRAMFILES") {
+        paths.push(PathBuf::from(program_files).join("Claude\\claude.exe"));
+    }
+
+    // Add %APPDATA%\npm for global npm installs
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        paths.push(PathBuf::from(app_data).join("npm\\claude.cmd"));
+    }
+
+    paths
+}
+
+// ============================================================================
+// Platform-specific shell-based CLI detection
+// ============================================================================
+
+/// Try to find claude using shell commands on Unix (macOS/Linux)
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn try_shell_based_cli_detection() -> Option<String> {
+    // Determine user's shell
+    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let is_zsh = user_shell.contains("zsh");
+
+    // Try sourcing interactive shell config (where PATH is usually set)
+    let source_cmd = if is_zsh {
+        "source ~/.zshrc 2>/dev/null; which claude"
+    } else {
+        "source ~/.bashrc 2>/dev/null; which claude"
+    };
+
+    if let Some(claude_path) = try_shell_which(&user_shell, &["-c", source_cmd]) {
+        return Some(claude_path);
+    }
+
+    // Try login shell with user's preferred shell
+    if let Some(claude_path) = try_shell_which(&user_shell, &["-l", "-c", "which claude"]) {
+        return Some(claude_path);
+    }
+
+    // Final fallback: try both common shells with login flag
+    for shell in ["/bin/zsh", "/bin/bash"] {
+        if let Some(claude_path) = try_shell_which(shell, &["-l", "-c", "which claude"]) {
+            return Some(claude_path);
+        }
+    }
+
+    None
+}
+
+/// Try to find claude using where command on Windows
+#[cfg(target_os = "windows")]
+fn try_shell_based_cli_detection() -> Option<String> {
+    // On Windows, PATH is global, so we can use 'where' command directly
+    // Try cmd.exe first
+    if let Some(claude_path) = try_shell_which("cmd.exe", &["/c", "where claude"]) {
+        // 'where' may return multiple lines, take the first one
+        return Some(claude_path.lines().next()?.to_string());
+    }
+
+    // Try PowerShell
+    if let Some(claude_path) =
+        try_shell_which("powershell.exe", &["-Command", "Get-Command claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"])
+    {
+        return Some(claude_path);
+    }
+
+    None
+}
+
+// ============================================================================
+// Platform-specific OAuth token detection
+// ============================================================================
+
+/// Check if OAuth token exists in Claude Desktop's config (macOS)
+#[cfg(target_os = "macos")]
+fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
+    home_dir.join("Library/Application Support/Claude/config.json")
+}
+
+/// Check if OAuth token exists in Claude Desktop's config (Windows)
+#[cfg(target_os = "windows")]
+fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
+    // On Windows, use %APPDATA%\Claude\config.json
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        return PathBuf::from(app_data).join("Claude\\config.json");
+    }
+    // Fallback to home directory
+    home_dir.join("AppData\\Roaming\\Claude\\config.json")
+}
+
+/// Check if OAuth token exists in Claude Desktop's config (Linux)
+#[cfg(target_os = "linux")]
+fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
+    home_dir.join(".config/Claude/config.json")
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -53,17 +191,11 @@ fn get_claude_version(claude_path: &str) -> Option<String> {
 pub async fn check_cli_installed_internal() -> CliInstallStatus {
     // Strategy:
     // 1. Check common installation paths directly (fastest, most reliable)
-    // 2. Try user's shell with interactive config sourced (.zshrc/.bashrc)
-    // 3. Fall back to login shell attempts
+    // 2. Try platform-specific shell/command detection
 
     // Check common installation paths first
     if let Some(home) = dirs::home_dir() {
-        let common_paths = [
-            home.join(".local/bin/claude"),
-            home.join(".claude/local/bin/claude"),
-            std::path::PathBuf::from("/usr/local/bin/claude"),
-            std::path::PathBuf::from("/opt/homebrew/bin/claude"),
-        ];
+        let common_paths = get_common_cli_paths(&home);
 
         for path in common_paths {
             if path.is_file() {
@@ -79,46 +211,14 @@ pub async fn check_cli_installed_internal() -> CliInstallStatus {
         }
     }
 
-    // Determine user's shell
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let is_zsh = user_shell.contains("zsh");
-
-    // Try sourcing interactive shell config (where PATH is usually set)
-    let source_cmd = if is_zsh {
-        "source ~/.zshrc 2>/dev/null; which claude"
-    } else {
-        "source ~/.bashrc 2>/dev/null; which claude"
-    };
-
-    if let Some(claude_path) = try_shell_which(&user_shell, &["-c", source_cmd]) {
+    // Try platform-specific shell-based detection
+    if let Some(claude_path) = try_shell_based_cli_detection() {
         let version = get_claude_version(&claude_path);
         return CliInstallStatus {
             installed: true,
             version,
             path: Some(claude_path),
         };
-    }
-
-    // Try login shell with user's preferred shell
-    if let Some(claude_path) = try_shell_which(&user_shell, &["-l", "-c", "which claude"]) {
-        let version = get_claude_version(&claude_path);
-        return CliInstallStatus {
-            installed: true,
-            version,
-            path: Some(claude_path),
-        };
-    }
-
-    // Final fallback: try both common shells with login flag
-    for shell in ["/bin/zsh", "/bin/bash"] {
-        if let Some(claude_path) = try_shell_which(shell, &["-l", "-c", "which claude"]) {
-            let version = get_claude_version(&claude_path);
-            return CliInstallStatus {
-                installed: true,
-                version,
-                path: Some(claude_path),
-            };
-        }
     }
 
     CliInstallStatus {
@@ -134,9 +234,8 @@ pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
 }
 
 /// Check if OAuth token exists in Claude Desktop's config
-fn check_oauth_token(home_dir: &std::path::Path) -> bool {
-    let config_path = home_dir
-        .join("Library/Application Support/Claude/config.json");
+fn check_oauth_token(home_dir: &Path) -> bool {
+    let config_path = get_oauth_config_path(home_dir);
 
     if let Ok(content) = std::fs::read_to_string(&config_path) {
         // Check if oauth:tokenCache field exists and has a value
@@ -146,7 +245,7 @@ fn check_oauth_token(home_dir: &std::path::Path) -> bool {
 }
 
 /// Check legacy credentials file location
-fn check_legacy_credentials(home_dir: &std::path::Path) -> bool {
+fn check_legacy_credentials(home_dir: &Path) -> bool {
     let creds_path = home_dir.join(".claude").join(".credentials.json");
     creds_path.exists()
 }
@@ -332,13 +431,10 @@ mod tests {
     #[test]
     fn test_check_oauth_token_exists() {
         let temp_dir = TempDir::new().unwrap();
-        let config_dir = temp_dir.path().join("Library/Application Support/Claude");
-        std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(
-            config_dir.join("config.json"),
-            r#"{"oauth:tokenCache": "sometoken"}"#,
-        )
-        .unwrap();
+        // Use the platform-specific path function to create the config in the right location
+        let config_path = get_oauth_config_path(temp_dir.path());
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(&config_path, r#"{"oauth:tokenCache": "sometoken"}"#).unwrap();
 
         assert!(check_oauth_token(temp_dir.path()));
     }
@@ -354,9 +450,10 @@ mod tests {
     #[test]
     fn test_check_oauth_token_no_token_field() {
         let temp_dir = TempDir::new().unwrap();
-        let config_dir = temp_dir.path().join("Library/Application Support/Claude");
-        std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(config_dir.join("config.json"), r#"{"darkMode": "light"}"#).unwrap();
+        // Use the platform-specific path function to create the config in the right location
+        let config_path = get_oauth_config_path(temp_dir.path());
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(&config_path, r#"{"darkMode": "light"}"#).unwrap();
 
         assert!(!check_oauth_token(temp_dir.path()));
     }
