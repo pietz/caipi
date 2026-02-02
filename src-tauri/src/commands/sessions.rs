@@ -346,7 +346,18 @@ pub async fn get_session_history(
                                 });
                             }
                         }
-                        _ => {} // Skip thinking blocks and others
+                        "thinking" => {
+                            if let Some(thinking_content) = block.get("thinking").and_then(|v| v.as_str()) {
+                                // Generate a unique ID for the thinking block
+                                let thinking_id = format!("thinking-{}", tools.len());
+                                tools.push(HistoryTool {
+                                    id: thinking_id,
+                                    tool_type: "Thinking".to_string(),
+                                    target: thinking_content.to_string(),
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

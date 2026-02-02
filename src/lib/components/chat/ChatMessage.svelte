@@ -143,4 +143,33 @@
   :global(.message-content a:hover) {
     opacity: 0.8;
   }
+
+  /* Table styles */
+  :global(.message-content table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75em 0;
+    font-size: 0.875em;
+    overflow-x: auto;
+    display: block;
+  }
+
+  :global(.message-content thead) {
+    background: hsl(var(--muted));
+  }
+
+  :global(.message-content th),
+  :global(.message-content td) {
+    padding: 0.5em 0.75em;
+    border: 1px solid hsl(var(--muted-foreground) / 0.3);
+    text-align: left;
+  }
+
+  :global(.message-content th) {
+    font-weight: 600;
+  }
+
+  :global(.message-content tbody tr:nth-child(even)) {
+    background: hsl(var(--muted) / 0.5);
+  }
 </style>
