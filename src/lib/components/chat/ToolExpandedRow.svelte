@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Loader2, X, Ban, AlertCircle, Clock } from 'lucide-svelte';
+  import { Check, Loader2, X, Ban, Clock } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
   import { getToolConfig } from './tool-configs';
 
@@ -29,11 +29,11 @@
     {#if tool.status === 'completed' || tool.status === 'history'}
       <Check size={14} class="text-green-500" />
     {:else if tool.status === 'error'}
-      <AlertCircle size={14} class="text-red-500" />
+      <X size={14} class="text-red-500" />
     {:else if tool.status === 'aborted'}
       <Ban size={14} class="text-muted-foreground" />
     {:else if tool.status === 'denied'}
-      <X size={14} class="text-red-500" />
+      <Ban size={14} class="text-muted-foreground" />
     {:else if tool.status === 'pending'}
       <Clock size={14} class="text-muted-foreground animate-pulse" />
     {:else if tool.status === 'running'}
@@ -53,7 +53,7 @@
         onclick={() => onPermissionResponse(false)}
         title="Deny (Esc)"
       >
-        <X size={14} />
+        <Ban size={14} />
       </button>
     {:else if isAwaitingPermission}
       <Clock size={14} class="text-amber-500 animate-pulse" />

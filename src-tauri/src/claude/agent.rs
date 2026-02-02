@@ -3,6 +3,7 @@ use claude_agent_sdk_rs::{
     ClaudeClient, ClaudeAgentOptions, Message, ContentBlock,
     PermissionMode, SettingSource,
 };
+use std::collections::HashMap;
 use futures::StreamExt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -213,6 +214,13 @@ impl AgentSession {
         // - AskUserQuestion: CLI blocks waiting for terminal input, no programmatic answer mechanism
         // - EnterPlanMode/ExitPlanMode: Plan mode requires interactive CLI approval dialogs
         // See ASK_USER_QUESTION_ISSUE.md for research details
+        //
+        // Extra args:
+        // - replay-user-messages: Enables streaming of Message::User which contains tool_result
+        //   blocks. Without this, we can't detect when tools complete or error.
+        let mut extra_args = HashMap::new();
+        extra_args.insert("replay-user-messages".to_string(), None);
+
         let options = ClaudeAgentOptions {
             cwd: Some(PathBuf::from(&self.folder_path)),
             hooks: Some(hooks),
@@ -227,6 +235,7 @@ impl AgentSession {
             resume: self.resume_session_id.clone(),
             max_thinking_tokens: if extended_thinking { Some(31999) } else { None },
             cli_path: self.cli_path.as_ref().map(PathBuf::from),
+            extra_args,
             ..Default::default()
         };
 
@@ -366,10 +375,27 @@ impl AgentSession {
                                         });
                                     }
                                 }
-                                Message::User(_user_msg) => {
-                                    // Tool results are now handled by the PostToolUse hook
-                                    // which fires immediately when a tool completes, ensuring
-                                    // proper ordering (ToolEnd before subsequent Text events)
+                                Message::User(user_msg) => {
+                                    // Extract tool results from User messages and emit ToolEnd events.
+                                    // The data is nested in extra.message.content due to how the CLI
+                                    // serializes replay messages.
+                                    if let Some(message) = user_msg.extra.get("message") {
+                                        if let Some(content_array) = message.get("content").and_then(|c| c.as_array()) {
+                                            for item in content_array {
+                                                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                                                    if let Some(tool_use_id) = item.get("tool_use_id").and_then(|id| id.as_str()) {
+                                                        let is_error = item.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                                                        let status = if is_error { "error" } else { "completed" };
+
+                                                        let _ = self.app_handle.emit("claude:event", &ChatEvent::ToolEnd {
+                                                            id: tool_use_id.to_string(),
+                                                            status: status.to_string(),
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }

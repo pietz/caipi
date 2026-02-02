@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Check, X } from 'lucide-svelte';
+  import { ChevronDown, Check, Ban } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
   import { getToolConfig } from './tool-configs';
   import ToolStackIcon from './ToolStackIcon.svelte';
@@ -181,7 +181,7 @@
             onclick={() => handlePermissionResponse(firstAwaitingPermission.id, false)}
             title="Deny (Esc)"
           >
-            <X size={14} />
+            <Ban size={14} />
           </button>
         {/if}
 

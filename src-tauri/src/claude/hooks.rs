@@ -6,7 +6,7 @@
 use crate::commands::chat::ChatEvent;
 use claude_agent_sdk_rs::{
     HookCallback, HookContext, HookEvent, HookInput, HookJsonOutput, HookMatcher,
-    PostToolUseHookInput, PreToolUseHookSpecificOutput, SyncHookJsonOutput, HookSpecificOutput,
+    PreToolUseHookSpecificOutput, SyncHookJsonOutput, HookSpecificOutput,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -307,35 +307,6 @@ pub fn build_pre_tool_use_hook(
     })
 }
 
-/// Build the post-tool-use hook callback to emit ToolEnd events
-pub fn build_post_tool_use_hook(app_handle: AppHandle) -> HookCallback {
-    Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
-        let app_handle = app_handle.clone();
-
-        Box::pin(async move {
-            if let HookInput::PostToolUse(PostToolUseHookInput { tool_response, .. }) = &input {
-                // Determine if the tool errored by checking the response
-                let is_error = tool_response.get("is_error")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-
-                let status = if is_error { "error" } else { "completed" };
-
-                // Emit ToolEnd event immediately
-                if let Some(id) = tool_use_id {
-                    let _ = app_handle.emit("claude:event", &ChatEvent::ToolEnd {
-                        id,
-                        status: status.to_string(),
-                    });
-                }
-            }
-
-            // Don't modify anything, just return default
-            HookJsonOutput::Sync(SyncHookJsonOutput::default())
-        })
-    })
-}
-
 /// Build the complete hooks map for an agent session
 pub fn build_hooks(
     permission_channels: PermissionChannels,
@@ -347,26 +318,18 @@ pub fn build_hooks(
 ) -> HashMap<HookEvent, Vec<HookMatcher>> {
     let pre_tool_use_hook = build_pre_tool_use_hook(
         permission_channels,
-        app_handle.clone(),
+        app_handle,
         session_id,
         permission_mode_arc,
         abort_flag,
         abort_notify,
     );
 
-    let post_tool_use_hook = build_post_tool_use_hook(app_handle);
-
     let mut hooks: HashMap<HookEvent, Vec<HookMatcher>> = HashMap::new();
     hooks.insert(
         HookEvent::PreToolUse,
         vec![HookMatcher::builder()
             .hooks(vec![pre_tool_use_hook])
-            .build()]
-    );
-    hooks.insert(
-        HookEvent::PostToolUse,
-        vec![HookMatcher::builder()
-            .hooks(vec![post_tool_use_hook])
             .build()]
     );
 

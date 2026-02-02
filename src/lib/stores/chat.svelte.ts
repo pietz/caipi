@@ -145,7 +145,9 @@ class ChatState {
 
   updateToolStatus(id: string, status: ToolStatus, extras?: { permissionRequestId?: string | null }) {
     const tool = this.tools.get(id);
-    if (!tool) return;
+    if (!tool) {
+      return;
+    }
 
     const newTools = new Map(this.tools);
     const updatedTool = { ...tool, status };
