@@ -25,7 +25,7 @@
     <span class="text-xs text-muted-foreground/70 truncate min-w-0 flex-1">{tool.target}</span>
   </div>
 
-  <div class="flex items-center gap-1.5 h-6">
+  <div class="flex items-center gap-1.5 h-6 ml-3">
     {#if tool.status === 'completed' || tool.status === 'history'}
       <Check size={14} class="text-green-500" />
     {:else if tool.status === 'error'}

@@ -89,11 +89,6 @@ export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions
   }
 }
 
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + '...';
-}
-
 function handleTextEvent(event: Extract<ChatEvent, { type: 'Text' }>) {
   lineBuffer += event.content;
 
@@ -215,7 +210,7 @@ function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingSta
   chat.addTool({
     id: event.thinkingId,
     toolType: 'Thinking',
-    target: truncate(event.content, 50),  // Preview of thinking
+    target: event.content,  // Full content, CSS handles truncation
     status: 'completed',  // Thinking arrives complete
     input: { content: event.content },  // Store full content
     timestamp: Math.floor(Date.now() / 1000),

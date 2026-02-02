@@ -810,7 +810,7 @@ describe('handleClaudeEvent', () => {
       );
     });
 
-    it('should truncate thinking preview to 50 chars', () => {
+    it('should pass full thinking content (CSS handles truncation)', () => {
       const longText = 'a'.repeat(60);
       const thinkingEvent: ChatEvent = {
         type: 'ThinkingStart',
@@ -822,7 +822,7 @@ describe('handleClaudeEvent', () => {
 
       expect(chat.addTool).toHaveBeenCalledWith(
         expect.objectContaining({
-          target: `${'a'.repeat(50)}...`,
+          target: longText,  // Full content passed through, CSS handles truncation
         })
       );
     });

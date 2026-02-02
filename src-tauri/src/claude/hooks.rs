@@ -470,22 +470,22 @@ mod tests {
         let result = extract_tool_target("Bash", &short_cmd);
         assert_eq!(result, "ls -la");
 
-        // Test truncation for description (should truncate at 60 chars)
-        let long_desc = json!({
+        // Long descriptions are passed through (CSS handles truncation)
+        let long_desc = "This is a very long description that would have been truncated before";
+        let long_desc_input = json!({
             "command": "some command",
-            "description": "This is a very long description that should be truncated because it exceeds the sixty character limit"
+            "description": long_desc
         });
-        let result = extract_tool_target("Bash", &long_desc);
-        assert!(result.len() <= 63); // 60 + "..."
-        assert!(result.ends_with("..."));
+        let result = extract_tool_target("Bash", &long_desc_input);
+        assert_eq!(result, long_desc);
 
-        // Test truncation for command fallback (should truncate at 50 chars)
-        let long_cmd = json!({
-            "command": "this is a very long command that should be truncated because it exceeds the limit"
+        // Long commands are passed through (CSS handles truncation)
+        let long_cmd = "this is a very long command that would have been truncated before";
+        let long_cmd_input = json!({
+            "command": long_cmd
         });
-        let result = extract_tool_target("Bash", &long_cmd);
-        assert!(result.len() <= 53); // 50 + "..."
-        assert!(result.ends_with("..."));
+        let result = extract_tool_target("Bash", &long_cmd_input);
+        assert_eq!(result, long_cmd);
     }
 
     #[test]
