@@ -59,7 +59,17 @@ jobs:
   build:
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            os: macos
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            os: windows
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,7 +83,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -90,6 +100,7 @@ jobs:
         run: npm run test:all
 
       - name: Import Apple certificate
+        if: matrix.os == 'macos'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -106,8 +117,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Build Tauri app (signed + notarized)
-        run: npm run tauri build
+      - name: Build Tauri app (macOS - signed + notarized)
+        if: matrix.os == 'macos'
+        run: npm run tauri build -- --target ${{ matrix.target }}
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -116,14 +128,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      - name: Build Tauri app (Windows)
+        if: matrix.os == 'windows'
+        run: npm run tauri build -- --target ${{ matrix.target }}
+
       - name: Rename artifacts
         run: node scripts/release-rename.js
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
 
       - name: Generate latest.json
+        if: matrix.os == 'macos'
         run: |
           VERSION="${{ needs.check.outputs.version }}"
-          SIGNATURE=$(cat src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig)
-          cat > src-tauri/target/release/bundle/latest.json << EOF
+          SIGNATURE=$(cat src-tauri/target/${{ matrix.target }}/release/bundle/macos/caipi.app.tar.gz.sig)
+          cat > src-tauri/target/${{ matrix.target }}/release/bundle/latest.json << EOF
           {
             "version": "$VERSION",
             "notes": "",
@@ -132,26 +151,40 @@ jobs:
               "darwin-aarch64": {
                 "signature": "$SIGNATURE",
                 "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi.app.tar.gz"
+              },
+              "windows-x86_64": {
+                "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi_x64.exe"
               }
             }
           }
           EOF
-          cat src-tauri/target/release/bundle/latest.json
+          cat src-tauri/target/${{ matrix.target }}/release/bundle/latest.json
 
-      - name: Upload build artifacts
+      - name: Upload macOS artifacts
+        if: matrix.os == 'macos'
         uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
+          name: release-artifacts-macos
           path: |
-            src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg
-            src-tauri/target/release/bundle/macos/caipi.app.tar.gz
-            src-tauri/target/release/bundle/macos/caipi.app.tar.gz.sig
-            src-tauri/target/release/bundle/latest.json
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/caipi_aarch64.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/caipi.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/caipi.app.tar.gz.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/latest.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Windows artifacts
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-windows
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/caipi_x64.exe
           retention-days: 30
           if-no-files-found: error
 
       - name: Cleanup keychain
-        if: always()
+        if: always() && matrix.os == 'macos'
         run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
 
   publish:
@@ -159,11 +192,17 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-artifacts
-          path: artifacts
+          name: release-artifacts-macos
+          path: artifacts-macos
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-windows
+          path: artifacts-windows
 
       - name: Create GitHub release
         env:
@@ -172,10 +211,11 @@ jobs:
           VERSION="${{ needs.check.outputs.version }}"
 
           gh release create "v$VERSION" \
-            artifacts/dmg/caipi_aarch64.dmg \
-            artifacts/macos/caipi.app.tar.gz \
-            artifacts/macos/caipi.app.tar.gz.sig \
-            artifacts/latest.json \
+            artifacts-macos/dmg/caipi_aarch64.dmg \
+            artifacts-macos/macos/caipi.app.tar.gz \
+            artifacts-macos/macos/caipi.app.tar.gz.sig \
+            artifacts-macos/latest.json \
+            artifacts-windows/nsis/caipi_x64.exe \
             --repo pietz/caipi.ai \
             --title "v$VERSION" \
             --notes "Release v$VERSION"

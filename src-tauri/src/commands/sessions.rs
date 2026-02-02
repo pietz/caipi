@@ -33,9 +33,33 @@ pub struct ProjectSessions {
     pub latest_modified: String,
 }
 
-/// Get folder name from path
+/// Get folder name from path (handles both Unix and Windows paths)
 fn get_folder_name(path: &str) -> String {
-    path.split('/').last().unwrap_or(path).to_string()
+    // Normalize Windows backslashes to forward slashes for cross-platform handling
+    let normalized = path.replace('\\', "/");
+    normalized
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// Encode a folder path for use as a directory name.
+/// Handles both Unix (/Users/foo) and Windows (C:\Users\foo) paths.
+fn encode_folder_path(path: &str) -> String {
+    // Normalize path separators to forward slashes
+    let normalized = path.replace('\\', "/");
+
+    // Remove drive letter on Windows (C: -> empty)
+    let without_drive = if normalized.len() >= 2 && normalized.chars().nth(1) == Some(':') {
+        &normalized[2..]
+    } else {
+        &normalized
+    };
+
+    // Replace slashes with dashes (matching Claude's format)
+    without_drive.replace('/', "-")
 }
 
 /// Verify that a project directory actually corresponds to the given folder path
@@ -208,7 +232,7 @@ pub async fn get_project_sessions(folder_path: String) -> Result<Vec<SessionInfo
     let projects_dir = home_dir.join(".claude").join("projects");
 
     // Encode the folder path to match Claude's format
-    let encoded = folder_path.replace('/', "-");
+    let encoded = encode_folder_path(&folder_path);
     let project_dir = projects_dir.join(&encoded);
 
     if !project_dir.exists() {
@@ -258,7 +282,7 @@ pub async fn get_session_history(
     let projects_dir = home_dir.join(".claude").join("projects");
 
     // Encode the folder path to match Claude's format
-    let encoded = folder_path.replace('/', "-");
+    let encoded = encode_folder_path(&folder_path);
     let project_dir = projects_dir.join(&encoded);
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
 
@@ -397,10 +421,30 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_get_folder_name() {
+    fn test_get_folder_name_unix() {
         assert_eq!(get_folder_name("/Users/pietz/Desktop"), "Desktop");
         assert_eq!(get_folder_name("/Users/pietz/Private/caipi"), "caipi");
         assert_eq!(get_folder_name("/Users/me/my-project"), "my-project");
+    }
+
+    #[test]
+    fn test_get_folder_name_windows() {
+        assert_eq!(get_folder_name(r"C:\Users\pietz\Desktop"), "Desktop");
+        assert_eq!(get_folder_name(r"D:\Projects\my-app"), "my-app");
+        assert_eq!(get_folder_name(r"C:\Users\me\Documents\code"), "code");
+    }
+
+    #[test]
+    fn test_encode_folder_path_unix() {
+        assert_eq!(encode_folder_path("/Users/foo/bar"), "-Users-foo-bar");
+        assert_eq!(encode_folder_path("/home/user/projects"), "-home-user-projects");
+    }
+
+    #[test]
+    fn test_encode_folder_path_windows() {
+        assert_eq!(encode_folder_path(r"C:\Users\foo\bar"), "-Users-foo-bar");
+        assert_eq!(encode_folder_path(r"D:\Projects"), "-Projects");
+        assert_eq!(encode_folder_path(r"C:\Users\me\Documents"), "-Users-me-Documents");
     }
 
     #[test]

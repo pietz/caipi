@@ -7,6 +7,7 @@
   import { Button } from '$lib/components/ui';
   import { theme } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
+  import { isWindows } from '$lib/utils/platform';
 
   let cliStatus = $state<CliInstallStatus | null>(null);
   let authStatus = $state<CliAuthStatus | null>(null);
@@ -18,7 +19,10 @@
 
   const currentTheme = $derived(theme.resolved);
 
-  const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
+  // Platform-specific install commands
+  const macLinuxCommand = 'curl -fsSL https://claude.ai/install.sh | bash';
+  const windowsCommand = 'irm https://claude.ai/install.ps1 | iex';
+  const installCommand = $derived(isWindows() ? windowsCommand : macLinuxCommand);
   let copied = $state(false);
 
   function toggleTheme() {
@@ -66,7 +70,9 @@
           return;
         }
         selectedFolder = selected;
-        folderName = selected.split('/').pop() || selected;
+        // Handle both Unix and Windows paths
+        const normalized = selected.replace(/\\/g, '/');
+        folderName = normalized.split('/').pop() || selected;
         error = null;
       }
     } catch (e) {

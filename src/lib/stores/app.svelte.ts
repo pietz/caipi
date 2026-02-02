@@ -74,7 +74,10 @@ class AppState {
 
   // Derived
   get folderName(): string {
-    return this.folder?.split('/').pop() ?? '';
+    if (!this.folder) return '';
+    // Handle both Unix and Windows paths
+    const normalized = this.folder.replace(/\\/g, '/');
+    return normalized.split('/').pop() ?? '';
   }
 
   get backendConfig() {
