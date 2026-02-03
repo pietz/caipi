@@ -12,6 +12,11 @@ on:
           - macos
           - windows
         default: both
+      skip_tests:
+        description: "Skip tests"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-macos:
@@ -44,6 +49,7 @@ jobs:
         run: npx svelte-kit sync
 
       - name: Run tests
+        if: inputs.skip_tests == false
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)
@@ -92,6 +98,7 @@ jobs:
         run: npx svelte-kit sync
 
       - name: Run tests
+        if: inputs.skip_tests == false
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)

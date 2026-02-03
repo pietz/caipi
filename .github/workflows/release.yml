@@ -5,6 +5,13 @@ on:
     branches: [main]
     paths:
       - "package.json"
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip tests"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -90,6 +97,7 @@ jobs:
         run: npx svelte-kit sync
 
       - name: Run tests
+        if: inputs.skip_tests != true
         run: npm run test:all
 
       - name: Import Apple certificate
