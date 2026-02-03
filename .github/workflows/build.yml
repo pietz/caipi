@@ -14,19 +14,9 @@ on:
         default: both
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-14
-            target: aarch64-apple-darwin
-            os: macos
-          - platform: windows-2022
-            target: x86_64-pc-windows-msvc
-            os: windows
-    runs-on: ${{ matrix.platform }}
-    if: inputs.platform == 'both' || inputs.platform == matrix.os
+  build-macos:
+    if: inputs.platform == 'both' || inputs.platform == 'macos'
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,7 +30,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -57,27 +47,65 @@ jobs:
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)
-        run: npm run tauri build -- --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: npm run tauri build -- --target aarch64-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Rename artifacts
         run: node scripts/release-rename.js
         env:
-          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_TARGET: aarch64-apple-darwin
 
       - name: Upload macOS artifact
-        if: matrix.os == 'macos'
         uses: actions/upload-artifact@v4
         with:
           name: build-macos
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/caipi_aarch64.dmg
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/caipi_aarch64.dmg
           retention-days: 7
           if-no-files-found: error
 
+  build-windows:
+    if: inputs.platform == 'both' || inputs.platform == 'windows'
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync SvelteKit
+        run: npx svelte-kit sync
+
+      - name: Run tests
+        run: npm run test:all
+
+      - name: Build Tauri app (unsigned)
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Rename artifacts
+        run: node scripts/release-rename.js
+        env:
+          BUILD_TARGET: x86_64-pc-windows-msvc
+
       - name: Upload Windows artifact
-        if: matrix.os == 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: build-windows
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/caipi_x64.exe
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/caipi_x64.exe
           retention-days: 7
           if-no-files-found: error
