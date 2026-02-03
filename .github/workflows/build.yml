@@ -95,7 +95,7 @@ jobs:
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)
-        run: npm run tauri build -- --target x86_64-pc-windows-msvc --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
 
       - name: Rename artifacts
         run: node scripts/release-rename.js
