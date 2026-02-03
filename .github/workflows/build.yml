@@ -2,16 +2,31 @@ name: Build
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "src/**"
-      - "src-tauri/**"
-      - "package.json"
-      - "package-lock.json"
+    inputs:
+      platform:
+        description: "Platform to build"
+        required: true
+        type: choice
+        options:
+          - both
+          - macos
+          - windows
+        default: both
 
 jobs:
   build:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            os: macos
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+            os: windows
+    runs-on: ${{ matrix.platform }}
+    if: inputs.platform == 'both' || inputs.platform == matrix.os
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +40,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -42,15 +57,27 @@ jobs:
         run: npm run test:all
 
       - name: Build Tauri app (unsigned)
-        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: npm run tauri build -- --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Rename artifacts
         run: node scripts/release-rename.js
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
 
-      - name: Upload DMG
+      - name: Upload macOS artifact
+        if: matrix.os == 'macos'
         uses: actions/upload-artifact@v4
         with:
-          name: caipi-unsigned-dmg
-          path: src-tauri/target/release/bundle/dmg/caipi_aarch64.dmg
+          name: build-macos
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/caipi_aarch64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Windows artifact
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-windows
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/caipi_x64.exe
           retention-days: 7
           if-no-files-found: error

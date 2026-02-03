@@ -2,7 +2,7 @@
 
 ## Overview
 
-Caipi is a macOS desktop app written in Tauri 2, providing a chat UI for Claude Code. Svelte 5 frontend, Rust backend.
+Caipi is a macOS + Windows desktop app written in Tauri 2, providing a chat UI for Claude Code. Svelte 5 frontend, Rust backend.
 
 ## Repositories
 
@@ -21,7 +21,24 @@ Caipi is a macOS desktop app written in Tauri 2, providing a chat UI for Claude 
 npm run tauri dev      # Run app in dev mode
 npm run check          # Type check frontend
 npm run test:all       # Run all tests
+
+# Test builds (manual, never publishes)
+gh workflow run Build -f platform=windows  # Windows only
+gh workflow run Build -f platform=macos    # macOS only
+gh workflow run Build -f platform=both     # Both platforms
 ```
+
+## GitHub Workflows
+
+**Build** (manual only)
+- Triggers: `gh workflow run Build -f platform=<macos|windows|both>`
+- Builds unsigned artifacts, never publishes
+- Use for: testing builds before release
+
+**Release** (automatic)
+- Triggers: push to main with version change in package.json
+- Builds macOS (signed + notarized) + Windows
+- Publishes to `pietz/caipi.ai` repo
 
 ## Release Process
 
