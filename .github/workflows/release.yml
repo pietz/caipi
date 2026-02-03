@@ -131,6 +131,9 @@ jobs:
       - name: Build Tauri app (Windows)
         if: matrix.os == 'windows'
         run: npm run tauri build -- --target ${{ matrix.target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Rename artifacts
         run: node scripts/release-rename.js
