@@ -218,7 +218,7 @@ jobs:
             artifacts-macos/macos/caipi.app.tar.gz \
             artifacts-macos/macos/caipi.app.tar.gz.sig \
             artifacts-macos/latest.json \
-            artifacts-windows/nsis/caipi_x64.exe \
+            artifacts-windows/caipi_x64.exe \
             --repo pietz/caipi.ai \
             --title "v$VERSION" \
             --notes "Release v$VERSION"
