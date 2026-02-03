@@ -3,6 +3,8 @@
   "app": {
     "windows": [
       {
+        "title": "Caipi",
+        "hiddenTitle": false,
         "titleBarStyle": "Visible",
         "decorations": true
       }

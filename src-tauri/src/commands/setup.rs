@@ -4,7 +4,61 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 const CLI_CACHE_TTL_SECONDS: u64 = 604800; // 7 days
+
+// ============================================================================
+// Platform-specific command creation (hidden window on Windows)
+// ============================================================================
+
+/// Create a command that won't spawn a visible console window on Windows
+#[cfg(target_os = "windows")]
+fn create_hidden_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// Create a command (passthrough on non-Windows platforms)
+#[cfg(not(target_os = "windows"))]
+fn create_hidden_command(program: &str) -> Command {
+    Command::new(program)
+}
+
+// ============================================================================
+// Windows CLI path normalization
+// ============================================================================
+
+/// Normalize Windows CLI path to prefer .cmd extension for npm-installed binaries.
+/// This fixes error 193 when the shell script (without extension) is found before claude.cmd.
+#[cfg(target_os = "windows")]
+fn normalize_windows_cli_path(path: &str) -> String {
+    let path_obj = Path::new(path);
+    // If already .cmd or .exe, return as-is
+    if let Some(ext) = path_obj.extension() {
+        let ext_lower = ext.to_string_lossy().to_lowercase();
+        if ext_lower == "cmd" || ext_lower == "exe" {
+            return path.to_string();
+        }
+    }
+    // For npm paths, try .cmd version
+    let cmd_path = format!("{}.cmd", path);
+    if Path::new(&cmd_path).is_file() {
+        return cmd_path;
+    }
+    path.to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
+fn normalize_windows_cli_path(path: &str) -> String {
+    path.to_string()
+}
 
 // ============================================================================
 // Platform-specific CLI path detection
@@ -103,14 +157,17 @@ fn try_shell_based_cli_detection() -> Option<String> {
     // Try cmd.exe first
     if let Some(claude_path) = try_shell_which("cmd.exe", &["/c", "where claude"]) {
         // 'where' may return multiple lines, take the first one
-        return Some(claude_path.lines().next()?.to_string());
+        let first_path = claude_path.lines().next()?.to_string();
+        // Normalize to .cmd if it exists (fixes error 193 with npm installs)
+        return Some(normalize_windows_cli_path(&first_path));
     }
 
     // Try PowerShell
     if let Some(claude_path) =
         try_shell_which("powershell.exe", &["-Command", "Get-Command claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"])
     {
-        return Some(claude_path);
+        // Normalize to .cmd if it exists (fixes error 193 with npm installs)
+        return Some(normalize_windows_cli_path(&claude_path));
     }
 
     None
@@ -164,7 +221,7 @@ pub struct CliAuthStatus {
 
 /// Try to find claude by running a command in a shell
 fn try_shell_which(shell: &str, args: &[&str]) -> Option<String> {
-    Command::new(shell)
+    create_hidden_command(shell)
         .args(args)
         .output()
         .ok()
@@ -175,7 +232,7 @@ fn try_shell_which(shell: &str, args: &[&str]) -> Option<String> {
 
 /// Get claude version by running the binary directly
 fn get_claude_version(claude_path: &str) -> Option<String> {
-    Command::new(claude_path)
+    create_hidden_command(claude_path)
         .arg("--version")
         .output()
         .ok()
@@ -251,7 +308,7 @@ fn check_legacy_credentials(home_dir: &Path) -> bool {
 fn test_claude_auth(claude_path: &str) -> bool {
     // Run claude with a simple "hi" prompt using --print mode and haiku (fastest, no thinking)
     // If authenticated, it will respond. If not, it will fail.
-    match Command::new(claude_path)
+    match create_hidden_command(claude_path)
         .args(["-p", "hi", "--model", "haiku"])
         .output()
     {

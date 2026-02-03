@@ -69,27 +69,31 @@
 {:else}
   <!-- Windows/Linux: Toolbar below native title bar -->
   <div
-    class="h-10 flex items-center justify-between px-3 border-b border-border shrink-0 bg-background"
+    class="h-9 flex items-center justify-between px-4 border-b border-border shrink-0 relative"
   >
     <!-- Left - Sidebar Toggle + Home -->
     <div class="flex items-center gap-1">
       <Button
         variant="ghost"
         size="icon"
-        class="h-7 w-7 text-muted-foreground"
+        class="h-6 w-6 text-muted-foreground"
         onclick={() => app.toggleLeftSidebar()}
       >
-        <PanelLeft size={16} />
+        <PanelLeft size={14} />
       </Button>
       <Button
         variant="ghost"
         size="icon"
-        class="h-7 w-7 text-muted-foreground"
+        class="h-6 w-6 text-muted-foreground"
         onclick={onBack}
       >
-        <Menu size={16} />
+        <Menu size={14} />
       </Button>
-      <span class="ml-2 text-sm font-medium">{title}</span>
+    </div>
+
+    <!-- Center - Project Name (absolutely centered) -->
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <span class="text-sm font-medium">{title}</span>
     </div>
 
     <!-- Right - Controls -->
@@ -97,18 +101,18 @@
       <Button
         variant="ghost"
         size="icon"
-        class="h-7 w-7 text-muted-foreground"
+        class="h-6 w-6 text-muted-foreground"
         onclick={() => app.openSettings()}
       >
-        <Settings size={16} />
+        <Settings size={14} />
       </Button>
       <Button
         variant="ghost"
         size="icon"
-        class="h-7 w-7 text-muted-foreground"
+        class="h-6 w-6 text-muted-foreground"
         onclick={() => app.toggleRightSidebar()}
       >
-        <PanelRight size={16} />
+        <PanelRight size={14} />
       </Button>
     </div>
   </div>
