@@ -129,12 +129,9 @@ fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
 /// Check if OAuth token exists in Claude Desktop's config (Windows)
 #[cfg(target_os = "windows")]
 fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
-    // On Windows, use %APPDATA%\Claude\config.json
-    if let Some(app_data) = std::env::var_os("APPDATA") {
-        return PathBuf::from(app_data).join("Claude\\config.json");
-    }
-    // Fallback to home directory
-    home_dir.join("AppData\\Roaming\\Claude\\config.json")
+    // Always derive from home_dir for testability
+    // This produces the same path as %APPDATA%\Claude\config.json when home_dir is the user's home
+    home_dir.join("AppData").join("Roaming").join("Claude").join("config.json")
 }
 
 /// Check if OAuth token exists in Claude Desktop's config (Linux)
