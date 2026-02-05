@@ -381,12 +381,33 @@ pub struct HookCallbackInput {
     pub tool_input: Option<Value>,
 }
 
-/// Acknowledgment of a control response we sent
+/// Acknowledgment of a control response we sent.
+///
+/// The CLI has emitted this in two formats across versions:
+/// 1. Flat: `{ "subtype": "...", "request_id": "..." }`
+/// 2. Nested: `{ "response": { "subtype": "...", "request_id": "...", ... } }`
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlResponseAck {
+#[serde(untagged)]
+pub enum ControlResponseAck {
+    /// Legacy flat acknowledgment payload
+    Flat {
+        /// Subtype (usually "success")
+        subtype: String,
+        /// Request ID this acknowledges
+        request_id: String,
+    },
+    /// Current nested acknowledgment payload
+    Nested {
+        /// Nested response object
+        response: ControlResponseAckPayload,
+    },
+}
+
+/// Nested control response acknowledgment payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlResponseAckPayload {
     /// Subtype (usually "success")
     pub subtype: String,
-
     /// Request ID this acknowledges
     pub request_id: String,
 }
@@ -863,6 +884,47 @@ mod tests {
             assert_eq!(result.session_id, Some("session123".to_string()));
         } else {
             panic!("Expected Result event");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_control_response_ack_flat() {
+        let json = r#"{
+            "type": "control_response",
+            "subtype": "success",
+            "request_id": "req_123"
+        }"#;
+
+        let event: CliEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CliEvent::ControlResponse(ControlResponseAck::Flat { subtype, request_id }) => {
+                assert_eq!(subtype, "success");
+                assert_eq!(request_id, "req_123");
+            }
+            _ => panic!("Expected flat ControlResponse ack"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_control_response_ack_nested() {
+        let json = r#"{
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": "req_456",
+                "response": {
+                    "commands": []
+                }
+            }
+        }"#;
+
+        let event: CliEvent = serde_json::from_str(json).unwrap();
+        match event {
+            CliEvent::ControlResponse(ControlResponseAck::Nested { response }) => {
+                assert_eq!(response.subtype, "success");
+                assert_eq!(response.request_id, "req_456");
+            }
+            _ => panic!("Expected nested ControlResponse ack"),
         }
     }
 
