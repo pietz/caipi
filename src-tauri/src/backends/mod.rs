@@ -9,4 +9,4 @@ mod types;
 pub mod claude;
 
 pub use session::BackendSession;
-pub use types::{BackendError, BackendRegistry, SessionConfig};
+pub use types::{BackendError, BackendKind, BackendRegistry, SessionConfig};

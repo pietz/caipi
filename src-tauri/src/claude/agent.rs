@@ -92,7 +92,7 @@ fn string_to_permission_mode(mode: &str) -> PermissionMode {
 
 fn string_to_model_id(model: &str) -> &'static str {
     match model {
-        "opus" => "claude-opus-4-5",
+        "opus" => "claude-opus-4-6",
         "sonnet" => "claude-sonnet-4-5",
         "haiku" => "claude-haiku-4-5",
         _ => "claude-sonnet-4-5",

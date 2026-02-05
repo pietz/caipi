@@ -420,11 +420,11 @@ describe('AppState Store', () => {
 
       app.setThinkingLevel('off');
       expect(app.thinkingLevel).toBe('off');
-      expect(mockLocalStorage['caipi:thinking:claude']).toBe('off');
+      expect(mockLocalStorage['caipi:thinking:claudecli']).toBe('off');
 
       app.setThinkingLevel('on');
       expect(app.thinkingLevel).toBe('on');
-      expect(mockLocalStorage['caipi:thinking:claude']).toBe('on');
+      expect(mockLocalStorage['caipi:thinking:claudecli']).toBe('on');
     });
   });
 

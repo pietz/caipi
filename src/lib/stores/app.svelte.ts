@@ -55,13 +55,13 @@ class AppState {
   rightSidebar = $state(false);
   settingsOpen = $state(false);
 
-  // Backend (fixed to 'claude' for now)
-  backend = $state<Backend>('claude');
+  // Backend default
+  backend = $state<Backend>('claudecli');
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
   model = $state<Model>(getPersistedModel());
-  thinkingLevel = $state<string>(getPersistedThinkingLevel('claude'));
+  thinkingLevel = $state<string>(getPersistedThinkingLevel('claudecli'));
 
   // Auth info
   authType = $state<string | null>(null);

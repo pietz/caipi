@@ -25,7 +25,7 @@
   };
 
   const modelConfig: Record<Model, { label: string; size: 'large' | 'medium' | 'small' }> = {
-    opus: { label: 'Opus 4.5', size: 'large' },
+    opus: { label: 'Opus 4.6', size: 'large' },
     sonnet: { label: 'Sonnet 4.5', size: 'medium' },
     haiku: { label: 'Haiku 4.5', size: 'small' },
   };

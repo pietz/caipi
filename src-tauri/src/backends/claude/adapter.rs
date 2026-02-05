@@ -46,7 +46,7 @@ impl Backend for ClaudeBackend {
             available_models: vec![
                 ModelInfo {
                     id: "opus".to_string(),
-                    name: "Claude Opus 4.5".to_string(),
+                    name: "Claude Opus 4.6".to_string(),
                     supports_thinking: true,
                 },
                 ModelInfo {

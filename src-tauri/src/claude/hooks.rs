@@ -24,6 +24,71 @@ use super::tool_utils::extract_tool_target;
 pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
 
 // ============================================================================
+// Permission Decision
+// ============================================================================
+
+/// Result of evaluating whether a tool should be allowed to run
+#[derive(Debug, Clone, PartialEq)]
+pub enum PermissionDecision {
+    /// Tool is allowed to run, with the given reason
+    Allow(String),
+    /// Tool is denied, with the given reason (for future use by external callers)
+    #[allow(dead_code)]
+    Deny(String),
+    /// Need to prompt the user for permission
+    PromptUser,
+}
+
+/// Determine whether a tool should be allowed based on mode, settings, and tool type.
+///
+/// This is the core permission logic extracted for reuse. It checks:
+/// 0. Interactive tools -> Deny (require TTY, can't be supported)
+/// 1. Bypass mode -> Allow all tools
+/// 2. Accept edits mode -> Allow file operations (not Bash)
+/// 3. User settings -> Check if tool is explicitly allowed
+/// 4. Read-only tools -> Allow without prompting
+/// 5. Protected tools -> Require user prompt
+pub fn determine_permission(
+    permission_mode: &str,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    user_settings: Option<&ClaudeSettings>,
+) -> PermissionDecision {
+    // 0. Interactive tools are never allowed - they require TTY input
+    // that we cannot provide when wrapping the CLI programmatically
+    if is_interactive_tool(tool_name) {
+        return PermissionDecision::Deny(
+            "Interactive tools requiring TTY input are not supported".to_string()
+        );
+    }
+
+    // 1. Check bypass mode - allows everything
+    if permission_mode == "bypassPermissions" {
+        return PermissionDecision::Allow("Bypass mode - all tools allowed".to_string());
+    }
+
+    // 2. Check accept edits mode - allows file operations but not Bash
+    if permission_mode == "acceptEdits" && tool_name != "Bash" {
+        return PermissionDecision::Allow("AcceptEdits mode - file operations allowed".to_string());
+    }
+
+    // 3. Check user settings (~/.claude/settings.json)
+    if let Some(settings) = user_settings {
+        if settings::is_tool_allowed(settings, tool_name, tool_input) {
+            return PermissionDecision::Allow("Allowed by user settings".to_string());
+        }
+    }
+
+    // 4. Check if this is a read-only tool that doesn't need permission
+    if !requires_permission(tool_name) {
+        return PermissionDecision::Allow("Read-only operation".to_string());
+    }
+
+    // 5. Protected tools require user prompt
+    PermissionDecision::PromptUser
+}
+
+// ============================================================================
 // Hook Response Builders
 // ============================================================================
 
@@ -78,20 +143,16 @@ pub fn extract_tool_info(input: &HookInput) -> Option<(String, serde_json::Value
     }
 }
 
-/// Check if the permission mode allows the tool without prompting
-pub fn check_mode_decision(mode: &str, tool_name: &str) -> Option<HookJsonOutput> {
-    match mode {
-        "bypassPermissions" => Some(allow_response("Bypass mode - all tools allowed")),
-        "acceptEdits" if tool_name != "Bash" => {
-            Some(allow_response("AcceptEdits mode - file operations allowed"))
-        }
-        _ => None,
-    }
-}
-
 /// Check if the tool requires permission prompting
 pub fn requires_permission(tool_name: &str) -> bool {
     matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit" | "Skill")
+}
+
+/// Check if the tool is an interactive tool that requires TTY input.
+/// These tools cannot be supported when wrapping the CLI programmatically
+/// because they block waiting for terminal input that we cannot provide.
+pub fn is_interactive_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "AskUserQuestion" | "EnterPlanMode" | "ExitPlanMode")
 }
 
 // ============================================================================
@@ -256,43 +317,40 @@ pub fn build_pre_tool_use_hook(
                 input: input_for_frontend,
             });
 
-            // 4. Check permission mode for auto-decisions
+            // 4. Determine permission using the reusable function
             let current_mode = permission_mode_arc.read().await.clone();
-            if let Some(decision) = check_mode_decision(&current_mode, &tool_name) {
-                // Emit status update: running (auto-approved)
-                let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_id,
-                    status: "running".to_string(),
-                    permission_request_id: None,
-                });
-                return decision;
-            }
+            let decision = determine_permission(
+                &current_mode,
+                &tool_name,
+                &tool_input,
+                user_settings.as_ref(),
+            );
 
-            // 5. Check if allowed by user settings (~/.claude/settings.json)
-            if let Some(ref settings) = user_settings {
-                if settings::is_tool_allowed(settings, &tool_name, &tool_input) {
-                    // Emit status update: running (allowed by user settings)
+            match decision {
+                PermissionDecision::Allow(reason) => {
+                    // Emit status update: running (auto-approved)
                     let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_id,
                         status: "running".to_string(),
                         permission_request_id: None,
                     });
-                    return allow_response("Allowed by user settings");
+                    return allow_response(&reason);
+                }
+                PermissionDecision::Deny(reason) => {
+                    // Emit status update: denied
+                    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                        tool_use_id: tool_id,
+                        status: "denied".to_string(),
+                        permission_request_id: None,
+                    });
+                    return deny_response(&reason);
+                }
+                PermissionDecision::PromptUser => {
+                    // Continue to prompt user below
                 }
             }
 
-            // 6. Check if this tool requires permission prompting
-            if !requires_permission(&tool_name) {
-                // Emit status update: running (no permission needed)
-                let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_id,
-                    status: "running".to_string(),
-                    permission_request_id: None,
-                });
-                return allow_response("Read-only operation");
-            }
-
-            // 7. Prompt user for permission
+            // 5. Prompt user for permission
             let request_id = Uuid::new_v4().to_string();
             prompt_user_permission(
                 permission_channels,
@@ -352,54 +410,108 @@ mod tests {
         assert!(!requires_permission("Glob"));
     }
 
+    #[test]
+    fn test_is_interactive_tool() {
+        // Interactive tools that require TTY
+        assert!(is_interactive_tool("AskUserQuestion"));
+        assert!(is_interactive_tool("EnterPlanMode"));
+        assert!(is_interactive_tool("ExitPlanMode"));
+        // Non-interactive tools
+        assert!(!is_interactive_tool("Read"));
+        assert!(!is_interactive_tool("Write"));
+        assert!(!is_interactive_tool("Bash"));
+    }
+
+    #[test]
+    fn test_determine_permission_denies_interactive_tools() {
+        // Interactive tools should always be denied, even in bypass mode
+        let input = json!({});
+
+        let result = determine_permission("bypassPermissions", "AskUserQuestion", &input, None);
+        assert!(matches!(result, PermissionDecision::Deny(_)));
+
+        let result = determine_permission("default", "EnterPlanMode", &input, None);
+        assert!(matches!(result, PermissionDecision::Deny(_)));
+
+        let result = determine_permission("acceptEdits", "ExitPlanMode", &input, None);
+        assert!(matches!(result, PermissionDecision::Deny(_)));
+    }
+
     // ============================================================================
-    // check_mode_decision tests
+    // determine_permission tests
     // ============================================================================
 
     #[test]
-    fn test_check_mode_decision_bypass() {
-        // bypassPermissions mode returns allow for any tool
-        let result = check_mode_decision("bypassPermissions", "Write");
-        assert!(result.is_some());
+    fn test_determine_permission_bypass_mode() {
+        // Bypass mode allows all tools
+        let input = json!({});
 
-        let result = check_mode_decision("bypassPermissions", "Bash");
-        assert!(result.is_some());
+        let result = determine_permission("bypassPermissions", "Write", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
 
-        let result = check_mode_decision("bypassPermissions", "Read");
-        assert!(result.is_some());
+        let result = determine_permission("bypassPermissions", "Bash", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        let result = determine_permission("bypassPermissions", "Read", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
     }
 
     #[test]
-    fn test_check_mode_decision_accept_edits_non_bash() {
-        // acceptEdits mode returns allow for Write/Edit/etc (not Bash)
-        let result = check_mode_decision("acceptEdits", "Write");
-        assert!(result.is_some());
+    fn test_determine_permission_accept_edits_mode() {
+        // AcceptEdits mode allows file operations but not Bash
+        let input = json!({});
 
-        let result = check_mode_decision("acceptEdits", "Edit");
-        assert!(result.is_some());
+        let result = determine_permission("acceptEdits", "Write", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
 
-        let result = check_mode_decision("acceptEdits", "NotebookEdit");
-        assert!(result.is_some());
+        let result = determine_permission("acceptEdits", "Edit", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        let result = determine_permission("acceptEdits", "NotebookEdit", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        // Bash requires prompt in acceptEdits mode
+        let result = determine_permission("acceptEdits", "Bash", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
     }
 
     #[test]
-    fn test_check_mode_decision_accept_edits_bash() {
-        // acceptEdits mode returns None for Bash (requires prompt)
-        let result = check_mode_decision("acceptEdits", "Bash");
-        assert!(result.is_none());
+    fn test_determine_permission_default_mode_read_only() {
+        // Default mode allows read-only tools without prompting
+        let input = json!({});
+
+        let result = determine_permission("default", "Read", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        let result = determine_permission("default", "Glob", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        let result = determine_permission("default", "Grep", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
+
+        let result = determine_permission("default", "WebFetch", &input, None);
+        assert!(matches!(result, PermissionDecision::Allow(_)));
     }
 
     #[test]
-    fn test_check_mode_decision_default() {
-        // default mode returns None (always prompt)
-        let result = check_mode_decision("default", "Write");
-        assert!(result.is_none());
+    fn test_determine_permission_default_mode_protected() {
+        // Default mode requires prompt for protected tools
+        let input = json!({});
 
-        let result = check_mode_decision("default", "Bash");
-        assert!(result.is_none());
+        let result = determine_permission("default", "Write", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
 
-        let result = check_mode_decision("default", "Read");
-        assert!(result.is_none());
+        let result = determine_permission("default", "Edit", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
+
+        let result = determine_permission("default", "Bash", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
+
+        let result = determine_permission("default", "NotebookEdit", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
+
+        let result = determine_permission("default", "Skill", &input, None);
+        assert!(matches!(result, PermissionDecision::PromptUser));
     }
 
     // ============================================================================

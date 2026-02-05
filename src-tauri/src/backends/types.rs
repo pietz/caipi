@@ -12,7 +12,10 @@ use super::session::BackendSession;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
+    /// Claude Code SDK (uses claude-agent-sdk-rs)
     Claude,
+    /// Claude CLI direct wrapper (spawns claude CLI directly)
+    ClaudeCli,
     // Future backends:
     // Codex,
     // Gemini,
@@ -23,6 +26,7 @@ impl std::fmt::Display for BackendKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendKind::Claude => write!(f, "claude"),
+            BackendKind::ClaudeCli => write!(f, "claudecli"),
         }
     }
 }
@@ -33,6 +37,7 @@ impl std::str::FromStr for BackendKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "claude" => Ok(BackendKind::Claude),
+            "claudecli" => Ok(BackendKind::ClaudeCli),
             _ => Err(BackendError {
                 message: format!("Unknown backend: {}", s),
                 recoverable: false,
@@ -155,7 +160,7 @@ impl BackendRegistry {
     pub fn new() -> Self {
         Self {
             backends: HashMap::new(),
-            default: BackendKind::Claude,
+            default: BackendKind::ClaudeCli,
         }
     }
 

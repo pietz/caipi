@@ -10,6 +10,25 @@ use crate::claude::agent::{PermissionChannels, PermissionResponse};
 // Global session store - now uses Arc<dyn BackendSession> for multi-backend support
 pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
 
+async fn get_session_from_store(
+    sessions: &SessionStore,
+    session_id: &str,
+) -> Result<Arc<dyn BackendSession>, String> {
+    let store = sessions.lock().await;
+    store
+        .get(session_id)
+        .cloned()
+        .ok_or("Session not found".to_string())
+}
+
+async fn remove_session_from_store(
+    sessions: &SessionStore,
+    session_id: &str,
+) -> Option<Arc<dyn BackendSession>> {
+    let mut store = sessions.lock().await;
+    store.remove(session_id)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
     pub id: String,
@@ -126,10 +145,7 @@ pub async fn destroy_session(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Remove session from store and get it for cleanup
-    let session = {
-        let mut store = sessions.lock().await;
-        store.remove(&session_id)
-    };
+    let session = remove_session_from_store(&sessions, &session_id).await;
 
     // Clean up the session if it existed
     if let Some(session) = session {
@@ -148,10 +164,7 @@ pub async fn send_message(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
     // Lock is now released!
 
     // Send message via the backend session
@@ -196,10 +209,7 @@ pub async fn get_session_messages(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
 
     Ok(session.get_messages().await)
 }
@@ -212,10 +222,7 @@ pub async fn abort_session(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
 
     session.abort().await.map_err(|e| e.to_string())
 }
@@ -229,10 +236,7 @@ pub async fn set_permission_mode(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
 
     let result = session.set_permission_mode(mode).await;
 
@@ -256,10 +260,7 @@ pub async fn set_model(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
 
     let result = session.set_model(model).await;
 
@@ -283,19 +284,118 @@ pub async fn set_thinking_level(
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
-    let session = {
-        let store = sessions.lock().await;
-        store.get(&session_id).ok_or("Session not found")?.clone()
-    };
+    let session = get_session_from_store(&sessions, &session_id).await?;
 
     session.set_thinking_level(level).await.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        get_session_from_store, remove_session_from_store, BackendSession, Message, SessionStore,
+    };
+    use crate::backends::{BackendError, BackendKind};
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    struct TestSession {
+        id: String,
+    }
+
+    impl TestSession {
+        fn new(id: &str) -> Self {
+            Self { id: id.to_string() }
+        }
+    }
+
+    #[async_trait]
+    impl BackendSession for TestSession {
+        fn session_id(&self) -> &str {
+            &self.id
+        }
+
+        fn backend_kind(&self) -> BackendKind {
+            BackendKind::Claude
+        }
+
+        fn folder_path(&self) -> &str {
+            "/tmp"
+        }
+
+        async fn send_message(&self, _message: &str) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        async fn abort(&self) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        async fn cleanup(&self) {}
+
+        async fn get_permission_mode(&self) -> String {
+            "default".to_string()
+        }
+
+        async fn set_permission_mode(&self, _mode: String) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        async fn get_model(&self) -> String {
+            "sonnet".to_string()
+        }
+
+        async fn set_model(&self, _model: String) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        async fn set_thinking_level(&self, _level: String) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        async fn get_messages(&self) -> Vec<Message> {
+            vec![]
+        }
+    }
+
+    fn test_store() -> SessionStore {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    #[tokio::test]
+    async fn get_session_from_store_returns_existing_session() {
+        let sessions = test_store();
+        let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-1"));
+        sessions.lock().await.insert("session-1".to_string(), session);
+
+        let found = get_session_from_store(&sessions, "session-1").await.unwrap();
+        assert_eq!(found.session_id(), "session-1");
+    }
+
+    #[tokio::test]
+    async fn get_session_from_store_returns_error_when_missing() {
+        let sessions = test_store();
+        let result = get_session_from_store(&sessions, "missing").await;
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), "Session not found");
+    }
+
+    #[tokio::test]
+    async fn remove_session_from_store_removes_and_returns_session() {
+        let sessions = test_store();
+        let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-2"));
+        sessions.lock().await.insert("session-2".to_string(), session);
+
+        let removed = remove_session_from_store(&sessions, "session-2").await;
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().session_id(), "session-2");
+        assert!(sessions.lock().await.is_empty());
+    }
+
     #[test]
     fn test_session_creation() {
-        // Placeholder for session lifecycle tests
-        assert!(true);
+        let sessions = test_store();
+        assert!(Arc::strong_count(&sessions) >= 1);
     }
 }

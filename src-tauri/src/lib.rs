@@ -3,8 +3,8 @@ mod commands;
 mod claude;
 mod storage;
 
-use backends::{BackendRegistry, BackendSession};
-use backends::claude::ClaudeBackend;
+use backends::{BackendKind, BackendRegistry, BackendSession};
+use backends::claude::{ClaudeBackend, ClaudeCliBackend};
 use commands::chat::SessionStore;
 use claude::agent::PermissionChannels;
 use std::collections::HashMap;
@@ -17,9 +17,22 @@ pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
 
-    // Initialize backend registry with Claude backend
+    // Initialize backend registry with Claude backends
     let mut registry = BackendRegistry::new();
     registry.register(Arc::new(ClaudeBackend::new()));
+    registry.register(Arc::new(ClaudeCliBackend::new()));
+
+    // Allow overriding the default backend via environment variable for testing
+    // Usage: CAIPI_BACKEND=claudecli npm run tauri dev
+    if let Ok(backend_env) = std::env::var("CAIPI_BACKEND") {
+        if let Ok(kind) = backend_env.parse::<BackendKind>() {
+            eprintln!("[init] Using backend from CAIPI_BACKEND env var: {}", kind);
+            registry.set_default(kind);
+        } else {
+            eprintln!("[init] Warning: Unknown CAIPI_BACKEND value '{}', using default", backend_env);
+        }
+    }
+
     let registry = Arc::new(registry);
 
     tauri::Builder::default()
