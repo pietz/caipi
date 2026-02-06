@@ -4,8 +4,10 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
-use crate::backends::{BackendRegistry, BackendSession, SessionConfig};
-use crate::claude::agent::{PermissionChannels, PermissionResponse};
+use crate::backends::{
+    BackendRegistry, BackendSession, PermissionChannels, PermissionResponse, SessionConfig,
+    CHAT_EVENT_CHANNEL,
+};
 
 // Global session store - now uses Arc<dyn BackendSession> for multi-backend support
 pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
@@ -171,7 +173,7 @@ pub async fn send_message(
     match session.send_message(&message).await {
         Ok(_) => Ok(()),
         Err(e) => {
-            let _ = app.emit("claude:event", &ChatEvent::Error { message: e.to_string() });
+            let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Error { message: e.to_string() });
             Err(e.to_string())
         }
     }
@@ -243,7 +245,7 @@ pub async fn set_permission_mode(
     // Emit current state regardless of success/failure to keep frontend in sync
     let current_mode = session.get_permission_mode().await;
     let current_model = session.get_model().await;
-    let _ = app.emit("claude:event", &ChatEvent::StateChanged {
+    let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::StateChanged {
         permission_mode: current_mode,
         model: current_model,
     });
@@ -267,7 +269,7 @@ pub async fn set_model(
     // Emit current state regardless of success/failure to keep frontend in sync
     let current_mode = session.get_permission_mode().await;
     let current_model = session.get_model().await;
-    let _ = app.emit("claude:event", &ChatEvent::StateChanged {
+    let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::StateChanged {
         permission_mode: current_mode,
         model: current_model,
     });

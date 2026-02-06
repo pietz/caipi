@@ -30,8 +30,8 @@
     // Register scroll callback for content changes (e.g., buffer flush)
     setOnContentChange(scrollToBottom);
 
-    // Listen for Claude events
-    unlisten = await listen<ChatEvent>('claude:event', (event) => {
+    // Listen for backend-neutral chat events
+    unlisten = await listen<ChatEvent>('chat:event', (event) => {
       handleClaudeEvent(event.payload, { onComplete: processQueuedMessages });
       scrollToBottom();
     });

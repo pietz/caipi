@@ -11,6 +11,7 @@ use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
+use crate::backends::CHAT_EVENT_CHANNEL;
 use crate::claude::agent::{AgentEvent, AgentSession};
 use crate::commands::chat::{ChatEvent, Message};
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
@@ -150,7 +151,7 @@ impl BackendSession for ClaudeSession {
                     AgentEvent::Complete => ChatEvent::Complete,
                     AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
                 };
-                let _ = app_handle.emit("claude:event", &chat_event);
+                let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &chat_event);
             })
             .await
             .map_err(|e| BackendError {

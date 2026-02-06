@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::claude::tool_utils::extract_tool_target;
+use crate::commands::chat::Message as ChatMessage;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SessionInfo {
@@ -272,31 +273,38 @@ pub struct HistoryMessage {
     pub tools: Vec<HistoryTool>,
 }
 
-/// Read messages from a session file for display
-#[tauri::command]
-pub async fn get_session_history(
-    folder_path: String,
-    session_id: String,
-) -> Result<Vec<HistoryMessage>, String> {
+fn resolve_session_file(folder_path: &str, session_id: &str) -> Result<Option<PathBuf>, String> {
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let projects_dir = home_dir.join(".claude").join("projects");
 
     // Encode the folder path to match Claude's format
-    let encoded = encode_folder_path(&folder_path);
+    let encoded = encode_folder_path(folder_path);
     let project_dir = projects_dir.join(&encoded);
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
 
     if !session_file.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
 
     // Verify the project directory actually belongs to this folder path
-    if !verify_project_path(&folder_path, &project_dir) {
-        return Ok(Vec::new());
+    if !verify_project_path(folder_path, &project_dir) {
+        return Ok(None);
     }
 
-    let content = fs::read_to_string(&session_file)
-        .map_err(|e| format!("Failed to read session file: {}", e))?;
+    Ok(Some(session_file))
+}
+
+/// Load parsed history messages from a Claude session log file.
+pub fn load_session_history_messages(
+    folder_path: &str,
+    session_id: &str,
+) -> Result<Vec<HistoryMessage>, String> {
+    let Some(session_file) = resolve_session_file(folder_path, session_id)? else {
+        return Ok(Vec::new());
+    };
+
+    let content =
+        fs::read_to_string(&session_file).map_err(|e| format!("Failed to read session file: {}", e))?;
 
     let mut messages: Vec<HistoryMessage> = Vec::new();
     let mut seen_uuids: HashSet<String> = HashSet::new();
@@ -413,6 +421,32 @@ pub async fn get_session_history(
     }
 
     Ok(messages)
+}
+
+/// Load log messages into the in-memory session shape used by chat sessions.
+pub fn load_session_log_messages(
+    folder_path: &str,
+    session_id: &str,
+) -> Result<Vec<ChatMessage>, String> {
+    let history = load_session_history_messages(folder_path, session_id)?;
+    Ok(history
+        .into_iter()
+        .map(|msg| ChatMessage {
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+        })
+        .collect())
+}
+
+/// Read messages from a session file for display
+#[tauri::command]
+pub async fn get_session_history(
+    folder_path: String,
+    session_id: String,
+) -> Result<Vec<HistoryMessage>, String> {
+    load_session_history_messages(&folder_path, &session_id)
 }
 
 #[cfg(test)]

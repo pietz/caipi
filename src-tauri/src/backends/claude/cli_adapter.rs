@@ -25,14 +25,16 @@ use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
+use crate::backends::{PermissionChannels, CHAT_EVENT_CHANNEL};
 use crate::claude::cli_protocol::{
     AssistantEvent, CliEvent, ContentBlock, IncomingControlRequest, OutgoingControlResponse,
     ResultEvent, SystemEvent, UsageInfo,
 };
-use crate::claude::hooks::{determine_permission, PermissionChannels, PermissionDecision};
+use crate::claude::hooks::{determine_permission, PermissionDecision};
 use crate::claude::settings::{self, ClaudeSettings};
 use crate::claude::tool_utils::extract_tool_target;
 use crate::commands::chat::{ChatEvent, Message};
+use crate::commands::sessions::load_session_log_messages;
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
 /// Claude CLI backend implementation.
@@ -228,6 +230,11 @@ impl CliSession {
             .unwrap_or_else(|| "default".to_string());
         let model = config.model.unwrap_or_else(|| "sonnet".to_string());
         let user_settings = settings::load_user_settings();
+        let initial_messages = config
+            .resume_session_id
+            .as_deref()
+            .map(|session_id| load_session_log_messages(&config.folder_path, session_id).unwrap_or_default())
+            .unwrap_or_default();
 
         // Get permission channels from app state
         let permission_channels: PermissionChannels = app_handle.state::<PermissionChannels>().inner().clone();
@@ -246,7 +253,7 @@ impl CliSession {
             user_settings,
             process: Arc::new(Mutex::new(None)),
             stdin_writer: Arc::new(Mutex::new(None)),
-            messages: Arc::new(RwLock::new(Vec::new())),
+            messages: Arc::new(RwLock::new(initial_messages)),
             permission_channels,
             cli_session_id: Arc::new(RwLock::new(None)),
         })
@@ -436,7 +443,7 @@ impl CliSession {
             )
             .await
             {
-                let _ = app_handle.emit("claude:event", &ChatEvent::Error { message });
+                let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Error { message });
             }
         });
 
@@ -626,7 +633,7 @@ impl CliSession {
             }
             .to_string();
 
-            let _ = app_handle.emit("claude:event", &ChatEvent::SessionInit { auth_type });
+            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::SessionInit { auth_type });
         }
     }
 
@@ -640,14 +647,14 @@ impl CliSession {
     ) {
         if let Some(usage) = &event.message.usage {
             let total_tokens = Self::context_tokens_from_usage(usage);
-            let _ = app_handle.emit("claude:event", &ChatEvent::TokenUsage { total_tokens });
+            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::TokenUsage { total_tokens });
         }
 
         for block in event.message.content {
             match block {
                 ContentBlock::Text(text_block) => {
                     let _ = app_handle.emit(
-                        "claude:event",
+                        CHAT_EVENT_CHANNEL,
                         &ChatEvent::Text {
                             content: text_block.text.clone(),
                         },
@@ -665,14 +672,14 @@ impl CliSession {
                 ContentBlock::Thinking(thinking_block) => {
                     let thinking_id = Uuid::new_v4().to_string();
                     let _ = app_handle.emit(
-                        "claude:event",
+                        CHAT_EVENT_CHANNEL,
                         &ChatEvent::ThinkingStart {
                             thinking_id: thinking_id.clone(),
                             content: thinking_block.thinking,
                         },
                     );
                     let _ = app_handle.emit(
-                        "claude:event",
+                        CHAT_EVENT_CHANNEL,
                         &ChatEvent::ThinkingEnd {
                             thinking_id,
                         },
@@ -693,7 +700,7 @@ impl CliSession {
                             "completed"
                         };
                         let _ = app_handle.emit(
-                            "claude:event",
+                            CHAT_EVENT_CHANNEL,
                             &ChatEvent::ToolEnd {
                                 id: tool_result.tool_use_id.clone(),
                                 status: status.to_string(),
@@ -727,7 +734,7 @@ impl CliSession {
                                 let is_error = item.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
                                 let status = if is_error { "error" } else { "completed" };
                                 let _ = app_handle.emit(
-                                    "claude:event",
+                                    CHAT_EVENT_CHANNEL,
                                     &ChatEvent::ToolEnd {
                                         id: tool_use_id.to_string(),
                                         status: status.to_string(),
@@ -818,7 +825,7 @@ impl CliSession {
         };
 
         let _ = app_handle.emit(
-            "claude:event",
+            CHAT_EVENT_CHANNEL,
             &ChatEvent::ToolStart {
                 tool_use_id: tool_use_id.clone(),
                 tool_type: tool_name.clone(),
@@ -850,7 +857,7 @@ impl CliSession {
             PermissionDecision::Allow(reason) => {
                 // Auto-approved - emit running status and send allow response
                 let _ = app_handle.emit(
-                    "claude:event",
+                    CHAT_EVENT_CHANNEL,
                     &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_use_id.clone(),
                         status: "running".to_string(),
@@ -870,7 +877,7 @@ impl CliSession {
                 // Denied - remove from active_tools, emit denied status, send deny response
                 active_tools.remove(&tool_use_id);
                 let _ = app_handle.emit(
-                    "claude:event",
+                    CHAT_EVENT_CHANNEL,
                     &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_use_id.clone(),
                         status: "denied".to_string(),
@@ -899,7 +906,7 @@ impl CliSession {
 
                 // Emit awaiting_permission status
                 let _ = app_handle.emit(
-                    "claude:event",
+                    CHAT_EVENT_CHANNEL,
                     &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_use_id.clone(),
                         status: "awaiting_permission".to_string(),
@@ -942,7 +949,7 @@ impl CliSession {
                 // Emit final status and send control response
                 let status = if allowed { "running" } else { "denied" };
                 let _ = app_handle.emit(
-                    "claude:event",
+                    CHAT_EVENT_CHANNEL,
                     &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_use_id.clone(),
                         status: status.to_string(),
@@ -965,10 +972,10 @@ impl CliSession {
     /// Handle result events (completion).
     async fn handle_result_event(event: ResultEvent, app_handle: &AppHandle) {
         if event.subtype == "success" {
-            let _ = app_handle.emit("claude:event", &ChatEvent::Complete);
+            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Complete);
         } else if event.subtype == "error" {
             let _ = app_handle.emit(
-                "claude:event",
+                CHAT_EVENT_CHANNEL,
                 &ChatEvent::Error {
                     message: "CLI returned error".to_string(),
                 },
@@ -1066,7 +1073,7 @@ impl BackendSession for CliSession {
 
         // Emit abort complete
         let _ = self.app_handle.emit(
-            "claude:event",
+            CHAT_EVENT_CHANNEL,
             &ChatEvent::AbortComplete {
                 session_id: self.id.clone(),
             },

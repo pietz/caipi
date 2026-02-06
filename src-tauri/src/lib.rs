@@ -5,8 +5,8 @@ mod storage;
 
 use backends::{BackendKind, BackendRegistry, BackendSession};
 use backends::claude::{ClaudeBackend, ClaudeCliBackend};
+use backends::PermissionChannels;
 use commands::chat::SessionStore;
-use claude::agent::PermissionChannels;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Manager;

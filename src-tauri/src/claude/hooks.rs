@@ -4,6 +4,7 @@
 //! including pre-tool-use and post-tool-use callbacks.
 
 use crate::commands::chat::ChatEvent;
+use crate::backends::{PermissionChannels, PermissionResponse, CHAT_EVENT_CHANNEL};
 use claude_agent_sdk_rs::{
     HookCallback, HookContext, HookEvent, HookInput, HookJsonOutput, HookMatcher,
     PreToolUseHookSpecificOutput, SyncHookJsonOutput, HookSpecificOutput,
@@ -13,15 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{oneshot, Mutex, Notify, RwLock};
+use tokio::sync::{oneshot, Notify, RwLock};
 use uuid::Uuid;
 
-use super::agent::PermissionResponse;
 use super::settings::{self, ClaudeSettings};
 use super::tool_utils::extract_tool_target;
-
-/// Type alias for permission channels - maps request ID to response sender
-pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
 
 // ============================================================================
 // Permission Decision
@@ -227,7 +224,7 @@ pub async fn prompt_user_permission(
     }
 
     // Emit status update: awaiting_permission
-    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
         tool_use_id: tool_use_id.clone(),
         status: "awaiting_permission".to_string(),
         permission_request_id: Some(request_id.clone()),
@@ -251,7 +248,7 @@ pub async fn prompt_user_permission(
         PermissionOutcome::Aborted => ("denied", deny_response("Session aborted")),
     };
 
-    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
         tool_use_id,
         status: status.to_string(),
         permission_request_id: None,
@@ -309,7 +306,7 @@ pub fn build_pre_tool_use_hook(
             };
             let target = extract_tool_target(&tool_name, &tool_input);
 
-            let _ = app_handle.emit("claude:event", &ChatEvent::ToolStart {
+            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStart {
                 tool_use_id: tool_id.clone(),
                 tool_type: tool_name.clone(),
                 target,
@@ -329,7 +326,7 @@ pub fn build_pre_tool_use_hook(
             match decision {
                 PermissionDecision::Allow(reason) => {
                     // Emit status update: running (auto-approved)
-                    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_id,
                         status: "running".to_string(),
                         permission_request_id: None,
@@ -338,7 +335,7 @@ pub fn build_pre_tool_use_hook(
                 }
                 PermissionDecision::Deny(reason) => {
                     // Emit status update: denied
-                    let _ = app_handle.emit("claude:event", &ChatEvent::ToolStatusUpdate {
+                    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
                         tool_use_id: tool_id,
                         status: "denied".to_string(),
                         permission_request_id: None,

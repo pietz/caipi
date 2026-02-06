@@ -1,4 +1,6 @@
 use crate::commands::chat::{Message as ChatMessage, ChatEvent};
+use crate::commands::sessions::load_session_log_messages;
+use crate::backends::{PermissionChannels, CHAT_EVENT_CHANNEL};
 use claude_agent_sdk_rs::{
     ClaudeClient, ClaudeAgentOptions, Message, ContentBlock,
     PermissionMode, SettingSource,
@@ -14,9 +16,6 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use super::hooks::build_hooks;
-
-// Re-export from hooks for external use
-pub use super::hooks::PermissionChannels;
 
 #[derive(Error, Debug)]
 pub enum AgentError {
@@ -35,12 +34,6 @@ pub enum AgentEvent {
     TokenUsage { total_tokens: u64 },
     Complete,
     Error(String),
-}
-
-/// Response from the UI for a permission request
-#[derive(Debug, Clone)]
-pub struct PermissionResponse {
-    pub allowed: bool,
 }
 
 pub struct AgentSession {
@@ -102,11 +95,15 @@ fn string_to_model_id(model: &str) -> &'static str {
 impl AgentSession {
     pub async fn new(folder_path: String, permission_mode: String, model: String, resume_session_id: Option<String>, cli_path: Option<String>, app_handle: AppHandle) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
+        let initial_messages = resume_session_id
+            .as_deref()
+            .map(|session_id| load_session_log_messages(&folder_path, session_id).unwrap_or_default())
+            .unwrap_or_default();
 
         Ok(Self {
             id,
             folder_path,
-            messages: Arc::new(Mutex::new(Vec::new())),
+            messages: Arc::new(Mutex::new(initial_messages)),
             client: Arc::new(Mutex::new(None)),
             app_handle,
             permission_mode: Arc::new(RwLock::new(permission_mode)),
@@ -329,13 +326,13 @@ impl AgentSession {
                                                 let thinking_id = format!("thinking-{}", Uuid::new_v4());
 
                                                 // Emit ThinkingStart
-                                                let _ = self.app_handle.emit("claude:event", &ChatEvent::ThinkingStart {
+                                                let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ThinkingStart {
                                                     thinking_id: thinking_id.clone(),
                                                     content: thinking_block.thinking.clone(),
                                                 });
 
                                                 // Emit ThinkingEnd immediately (thinking comes as complete block)
-                                                let _ = self.app_handle.emit("claude:event", &ChatEvent::ThinkingEnd {
+                                                let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ThinkingEnd {
                                                     thinking_id,
                                                 });
                                             }
@@ -387,7 +384,7 @@ impl AgentSession {
                                                         let is_error = item.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
                                                         let status = if is_error { "error" } else { "completed" };
 
-                                                        let _ = self.app_handle.emit("claude:event", &ChatEvent::ToolEnd {
+                                                        let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolEnd {
                                                             id: tool_use_id.to_string(),
                                                             status: status.to_string(),
                                                         });
@@ -434,7 +431,7 @@ impl AgentSession {
         if was_aborted {
             // Emit AbortComplete after stream is fully drained
             // This signals the frontend that the abort is complete and it can finalize
-            let _ = self.app_handle.emit("claude:event", &ChatEvent::AbortComplete {
+            let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::AbortComplete {
                 session_id: self.id.clone(),
             });
         }
