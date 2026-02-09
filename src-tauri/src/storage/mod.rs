@@ -1,11 +1,12 @@
 use crate::commands::folder::RecentFolder;
 use crate::commands::setup::CliStatus;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use parking_lot::Mutex;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::NamedTempFile;
@@ -57,12 +58,21 @@ pub struct AppData {
     pub license: Option<LicenseData>,
     #[serde(default)]
     pub cli_path: Option<String>,
+    #[serde(default)]
+    pub default_backend: Option<String>,
+    #[serde(default)]
+    pub backend_cli_paths: HashMap<String, String>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
+    let folder = if cfg!(debug_assertions) {
+        "caipi-dev"
+    } else {
+        "caipi"
+    };
     let dir = dirs::data_local_dir()
         .ok_or(StorageError::NoAppDir)?
-        .join("caipi");
+        .join(folder);
 
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
@@ -117,7 +127,9 @@ fn save_data(data: &AppData) -> Result<(), StorageError> {
     // Write to temp file, then atomic rename
     let mut temp_file = NamedTempFile::new_in(dir)?;
     temp_file.write_all(content.as_bytes())?;
-    temp_file.persist(&path).map_err(|e| StorageError::Io(e.error))?;
+    temp_file
+        .persist(&path)
+        .map_err(|e| StorageError::Io(e.error))?;
 
     Ok(())
 }
@@ -264,13 +276,67 @@ pub fn clear_license() -> Result<(), StorageError> {
 
 pub fn get_cli_path() -> Result<Option<String>, StorageError> {
     let data = load_data()?;
+    if let Some(path) = data.backend_cli_paths.get("claudecli") {
+        return Ok(Some(path.clone()));
+    }
     Ok(data.cli_path)
 }
 
 pub fn set_cli_path(path: Option<String>) -> Result<(), StorageError> {
     let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
-    data.cli_path = path;
+    data.cli_path = path.clone();
+    match path {
+        Some(path) => {
+            data.backend_cli_paths.insert("claudecli".to_string(), path);
+        }
+        None => {
+            data.backend_cli_paths.remove("claudecli");
+        }
+    }
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn get_default_backend() -> Result<Option<String>, StorageError> {
+    let data = load_data()?;
+    Ok(data.default_backend)
+}
+
+pub fn set_default_backend(backend: Option<String>) -> Result<(), StorageError> {
+    let _guard = get_storage_lock().lock();
+    let mut data = load_data()?;
+    data.default_backend = backend;
+    save_data(&data)?;
+    Ok(())
+}
+
+pub fn get_backend_cli_paths() -> Result<HashMap<String, String>, StorageError> {
+    let data = load_data()?;
+    Ok(data.backend_cli_paths)
+}
+
+pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageError> {
+    let data = load_data()?;
+    Ok(data.backend_cli_paths.get(backend).cloned())
+}
+
+pub fn set_backend_cli_path(backend: &str, path: Option<String>) -> Result<(), StorageError> {
+    let _guard = get_storage_lock().lock();
+    let mut data = load_data()?;
+    match path {
+        Some(path) => {
+            data.backend_cli_paths.insert(backend.to_string(), path);
+        }
+        None => {
+            data.backend_cli_paths.remove(backend);
+        }
+    }
+
+    if backend == "claudecli" {
+        data.cli_path = data.backend_cli_paths.get("claudecli").cloned();
+    }
+
     save_data(&data)?;
     Ok(())
 }
@@ -295,7 +361,9 @@ fn save_data_to(path: &std::path::Path, data: &AppData) -> Result<(), StorageErr
     // Write to temp file, then atomic rename
     let mut temp_file = NamedTempFile::new_in(dir)?;
     temp_file.write_all(content.as_bytes())?;
-    temp_file.persist(path).map_err(|e| StorageError::Io(e.error))?;
+    temp_file
+        .persist(path)
+        .map_err(|e| StorageError::Io(e.error))?;
 
     Ok(())
 }
@@ -401,6 +469,8 @@ mod tests {
             default_folder: Some("/default/path".to_string()),
             license: None,
             cli_path: None,
+            default_backend: Some("claudecli".to_string()),
+            backend_cli_paths: HashMap::new(),
         };
 
         save_data_to(&data_path, &original_data).unwrap();
@@ -415,7 +485,10 @@ mod tests {
         assert_eq!(cache.cached_at, 12345);
         assert!(cache.status.installed);
         assert_eq!(cache.status.version, Some("1.0.0".to_string()));
-        assert_eq!(loaded_data.default_folder, Some("/default/path".to_string()));
+        assert_eq!(
+            loaded_data.default_folder,
+            Some("/default/path".to_string())
+        );
     }
 
     #[test]

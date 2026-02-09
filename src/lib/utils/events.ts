@@ -4,19 +4,25 @@ import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 
 // Discriminated union matching Rust ChatEvent enum (serde tag = "type")
-export type ChatEvent =
+type EventMeta = {
+  sessionId?: string;
+  turnId?: string;
+};
+
+export type ChatEvent = EventMeta & (
   | { type: 'Text'; content: string }
   | { type: 'ToolStart'; toolUseId: string; toolType: string; target: string; status: string; input?: Record<string, unknown> }
   | { type: 'ToolStatusUpdate'; toolUseId: string; status: string; permissionRequestId?: string }
   | { type: 'ToolEnd'; id: string; status: string }
   | { type: 'SessionInit'; auth_type: string }
   | { type: 'StateChanged'; permissionMode: string; model: string }
-  | { type: 'TokenUsage'; totalTokens: number }
+  | { type: 'TokenUsage'; totalTokens: number; contextTokens?: number; contextWindow?: number }
   | { type: 'Complete' }
   | { type: 'AbortComplete'; sessionId: string }
   | { type: 'Error'; message: string }
   | { type: 'ThinkingStart'; thinkingId: string; content: string }
-  | { type: 'ThinkingEnd'; thinkingId: string };
+  | { type: 'ThinkingEnd'; thinkingId: string }
+);
 
 export interface EventHandlerOptions {
   onComplete?: () => void;
@@ -37,6 +43,10 @@ export function setOnContentChange(callback: (() => void) | null) {
 
 export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions = {}) {
   const { onComplete, onError } = options;
+
+  if (shouldIgnoreEvent(event)) {
+    return;
+  }
 
   switch (event.type) {
     case 'Text':
@@ -87,6 +97,19 @@ export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions
       // Thinking blocks arrive complete, so ThinkingEnd is a no-op
       break;
   }
+}
+
+function shouldIgnoreEvent(event: ChatEvent): boolean {
+  if (event.sessionId && app.sessionId && event.sessionId !== app.sessionId) {
+    return true;
+  }
+
+  // Turn gating is best-effort: only reject when both sides provide turn IDs.
+  if (event.turnId && chat.activeTurnId && event.turnId !== chat.activeTurnId) {
+    return true;
+  }
+
+  return false;
 }
 
 function handleTextEvent(event: Extract<ChatEvent, { type: 'Text' }>) {
@@ -251,7 +274,8 @@ function handleStateChangedEvent(event: Extract<ChatEvent, { type: 'StateChanged
 }
 
 function handleTokenUsageEvent(event: Extract<ChatEvent, { type: 'TokenUsage' }>) {
-  chat.tokenCount = event.totalTokens;
+  chat.tokenCount = event.contextTokens ?? event.totalTokens;
+  chat.contextWindow = event.contextWindow ?? null;
 }
 
 function handleErrorEvent(event: Extract<ChatEvent, { type: 'Error' }>, onError?: (message: string) => void) {

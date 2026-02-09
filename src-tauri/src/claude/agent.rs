@@ -1,16 +1,15 @@
-use crate::commands::chat::{Message as ChatMessage, ChatEvent};
+use crate::backends::{emit_chat_event, PermissionChannels};
+use crate::commands::chat::{ChatEvent, Message as ChatMessage};
 use crate::commands::sessions::load_session_log_messages;
-use crate::backends::{PermissionChannels, CHAT_EVENT_CHANNEL};
 use claude_agent_sdk_rs::{
-    ClaudeClient, ClaudeAgentOptions, Message, ContentBlock,
-    PermissionMode, SettingSource,
+    ClaudeAgentOptions, ClaudeClient, ContentBlock, Message, PermissionMode, SettingSource,
 };
-use std::collections::HashMap;
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Manager};
+use std::sync::Arc;
+use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
@@ -93,11 +92,20 @@ fn string_to_model_id(model: &str) -> &'static str {
 }
 
 impl AgentSession {
-    pub async fn new(folder_path: String, permission_mode: String, model: String, resume_session_id: Option<String>, cli_path: Option<String>, app_handle: AppHandle) -> Result<Self, AgentError> {
+    pub async fn new(
+        folder_path: String,
+        permission_mode: String,
+        model: String,
+        resume_session_id: Option<String>,
+        cli_path: Option<String>,
+        app_handle: AppHandle,
+    ) -> Result<Self, AgentError> {
         let id = Uuid::new_v4().to_string();
         let initial_messages = resume_session_id
             .as_deref()
-            .map(|session_id| load_session_log_messages(&folder_path, session_id).unwrap_or_default())
+            .map(|session_id| {
+                load_session_log_messages(&folder_path, session_id).unwrap_or_default()
+            })
             .unwrap_or_default();
 
         Ok(Self {
@@ -133,7 +141,10 @@ impl AgentSession {
         let client_guard = self.client.lock().await;
         if let Some(client) = client_guard.as_ref() {
             let sdk_mode = string_to_permission_mode(&mode);
-            client.set_permission_mode(sdk_mode).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+            client
+                .set_permission_mode(sdk_mode)
+                .await
+                .map_err(|e| AgentError::Sdk(e.to_string()))?;
         }
 
         Ok(())
@@ -150,7 +161,10 @@ impl AgentSession {
         let client_guard = self.client.lock().await;
         if let Some(client) = client_guard.as_ref() {
             let model_id = string_to_model_id(&model);
-            client.set_model(Some(model_id)).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+            client
+                .set_model(Some(model_id))
+                .await
+                .map_err(|e| AgentError::Sdk(e.to_string()))?;
         }
 
         Ok(())
@@ -170,7 +184,12 @@ impl AgentSession {
         self.model.read().await.clone()
     }
 
-    pub async fn send_message<F>(&self, message: &str, on_event: F) -> Result<(), AgentError>
+    pub async fn send_message<F>(
+        &self,
+        message: &str,
+        turn_id: Option<String>,
+        on_event: F,
+    ) -> Result<(), AgentError>
     where
         F: Fn(AgentEvent) + Send + Sync + 'static,
     {
@@ -194,6 +213,7 @@ impl AgentSession {
             permission_channels.inner().clone(),
             self.app_handle.clone(),
             self.id.clone(),
+            turn_id.clone(),
             self.permission_mode.clone(),
             self.abort_flag.clone(),
             self.abort_notify.clone(),
@@ -246,14 +266,23 @@ impl AgentSession {
         let client = client_guard.as_mut().unwrap();
 
         // Connect if not connected
-        client.connect().await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+        client
+            .connect()
+            .await
+            .map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         // Always update the model before sending the query to ensure model changes take effect
         // This handles the case where set_model() was called when client wasn't connected
-        client.set_model(Some(model_id)).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+        client
+            .set_model(Some(model_id))
+            .await
+            .map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         // Send query
-        client.query(message).await.map_err(|e| AgentError::Sdk(e.to_string()))?;
+        client
+            .query(message)
+            .await
+            .map_err(|e| AgentError::Sdk(e.to_string()))?;
 
         let mut assistant_content = String::new();
         let mut was_aborted = false;
@@ -307,9 +336,17 @@ impl AgentSession {
 
                                     // Extract token usage from assistant message (per API call, not cumulative)
                                     if let Some(usage) = &assistant_msg.message.usage {
-                                        let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                        on_event(AgentEvent::TokenUsage { total_tokens: input + cache_read });
+                                        let input = usage
+                                            .get("input_tokens")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(0);
+                                        let cache_read = usage
+                                            .get("cache_read_input_tokens")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(0);
+                                        on_event(AgentEvent::TokenUsage {
+                                            total_tokens: input + cache_read,
+                                        });
                                     }
 
                                     for block in assistant_msg.message.content.iter() {
@@ -323,18 +360,30 @@ impl AgentSession {
                                                 // with full context including permission status
                                             }
                                             ContentBlock::Thinking(thinking_block) => {
-                                                let thinking_id = format!("thinking-{}", Uuid::new_v4());
+                                                let thinking_id =
+                                                    format!("thinking-{}", Uuid::new_v4());
 
                                                 // Emit ThinkingStart
-                                                let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ThinkingStart {
+                                                let thinking_start = ChatEvent::ThinkingStart {
                                                     thinking_id: thinking_id.clone(),
                                                     content: thinking_block.thinking.clone(),
-                                                });
+                                                };
+                                                emit_chat_event(
+                                                    &self.app_handle,
+                                                    Some(self.id.as_str()),
+                                                    turn_id.as_deref(),
+                                                    &thinking_start,
+                                                );
 
                                                 // Emit ThinkingEnd immediately (thinking comes as complete block)
-                                                let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ThinkingEnd {
-                                                    thinking_id,
-                                                });
+                                                let thinking_end =
+                                                    ChatEvent::ThinkingEnd { thinking_id };
+                                                emit_chat_event(
+                                                    &self.app_handle,
+                                                    Some(self.id.as_str()),
+                                                    turn_id.as_deref(),
+                                                    &thinking_end,
+                                                );
                                             }
                                             _ => {
                                                 // ToolResult should come via Message::User, not here
@@ -347,7 +396,7 @@ impl AgentSession {
                                     // Note: Token usage is now extracted from Assistant messages
                                     // (per API call) rather than Result (which is cumulative)
                                     let _ = result; // silence unused warning
-                                    // Turn properly concluded
+                                                    // Turn properly concluded
                                     if !was_aborted {
                                         on_event(AgentEvent::Complete);
                                     }
@@ -356,7 +405,8 @@ impl AgentSession {
                                 Message::System(sys) => {
                                     // Extract auth type from init message
                                     if sys.subtype == "init" {
-                                        let api_key_source = sys.data
+                                        let api_key_source = sys
+                                            .data
                                             .get("apiKeySource")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("unknown");
@@ -377,17 +427,37 @@ impl AgentSession {
                                     // The data is nested in extra.message.content due to how the CLI
                                     // serializes replay messages.
                                     if let Some(message) = user_msg.extra.get("message") {
-                                        if let Some(content_array) = message.get("content").and_then(|c| c.as_array()) {
+                                        if let Some(content_array) =
+                                            message.get("content").and_then(|c| c.as_array())
+                                        {
                                             for item in content_array {
-                                                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                                                    if let Some(tool_use_id) = item.get("tool_use_id").and_then(|id| id.as_str()) {
-                                                        let is_error = item.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
-                                                        let status = if is_error { "error" } else { "completed" };
+                                                if item.get("type").and_then(|t| t.as_str())
+                                                    == Some("tool_result")
+                                                {
+                                                    if let Some(tool_use_id) = item
+                                                        .get("tool_use_id")
+                                                        .and_then(|id| id.as_str())
+                                                    {
+                                                        let is_error = item
+                                                            .get("is_error")
+                                                            .and_then(|e| e.as_bool())
+                                                            .unwrap_or(false);
+                                                        let status = if is_error {
+                                                            "error"
+                                                        } else {
+                                                            "completed"
+                                                        };
 
-                                                        let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolEnd {
+                                                        let tool_end = ChatEvent::ToolEnd {
                                                             id: tool_use_id.to_string(),
                                                             status: status.to_string(),
-                                                        });
+                                                        };
+                                                        emit_chat_event(
+                                                            &self.app_handle,
+                                                            Some(self.id.as_str()),
+                                                            turn_id.as_deref(),
+                                                            &tool_end,
+                                                        );
                                                     }
                                                 }
                                             }
@@ -417,7 +487,9 @@ impl AgentSession {
                     } else {
                         // Unexpected timeout during normal operation - emit error
                         eprintln!("[agent] Stream timeout during normal operation");
-                        on_event(AgentEvent::Error("Stream timeout - no response from Claude".to_string()));
+                        on_event(AgentEvent::Error(
+                            "Stream timeout - no response from Claude".to_string(),
+                        ));
                     }
                     break;
                 }
@@ -431,9 +503,15 @@ impl AgentSession {
         if was_aborted {
             // Emit AbortComplete after stream is fully drained
             // This signals the frontend that the abort is complete and it can finalize
-            let _ = self.app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::AbortComplete {
+            let abort_event = ChatEvent::AbortComplete {
                 session_id: self.id.clone(),
-            });
+            };
+            emit_chat_event(
+                &self.app_handle,
+                Some(self.id.as_str()),
+                turn_id.as_deref(),
+                &abort_event,
+            );
         }
         // Note: Normal completion emits Complete via on_event in the Result branch
 

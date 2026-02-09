@@ -5,7 +5,7 @@ import { getBackendConfig, type Backend } from '$lib/config/backends';
 
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
-export type Model = 'opus' | 'sonnet' | 'haiku';
+export type Model = string;
 
 export interface LicenseInfo {
   valid: boolean;
@@ -21,20 +21,45 @@ export interface CliStatus {
   path?: string;
 }
 
-function getPersistedModel(): Model {
-  if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem('caipi:model');
-    if (saved === 'opus' || saved === 'sonnet' || saved === 'haiku') return saved;
+function getDefaultModel(backend: Backend): Model {
+  const models = getBackendConfig(backend).models;
+  if (backend === 'claude' || backend === 'claudecli') {
+    return models.find((m) => m.id === 'sonnet')?.id ?? models[0]?.id ?? '';
   }
-  return 'sonnet';
+  return models[0]?.id ?? '';
 }
 
-function getPersistedThinkingLevel(backend: Backend): string {
+function getPersistedModel(backend: Backend): Model {
+  const validModels = getBackendConfig(backend).models.map((m) => m.id);
+
   if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem(`caipi:thinking:${backend}`);
-    if (saved) return saved;
+    const scoped = localStorage.getItem(`caipi:model:${backend}`);
+    if (scoped && validModels.includes(scoped)) return scoped;
+
+    // Legacy fallback for older builds that used a single shared model key.
+    const legacy = localStorage.getItem('caipi:model');
+    if (legacy && validModels.includes(legacy)) return legacy;
   }
-  return getBackendConfig(backend).defaultThinking;
+  return getDefaultModel(backend);
+}
+
+function getDefaultThinkingLevel(backend: Backend, model: Model): string {
+  const config = getBackendConfig(backend);
+  const modelConfig = config.models.find((m) => m.id === model);
+  return modelConfig?.defaultThinking ?? '';
+}
+
+function getPersistedThinkingLevel(backend: Backend, model: Model): string {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem(`caipi:thinking:${backend}:${model}`);
+    if (saved) {
+      // Validate saved value is still valid for this model
+      const config = getBackendConfig(backend);
+      const modelConfig = config.models.find((m) => m.id === model);
+      if (modelConfig?.thinkingOptions.some((o) => o.value === saved)) return saved;
+    }
+  }
+  return getDefaultThinkingLevel(backend, model);
 }
 
 class AppState {
@@ -56,21 +81,20 @@ class AppState {
   settingsOpen = $state(false);
 
   // Backend default
-  backend = $state<Backend>('claudecli');
+  defaultBackend = $state<Backend>('claudecli');
+  sessionBackend = $state<Backend | null>(null);
+  backendCliPaths = $state<Record<string, string>>({});
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
-  model = $state<Model>(getPersistedModel());
-  thinkingLevel = $state<string>(getPersistedThinkingLevel('claudecli'));
+  model = $state<Model>(getPersistedModel('claudecli'));
+  thinkingLevel = $state<string>(getPersistedThinkingLevel('claudecli', getPersistedModel('claudecli')));
 
   // Auth info
   authType = $state<string | null>(null);
 
   // License
   license = $state<LicenseInfo | null>(null);
-
-  // CLI Path (custom path to Claude CLI)
-  cliPath = $state<string | null>(null);
 
   // Derived
   get folderName(): string {
@@ -81,7 +105,23 @@ class AppState {
   }
 
   get backendConfig() {
-    return getBackendConfig(this.backend);
+    return getBackendConfig(this.sessionBackend ?? this.defaultBackend);
+  }
+
+  get activeBackend(): Backend {
+    return this.sessionBackend ?? this.defaultBackend;
+  }
+
+  get currentModelConfig() {
+    return this.backendConfig.models.find((m) => m.id === this.model) ?? this.backendConfig.models[0];
+  }
+
+  get thinkingOptions() {
+    return this.currentModelConfig?.thinkingOptions ?? [];
+  }
+
+  get cliPath(): string | null {
+    return this.backendCliPaths[this.defaultBackend] ?? null;
   }
 
   // Methods
@@ -117,8 +157,27 @@ class AppState {
     this.license = license;
   }
 
-  setCliPath(path: string | null) {
-    this.cliPath = path;
+  setCliPath(path: string | null, backend: Backend = this.defaultBackend) {
+    const next = { ...this.backendCliPaths };
+    if (path) {
+      next[backend] = path;
+    } else {
+      delete next[backend];
+    }
+    this.backendCliPaths = next;
+  }
+
+  getCliPath(backend: Backend): string | undefined {
+    return this.backendCliPaths[backend];
+  }
+
+  async setDefaultBackend(backend: Backend) {
+    this.defaultBackend = backend;
+    if (!this.sessionBackend) {
+      this.model = getPersistedModel(backend);
+      this.thinkingLevel = getPersistedThinkingLevel(backend, this.model);
+    }
+    await api.setDefaultBackend(backend);
   }
 
   toggleLeftSidebar() {
@@ -137,16 +196,22 @@ class AppState {
     this.settingsOpen = false;
   }
 
-  setModel(model: Model) {
+  setModel(model: Model, backend: Backend = this.activeBackend) {
     this.model = model;
     if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`caipi:model:${backend}`, model);
+      // Keep legacy key in sync for backwards compatibility.
       localStorage.setItem('caipi:model', model);
     }
+    // Reset thinking level to persisted or default for the new model
+    this.thinkingLevel = getPersistedThinkingLevel(backend, model);
   }
 
   cycleModel() {
-    const models: Model[] = ['opus', 'sonnet', 'haiku'];
-    const next = (models.indexOf(this.model) + 1) % models.length;
+    const models = this.backendConfig.models.map((m) => m.id);
+    if (!models.length) return;
+    const currentIndex = models.indexOf(this.model);
+    const next = (currentIndex + 1) % models.length;
     this.setModel(models[next]);
   }
 
@@ -163,12 +228,13 @@ class AppState {
   setThinkingLevel(level: string) {
     this.thinkingLevel = level;
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(`caipi:thinking:${this.backend}`, level);
+      localStorage.setItem(`caipi:thinking:${this.activeBackend}:${this.model}`, level);
     }
   }
 
   cycleThinking() {
-    const options = this.backendConfig.thinkingOptions;
+    const options = this.thinkingOptions;
+    if (!options.length) return;
     const currentIndex = options.findIndex(opt => opt.value === this.thinkingLevel);
     const nextIndex = (currentIndex + 1) % options.length;
     this.setThinkingLevel(options[nextIndex].value);
@@ -180,26 +246,52 @@ class AppState {
     this.model = model;
   }
 
+  ensureBackendState(backend: Backend) {
+    const backendModels = getBackendConfig(backend).models.map((m) => m.id);
+    if (!backendModels.includes(this.model)) {
+      this.setModel(getPersistedModel(backend), backend);
+    }
+    this.thinkingLevel = getPersistedThinkingLevel(backend, this.model);
+  }
+
   async startSession(folder: string): Promise<void> {
     // Clean up previous session to prevent memory leaks
     if (this.sessionId) {
-      await api.destroySession(this.sessionId).catch(() => {});
+      const oldSession = this.sessionId;
+      this.sessionId = null;
+      void api.destroySession(oldSession).catch(() => {});
     }
 
     this.folder = folder;
-    this.sessionId = await api.createSession(folder, this.permissionMode, this.model, undefined, this.cliPath ?? undefined, this.backend);
+    const backend = this.defaultBackend;
+    this.ensureBackendState(backend);
+    this.sessionId = await api.createSession(
+      folder,
+      this.permissionMode,
+      this.model,
+      undefined,
+      this.getCliPath(backend),
+      backend
+    );
+    this.sessionBackend = backend;
     // Sync persisted thinking level to the new session
-    await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
+    if (this.thinkingOptions.length > 0 && this.thinkingLevel) {
+      await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
+    }
     this.screen = 'chat';
   }
 
-  async resumeSession(folderPath: string, sessionId: string): Promise<void> {
+  async resumeSession(folderPath: string, sessionId: string, backendOverride?: Backend): Promise<void> {
     // Clean up previous session to prevent memory leaks
     if (this.sessionId) {
-      await api.destroySession(this.sessionId).catch(() => {});
+      const oldSession = this.sessionId;
+      this.sessionId = null;
+      void api.destroySession(oldSession).catch(() => {});
     }
 
     this.folder = folderPath;
+    const backend = backendOverride ?? this.defaultBackend;
+    this.ensureBackendState(backend);
 
     // Create session first - if this fails, don't pollute chat state
     this.sessionId = await api.createSession(
@@ -207,17 +299,19 @@ class AppState {
       this.permissionMode,
       this.model,
       sessionId,
-      this.cliPath ?? undefined,
-      this.backend
+      this.getCliPath(backend),
+      backend
     );
+    this.sessionBackend = backend;
 
     // Sync persisted thinking level to the resumed session
-    await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
+    if (this.thinkingOptions.length > 0 && this.thinkingLevel) {
+      await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
+    }
 
     // Only load history after successful session creation
-    const history = await api.getSessionHistory(folderPath, sessionId);
+    const history = await api.getSessionHistory(folderPath, sessionId, backend);
     chat.loadHistory(history);
-
     this.screen = 'chat';
   }
 
@@ -227,6 +321,7 @@ class AppState {
     this.error = null;
     this.folder = null;
     this.sessionId = null;
+    this.sessionBackend = null;
     this.leftSidebar = false;
     this.rightSidebar = false;
     this.authType = null;

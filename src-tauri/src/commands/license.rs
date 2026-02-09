@@ -116,8 +116,8 @@ pub async fn validate_license(license_key: String) -> Result<LicenseValidationRe
     let response_text = response.text().await.map_err(|e| e.to_string())?;
 
     // Parse the response
-    let activate_response: LemonSqueezyActivateResponse =
-        serde_json::from_str(&response_text).map_err(|e| {
+    let activate_response: LemonSqueezyActivateResponse = serde_json::from_str(&response_text)
+        .map_err(|e| {
             format!(
                 "Failed to parse license server response: {} (status: {})",
                 e, status

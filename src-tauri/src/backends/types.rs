@@ -16,8 +16,9 @@ pub enum BackendKind {
     Claude,
     /// Claude CLI direct wrapper (spawns claude CLI directly)
     ClaudeCli,
+    /// Codex CLI direct wrapper (spawns codex CLI directly)
+    Codex,
     // Future backends:
-    // Codex,
     // Gemini,
     // Copilot,
 }
@@ -27,6 +28,7 @@ impl std::fmt::Display for BackendKind {
         match self {
             BackendKind::Claude => write!(f, "claude"),
             BackendKind::ClaudeCli => write!(f, "claudecli"),
+            BackendKind::Codex => write!(f, "codex"),
         }
     }
 }
@@ -38,6 +40,7 @@ impl std::str::FromStr for BackendKind {
         match s.to_lowercase().as_str() {
             "claude" => Ok(BackendKind::Claude),
             "claudecli" => Ok(BackendKind::ClaudeCli),
+            "codex" => Ok(BackendKind::Codex),
             _ => Err(BackendError {
                 message: format!("Unknown backend: {}", s),
                 recoverable: false,
@@ -174,15 +177,15 @@ impl BackendRegistry {
         self.backends.get(&kind).cloned()
     }
 
-    /// Gets the default backend.
-    pub fn default_backend(&self) -> Option<Arc<dyn Backend>> {
-        self.get(self.default)
-    }
-
     /// Sets the default backend kind.
     #[allow(dead_code)]
     pub fn set_default(&mut self, kind: BackendKind) {
         self.default = kind;
+    }
+
+    /// Gets the default backend kind.
+    pub fn default_kind(&self) -> BackendKind {
+        self.default
     }
 
     /// Returns all registered backend kinds.

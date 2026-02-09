@@ -405,26 +405,27 @@ describe('AppState Store', () => {
     it('cycleThinking cycles through thinking levels', async () => {
       const { app } = await import('./app.svelte');
 
-      // Default is 'on' for Claude
-      expect(app.thinkingLevel).toBe('on');
+      // Claude CLI currently has no thinking controls exposed.
+      expect(app.thinkingLevel).toBe('');
 
       app.cycleThinking();
-      expect(app.thinkingLevel).toBe('off');
+      expect(app.thinkingLevel).toBe('');
 
       app.cycleThinking();
-      expect(app.thinkingLevel).toBe('on');
+      expect(app.thinkingLevel).toBe('');
     });
 
-    it('setThinkingLevel updates and persists thinking level', async () => {
+    it('setThinkingLevel updates and persists thinking level per model', async () => {
       const { app } = await import('./app.svelte');
 
       app.setThinkingLevel('off');
       expect(app.thinkingLevel).toBe('off');
-      expect(mockLocalStorage['caipi:thinking:claudecli']).toBe('off');
+      // Key includes both backend and model
+      expect(mockLocalStorage[`caipi:thinking:claudecli:${app.model}`]).toBe('off');
 
       app.setThinkingLevel('on');
       expect(app.thinkingLevel).toBe('on');
-      expect(mockLocalStorage['caipi:thinking:claudecli']).toBe('on');
+      expect(mockLocalStorage[`caipi:thinking:claudecli:${app.model}`]).toBe('on');
     });
   });
 
@@ -514,6 +515,34 @@ describe('AppState Store', () => {
         })
       );
     });
+
+    it('startSession does not block on destroy_session', async () => {
+      const { app } = await import('./app.svelte');
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      app.setSessionId('old-session');
+
+      let resolveDestroy: (() => void) | undefined;
+      const destroyPromise = new Promise<void>((resolve) => {
+        resolveDestroy = resolve;
+      });
+
+      vi.mocked(invoke).mockImplementation((command) => {
+        if (command === 'destroy_session') return destroyPromise;
+        if (command === 'create_session') return Promise.resolve('new-session');
+        if (command === 'set_thinking_level') return Promise.resolve(undefined);
+        return Promise.resolve(undefined);
+      });
+
+      const result = await Promise.race([
+        app.startSession('/test/project').then(() => 'done'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+      ]);
+
+      expect(result).toBe('done');
+      expect(invoke).toHaveBeenCalledWith('destroy_session', { sessionId: 'old-session' });
+      if (resolveDestroy) resolveDestroy();
+    });
   });
 
   describe('resumeSession', () => {
@@ -535,7 +564,6 @@ describe('AppState Store', () => {
       vi.spyOn(chat, 'loadHistory').mockImplementation(() => {});
       vi.mocked(invoke)
         .mockResolvedValueOnce('session-resume')  // create_session
-        .mockResolvedValueOnce(undefined)         // set_thinking_level
         .mockResolvedValueOnce(history);          // get_session_history
 
       await app.resumeSession('/test/project', 'session-abc');
@@ -547,18 +575,77 @@ describe('AppState Store', () => {
           permissionMode: app.permissionMode,
           model: app.model,
           resumeSessionId: 'session-abc',
+          backend: 'claudecli',
+        })
+      );
+      expect(invoke).not.toHaveBeenCalledWith(
+        'set_thinking_level',
+        expect.anything()
+      );
+      expect(invoke).toHaveBeenCalledWith('get_session_history', {
+        folderPath: '/test/project',
+        sessionId: 'session-abc',
+        backend: 'claudecli',
+      });
+      expect(chat.loadHistory).toHaveBeenCalledWith(history);
+      expect(app.screen).toBe('chat');
+    });
+
+    it('resumeSession uses provided backend override', async () => {
+      const { app } = await import('./app.svelte');
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      vi.mocked(invoke).mockImplementation((command) => {
+        if (command === 'create_session') return Promise.resolve('session-resume');
+        if (command === 'set_thinking_level') return Promise.resolve(undefined);
+        if (command === 'get_session_history') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      await app.resumeSession('/test/project', 'session-override', 'codex');
+
+      expect(invoke).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          folderPath: '/test/project',
+          resumeSessionId: 'session-override',
+          backend: 'codex',
         })
       );
       expect(invoke).toHaveBeenCalledWith('set_thinking_level', {
         sessionId: 'session-resume',
         level: app.thinkingLevel,
       });
-      expect(invoke).toHaveBeenCalledWith('get_session_history', {
-        folderPath: '/test/project',
-        sessionId: 'session-abc',
+    });
+
+    it('resumeSession does not block on destroy_session', async () => {
+      const { app } = await import('./app.svelte');
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      app.setSessionId('old-session');
+      app.setFolder('/old/project');
+
+      let resolveDestroy: (() => void) | undefined;
+      const destroyPromise = new Promise<void>((resolve) => {
+        resolveDestroy = resolve;
       });
-      expect(chat.loadHistory).toHaveBeenCalledWith(history);
-      expect(app.screen).toBe('chat');
+
+      vi.mocked(invoke).mockImplementation((command) => {
+        if (command === 'destroy_session') return destroyPromise;
+        if (command === 'create_session') return Promise.resolve('session-resume');
+        if (command === 'set_thinking_level') return Promise.resolve(undefined);
+        if (command === 'get_session_history') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const result = await Promise.race([
+        app.resumeSession('/test/project', 'session-abc').then(() => 'done'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+      ]);
+
+      expect(result).toBe('done');
+      expect(invoke).toHaveBeenCalledWith('destroy_session', { sessionId: 'old-session' });
+      if (resolveDestroy) resolveDestroy();
     });
   });
 });

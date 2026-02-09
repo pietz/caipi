@@ -89,10 +89,16 @@
     margin-bottom: 0;
   }
 
-  :global(.message-content ul),
+  :global(.message-content ul) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+    list-style-type: disc;
+  }
+
   :global(.message-content ol) {
     margin: 0.5em 0;
     padding-left: 1.5em;
+    list-style-type: decimal;
   }
 
   :global(.message-content li) {

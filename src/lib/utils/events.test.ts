@@ -28,6 +28,7 @@ vi.mock('$lib/stores/chat.svelte', () => ({
     clearPendingPermissions: vi.fn(),
     addErrorMessage: vi.fn(),
     tokenCount: 0,
+    contextWindow: null,
   },
 }));
 
@@ -861,6 +862,21 @@ describe('handleClaudeEvent', () => {
       handleClaudeEvent(event);
 
       expect(chat.tokenCount).toBe(1234);
+      expect(chat.contextWindow).toBeNull();
+    });
+
+    it('should prefer context token/window when provided', () => {
+      const event: ChatEvent = {
+        type: 'TokenUsage',
+        totalTokens: 1234,
+        contextTokens: 800,
+        contextWindow: 200000,
+      };
+
+      handleClaudeEvent(event);
+
+      expect(chat.tokenCount).toBe(800);
+      expect(chat.contextWindow).toBe(200000);
     });
 
     // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time

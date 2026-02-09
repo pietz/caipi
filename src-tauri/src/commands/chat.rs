@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 
 use crate::backends::{
-    BackendRegistry, BackendSession, PermissionChannels, PermissionResponse, SessionConfig,
-    CHAT_EVENT_CHANNEL,
+    emit_chat_event, BackendRegistry, BackendSession, PermissionChannels, PermissionResponse,
+    SessionConfig,
 };
+use crate::storage;
 
 // Global session store - now uses Arc<dyn BackendSession> for multi-backend support
 pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
@@ -42,7 +43,9 @@ pub struct Message {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ChatEvent {
-    Text { content: String },
+    Text {
+        content: String,
+    },
     /// Emitted from PreToolUse hook when a tool starts
     ToolStart {
         #[serde(rename = "toolUseId")]
@@ -50,7 +53,7 @@ pub enum ChatEvent {
         #[serde(rename = "toolType")]
         tool_type: String,
         target: String,
-        status: String,  // "pending"
+        status: String, // "pending"
         #[serde(skip_serializing_if = "Option::is_none")]
         input: Option<serde_json::Value>,
     },
@@ -58,16 +61,21 @@ pub enum ChatEvent {
     ToolStatusUpdate {
         #[serde(rename = "toolUseId")]
         tool_use_id: String,
-        status: String,  // "awaiting_permission", "running", "denied"
-        #[serde(rename = "permissionRequestId", skip_serializing_if = "Option::is_none")]
+        status: String, // "awaiting_permission", "running", "denied"
+        #[serde(
+            rename = "permissionRequestId",
+            skip_serializing_if = "Option::is_none"
+        )]
         permission_request_id: Option<String>,
     },
     /// Emitted from PostToolUse hook when a tool completes
     ToolEnd {
         id: String,
-        status: String,  // "completed", "error"
+        status: String, // "completed", "error"
     },
-    SessionInit { auth_type: String },
+    SessionInit {
+        auth_type: String,
+    },
     StateChanged {
         #[serde(rename = "permissionMode")]
         permission_mode: String,
@@ -76,6 +84,10 @@ pub enum ChatEvent {
     TokenUsage {
         #[serde(rename = "totalTokens")]
         total_tokens: u64,
+        #[serde(rename = "contextTokens", skip_serializing_if = "Option::is_none")]
+        context_tokens: Option<u64>,
+        #[serde(rename = "contextWindow", skip_serializing_if = "Option::is_none")]
+        context_window: Option<u64>,
     },
     Complete,
     #[serde(rename = "AbortComplete")]
@@ -83,7 +95,9 @@ pub enum ChatEvent {
         #[serde(rename = "sessionId")]
         session_id: String,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
     ThinkingStart {
         #[serde(rename = "thinkingId")]
         thinking_id: String,
@@ -108,12 +122,29 @@ pub async fn create_session(
     let sessions: tauri::State<'_, SessionStore> = app.state();
     let registry: tauri::State<'_, Arc<BackendRegistry>> = app.state();
 
-    // Get the backend (default to Claude for now)
-    let backend_impl = if let Some(backend_name) = backend {
-        let kind = backend_name.parse().map_err(|e: crate::backends::BackendError| e.to_string())?;
-        registry.get(kind).ok_or_else(|| format!("Backend not registered: {}", backend_name))?
+    let selected_backend = if let Some(backend_name) = backend {
+        backend_name
     } else {
-        registry.default_backend().ok_or("No default backend registered")?
+        let persisted_default = storage::get_default_backend().map_err(|e| e.to_string())?;
+        match persisted_default
+            .as_deref()
+            .and_then(|name| name.parse::<crate::backends::BackendKind>().ok())
+        {
+            Some(kind) => kind.to_string(),
+            None => registry.default_kind().to_string(),
+        }
+    };
+
+    let kind = selected_backend
+        .parse()
+        .map_err(|e: crate::backends::BackendError| e.to_string())?;
+    let backend_impl = registry
+        .get(kind)
+        .ok_or_else(|| format!("Backend not registered: {}", selected_backend))?;
+
+    let resolved_cli_path = match cli_path {
+        Some(path) => Some(path),
+        None => storage::get_backend_cli_path(&selected_backend).map_err(|e| e.to_string())?,
     };
 
     // Create session config
@@ -122,7 +153,7 @@ pub async fn create_session(
         permission_mode,
         model,
         resume_session_id,
-        cli_path,
+        cli_path: resolved_cli_path,
     };
 
     // Create session via backend
@@ -140,10 +171,7 @@ pub async fn create_session(
 }
 
 #[tauri::command]
-pub async fn destroy_session(
-    session_id: String,
-    app: AppHandle,
-) -> Result<(), String> {
+pub async fn destroy_session(session_id: String, app: AppHandle) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Remove session from store and get it for cleanup
@@ -161,6 +189,7 @@ pub async fn destroy_session(
 pub async fn send_message(
     session_id: String,
     message: String,
+    turn_id: Option<String>,
     app: AppHandle,
 ) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
@@ -170,10 +199,18 @@ pub async fn send_message(
     // Lock is now released!
 
     // Send message via the backend session
-    match session.send_message(&message).await {
+    match session.send_message(&message, turn_id.as_deref()).await {
         Ok(_) => Ok(()),
         Err(e) => {
-            let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Error { message: e.to_string() });
+            let error_event = ChatEvent::Error {
+                message: e.to_string(),
+            };
+            emit_chat_event(
+                &app,
+                Some(session_id.as_str()),
+                turn_id.as_deref(),
+                &error_event,
+            );
             Err(e.to_string())
         }
     }
@@ -199,7 +236,10 @@ pub async fn respond_permission(
         let _ = tx.send(PermissionResponse { allowed });
         Ok(())
     } else {
-        Err(format!("No pending permission request with id: {}", request_id))
+        Err(format!(
+            "No pending permission request with id: {}",
+            request_id
+        ))
     }
 }
 
@@ -217,10 +257,7 @@ pub async fn get_session_messages(
 }
 
 #[tauri::command]
-pub async fn abort_session(
-    session_id: String,
-    app: AppHandle,
-) -> Result<(), String> {
+pub async fn abort_session(session_id: String, app: AppHandle) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
@@ -245,20 +282,17 @@ pub async fn set_permission_mode(
     // Emit current state regardless of success/failure to keep frontend in sync
     let current_mode = session.get_permission_mode().await;
     let current_model = session.get_model().await;
-    let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::StateChanged {
+    let state_event = ChatEvent::StateChanged {
         permission_mode: current_mode,
         model: current_model,
-    });
+    };
+    emit_chat_event(&app, Some(session_id.as_str()), None, &state_event);
 
     result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn set_model(
-    session_id: String,
-    model: String,
-    app: AppHandle,
-) -> Result<(), String> {
+pub async fn set_model(session_id: String, model: String, app: AppHandle) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
     // Get the session Arc, releasing the lock immediately
@@ -269,10 +303,11 @@ pub async fn set_model(
     // Emit current state regardless of success/failure to keep frontend in sync
     let current_mode = session.get_permission_mode().await;
     let current_model = session.get_model().await;
-    let _ = app.emit(CHAT_EVENT_CHANNEL, &ChatEvent::StateChanged {
+    let state_event = ChatEvent::StateChanged {
         permission_mode: current_mode,
         model: current_model,
-    });
+    };
+    emit_chat_event(&app, Some(session_id.as_str()), None, &state_event);
 
     result.map_err(|e| e.to_string())
 }
@@ -288,7 +323,10 @@ pub async fn set_thinking_level(
     // Get the session Arc, releasing the lock immediately
     let session = get_session_from_store(&sessions, &session_id).await?;
 
-    session.set_thinking_level(level).await.map_err(|e| e.to_string())
+    session
+        .set_thinking_level(level)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -326,7 +364,11 @@ mod tests {
             "/tmp"
         }
 
-        async fn send_message(&self, _message: &str) -> Result<(), BackendError> {
+        async fn send_message(
+            &self,
+            _message: &str,
+            _turn_id: Option<&str>,
+        ) -> Result<(), BackendError> {
             Ok(())
         }
 
@@ -369,9 +411,14 @@ mod tests {
     async fn get_session_from_store_returns_existing_session() {
         let sessions = test_store();
         let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-1"));
-        sessions.lock().await.insert("session-1".to_string(), session);
+        sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), session);
 
-        let found = get_session_from_store(&sessions, "session-1").await.unwrap();
+        let found = get_session_from_store(&sessions, "session-1")
+            .await
+            .unwrap();
         assert_eq!(found.session_id(), "session-1");
     }
 
@@ -387,7 +434,10 @@ mod tests {
     async fn remove_session_from_store_removes_and_returns_session() {
         let sessions = test_store();
         let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-2"));
-        sessions.lock().await.insert("session-2".to_string(), session);
+        sessions
+            .lock()
+            .await
+            .insert("session-2".to_string(), session);
 
         let removed = remove_session_from_store(&sessions, "session-2").await;
         assert!(removed.is_some());

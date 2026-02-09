@@ -3,17 +3,17 @@
 //! This module contains all the hook logic for handling tool permissions,
 //! including pre-tool-use and post-tool-use callbacks.
 
+use crate::backends::{emit_chat_event, PermissionChannels, PermissionResponse};
 use crate::commands::chat::ChatEvent;
-use crate::backends::{PermissionChannels, PermissionResponse, CHAT_EVENT_CHANNEL};
 use claude_agent_sdk_rs::{
     HookCallback, HookContext, HookEvent, HookInput, HookJsonOutput, HookMatcher,
-    PreToolUseHookSpecificOutput, SyncHookJsonOutput, HookSpecificOutput,
+    HookSpecificOutput, PreToolUseHookSpecificOutput, SyncHookJsonOutput,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::sync::{oneshot, Notify, RwLock};
 use uuid::Uuid;
 
@@ -55,7 +55,7 @@ pub fn determine_permission(
     // that we cannot provide when wrapping the CLI programmatically
     if is_interactive_tool(tool_name) {
         return PermissionDecision::Deny(
-            "Interactive tools requiring TTY input are not supported".to_string()
+            "Interactive tools requiring TTY input are not supported".to_string(),
         );
     }
 
@@ -97,7 +97,7 @@ pub fn allow_response(reason: &str) -> HookJsonOutput {
                 permission_decision: Some("allow".to_string()),
                 permission_decision_reason: Some(reason.to_string()),
                 updated_input: None,
-            }
+            },
         )),
         ..Default::default()
     })
@@ -111,7 +111,7 @@ pub fn deny_response(reason: &str) -> HookJsonOutput {
                 permission_decision: Some("deny".to_string()),
                 permission_decision_reason: Some(reason.to_string()),
                 updated_input: None,
-            }
+            },
         )),
         ..Default::default()
     })
@@ -142,14 +142,20 @@ pub fn extract_tool_info(input: &HookInput) -> Option<(String, serde_json::Value
 
 /// Check if the tool requires permission prompting
 pub fn requires_permission(tool_name: &str) -> bool {
-    matches!(tool_name, "Write" | "Edit" | "Bash" | "NotebookEdit" | "Skill")
+    matches!(
+        tool_name,
+        "Write" | "Edit" | "Bash" | "NotebookEdit" | "Skill"
+    )
 }
 
 /// Check if the tool is an interactive tool that requires TTY input.
 /// These tools cannot be supported when wrapping the CLI programmatically
 /// because they block waiting for terminal input that we cannot provide.
 pub fn is_interactive_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "AskUserQuestion" | "EnterPlanMode" | "ExitPlanMode")
+    matches!(
+        tool_name,
+        "AskUserQuestion" | "EnterPlanMode" | "ExitPlanMode"
+    )
 }
 
 // ============================================================================
@@ -209,7 +215,8 @@ async fn wait_for_permission(
 pub async fn prompt_user_permission(
     permission_channels: PermissionChannels,
     app_handle: AppHandle,
-    _session_id: String,
+    session_id: String,
+    turn_id: Option<String>,
     tool_use_id: String,
     request_id: String,
     abort_notify: Arc<Notify>,
@@ -224,11 +231,17 @@ pub async fn prompt_user_permission(
     }
 
     // Emit status update: awaiting_permission
-    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
+    let awaiting_permission = ChatEvent::ToolStatusUpdate {
         tool_use_id: tool_use_id.clone(),
         status: "awaiting_permission".to_string(),
         permission_request_id: Some(request_id.clone()),
-    });
+    };
+    emit_chat_event(
+        &app_handle,
+        Some(session_id.as_str()),
+        turn_id.as_deref(),
+        &awaiting_permission,
+    );
 
     // Wait for permission response
     let outcome = wait_for_permission(rx, abort_notify, abort_flag).await;
@@ -248,11 +261,17 @@ pub async fn prompt_user_permission(
         PermissionOutcome::Aborted => ("denied", deny_response("Session aborted")),
     };
 
-    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
+    let final_status_event = ChatEvent::ToolStatusUpdate {
         tool_use_id,
         status: status.to_string(),
         permission_request_id: None,
-    });
+    };
+    emit_chat_event(
+        &app_handle,
+        Some(session_id.as_str()),
+        turn_id.as_deref(),
+        &final_status_event,
+    );
 
     result
 }
@@ -266,6 +285,7 @@ pub fn build_pre_tool_use_hook(
     permission_channels: PermissionChannels,
     app_handle: AppHandle,
     session_id: String,
+    turn_id: Option<String>,
     permission_mode_arc: Arc<RwLock<String>>,
     abort_flag: Arc<AtomicBool>,
     abort_notify: Arc<Notify>,
@@ -273,93 +293,117 @@ pub fn build_pre_tool_use_hook(
     // Load user settings once at hook creation
     let user_settings: Option<ClaudeSettings> = settings::load_user_settings();
 
-    Arc::new(move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
-        let permission_channels = permission_channels.clone();
-        let app_handle = app_handle.clone();
-        let session_id = session_id.clone();
-        let permission_mode_arc = permission_mode_arc.clone();
-        let abort_flag = abort_flag.clone();
-        let abort_notify = abort_notify.clone();
-        let user_settings = user_settings.clone();
+    Arc::new(
+        move |input: HookInput, tool_use_id: Option<String>, _ctx: HookContext| {
+            let permission_channels = permission_channels.clone();
+            let app_handle = app_handle.clone();
+            let session_id = session_id.clone();
+            let turn_id = turn_id.clone();
+            let permission_mode_arc = permission_mode_arc.clone();
+            let abort_flag = abort_flag.clone();
+            let abort_notify = abort_notify.clone();
+            let user_settings = user_settings.clone();
 
-        Box::pin(async move {
-            // 1. Check if abort was requested
-            if let Some(deny) = check_abort_decision(&abort_flag) {
-                return deny;
-            }
-
-            // 2. Extract tool info (only handle PreToolUse events)
-            let (tool_name, tool_input) = match extract_tool_info(&input) {
-                Some(info) => info,
-                None => return HookJsonOutput::Sync(SyncHookJsonOutput::default()),
-            };
-
-            // Get tool_use_id or generate a fallback (should always have one from SDK)
-            let tool_id = tool_use_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-
-            // 3. Emit ToolStart with pending status
-            // Include input for task/todo tools so frontend can update task list
-            let input_for_frontend = if tool_name.starts_with("Task") || tool_name.starts_with("Todo") {
-                Some(tool_input.clone())
-            } else {
-                None
-            };
-            let target = extract_tool_target(&tool_name, &tool_input);
-
-            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStart {
-                tool_use_id: tool_id.clone(),
-                tool_type: tool_name.clone(),
-                target,
-                status: "pending".to_string(),
-                input: input_for_frontend,
-            });
-
-            // 4. Determine permission using the reusable function
-            let current_mode = permission_mode_arc.read().await.clone();
-            let decision = determine_permission(
-                &current_mode,
-                &tool_name,
-                &tool_input,
-                user_settings.as_ref(),
-            );
-
-            match decision {
-                PermissionDecision::Allow(reason) => {
-                    // Emit status update: running (auto-approved)
-                    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_id,
-                        status: "running".to_string(),
-                        permission_request_id: None,
-                    });
-                    return allow_response(&reason);
+            Box::pin(async move {
+                // 1. Check if abort was requested
+                if let Some(deny) = check_abort_decision(&abort_flag) {
+                    return deny;
                 }
-                PermissionDecision::Deny(reason) => {
-                    // Emit status update: denied
-                    let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_id,
-                        status: "denied".to_string(),
-                        permission_request_id: None,
-                    });
-                    return deny_response(&reason);
-                }
-                PermissionDecision::PromptUser => {
-                    // Continue to prompt user below
-                }
-            }
 
-            // 5. Prompt user for permission
-            let request_id = Uuid::new_v4().to_string();
-            prompt_user_permission(
-                permission_channels,
-                app_handle,
-                session_id,
-                tool_id,
-                request_id,
-                abort_notify,
-                abort_flag,
-            ).await
-        })
-    })
+                // 2. Extract tool info (only handle PreToolUse events)
+                let (tool_name, tool_input) = match extract_tool_info(&input) {
+                    Some(info) => info,
+                    None => return HookJsonOutput::Sync(SyncHookJsonOutput::default()),
+                };
+
+                // Get tool_use_id or generate a fallback (should always have one from SDK)
+                let tool_id = tool_use_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+                // 3. Emit ToolStart with pending status
+                // Include input for task/todo tools so frontend can update task list
+                let input_for_frontend =
+                    if tool_name.starts_with("Task") || tool_name.starts_with("Todo") {
+                        Some(tool_input.clone())
+                    } else {
+                        None
+                    };
+                let target = extract_tool_target(&tool_name, &tool_input);
+
+                let tool_start = ChatEvent::ToolStart {
+                    tool_use_id: tool_id.clone(),
+                    tool_type: tool_name.clone(),
+                    target,
+                    status: "pending".to_string(),
+                    input: input_for_frontend,
+                };
+                emit_chat_event(
+                    &app_handle,
+                    Some(session_id.as_str()),
+                    turn_id.as_deref(),
+                    &tool_start,
+                );
+
+                // 4. Determine permission using the reusable function
+                let current_mode = permission_mode_arc.read().await.clone();
+                let decision = determine_permission(
+                    &current_mode,
+                    &tool_name,
+                    &tool_input,
+                    user_settings.as_ref(),
+                );
+
+                match decision {
+                    PermissionDecision::Allow(reason) => {
+                        // Emit status update: running (auto-approved)
+                        let running_status = ChatEvent::ToolStatusUpdate {
+                            tool_use_id: tool_id,
+                            status: "running".to_string(),
+                            permission_request_id: None,
+                        };
+                        emit_chat_event(
+                            &app_handle,
+                            Some(session_id.as_str()),
+                            turn_id.as_deref(),
+                            &running_status,
+                        );
+                        return allow_response(&reason);
+                    }
+                    PermissionDecision::Deny(reason) => {
+                        // Emit status update: denied
+                        let denied_status = ChatEvent::ToolStatusUpdate {
+                            tool_use_id: tool_id,
+                            status: "denied".to_string(),
+                            permission_request_id: None,
+                        };
+                        emit_chat_event(
+                            &app_handle,
+                            Some(session_id.as_str()),
+                            turn_id.as_deref(),
+                            &denied_status,
+                        );
+                        return deny_response(&reason);
+                    }
+                    PermissionDecision::PromptUser => {
+                        // Continue to prompt user below
+                    }
+                }
+
+                // 5. Prompt user for permission
+                let request_id = Uuid::new_v4().to_string();
+                prompt_user_permission(
+                    permission_channels,
+                    app_handle,
+                    session_id,
+                    turn_id,
+                    tool_id,
+                    request_id,
+                    abort_notify,
+                    abort_flag,
+                )
+                .await
+            })
+        },
+    )
 }
 
 /// Build the complete hooks map for an agent session
@@ -367,6 +411,7 @@ pub fn build_hooks(
     permission_channels: PermissionChannels,
     app_handle: AppHandle,
     session_id: String,
+    turn_id: Option<String>,
     permission_mode_arc: Arc<RwLock<String>>,
     abort_flag: Arc<AtomicBool>,
     abort_notify: Arc<Notify>,
@@ -375,6 +420,7 @@ pub fn build_hooks(
         permission_channels,
         app_handle,
         session_id,
+        turn_id,
         permission_mode_arc,
         abort_flag,
         abort_notify,
@@ -385,7 +431,7 @@ pub fn build_hooks(
         HookEvent::PreToolUse,
         vec![HookMatcher::builder()
             .hooks(vec![pre_tool_use_hook])
-            .build()]
+            .build()],
     );
 
     hooks
@@ -673,7 +719,8 @@ mod tests {
 
         // Verify it's a deny response by checking the structure
         if let Some(HookJsonOutput::Sync(sync_output)) = result {
-            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output
+            {
                 assert_eq!(pre_tool.permission_decision, Some("deny".to_string()));
                 assert!(pre_tool.permission_decision_reason.is_some());
             } else {
@@ -693,9 +740,13 @@ mod tests {
         let result = allow_response("Test reason");
 
         if let HookJsonOutput::Sync(sync_output) = result {
-            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output
+            {
                 assert_eq!(pre_tool.permission_decision, Some("allow".to_string()));
-                assert_eq!(pre_tool.permission_decision_reason, Some("Test reason".to_string()));
+                assert_eq!(
+                    pre_tool.permission_decision_reason,
+                    Some("Test reason".to_string())
+                );
                 assert!(pre_tool.updated_input.is_none());
             } else {
                 panic!("Expected PreToolUse hook specific output");
@@ -710,9 +761,13 @@ mod tests {
         let result = deny_response("Test denial");
 
         if let HookJsonOutput::Sync(sync_output) = result {
-            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output {
+            if let Some(HookSpecificOutput::PreToolUse(pre_tool)) = sync_output.hook_specific_output
+            {
                 assert_eq!(pre_tool.permission_decision, Some("deny".to_string()));
-                assert_eq!(pre_tool.permission_decision_reason, Some("Test denial".to_string()));
+                assert_eq!(
+                    pre_tool.permission_decision_reason,
+                    Some("Test denial".to_string())
+                );
                 assert!(pre_tool.updated_input.is_none());
             } else {
                 panic!("Expected PreToolUse hook specific output");
@@ -721,5 +776,4 @@ mod tests {
             panic!("Expected Sync hook output");
         }
     }
-
 }

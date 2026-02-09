@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  CliInstallStatus,
-  CliAuthStatus,
+  BackendCliStatus,
   StartupInfo,
   RecentFolder,
   LicenseStatus,
@@ -13,32 +12,32 @@ import type {
 
 export const api = {
   // Setup
-  checkCliInstalled: () => invoke<CliInstallStatus>('check_cli_installed'),
-  checkCliAuthenticated: () => invoke<CliAuthStatus>('check_cli_authenticated'),
+  checkAllBackendsStatus: () => invoke<BackendCliStatus[]>('check_all_backends_status'),
   getStartupInfo: () => invoke<StartupInfo>('get_startup_info'),
   validateFolder: (path: string) => invoke<boolean>('validate_folder', { path }),
-  completeOnboarding: (defaultFolder?: string) =>
-    invoke<void>('complete_onboarding', { defaultFolder }),
+  completeOnboarding: (defaultFolder?: string, defaultBackend?: string) =>
+    invoke<void>('complete_onboarding', { defaultFolder, defaultBackend }),
   saveRecentFolder: (path: string) => invoke<void>('save_recent_folder', { path }),
+  setDefaultBackend: (backend?: string) => invoke<void>('set_default_backend', { backend }),
 
   // Folders
   getRecentFolders: () => invoke<RecentFolder[]>('get_recent_folders'),
 
   // Sessions
-  getAllSessions: () => invoke<ProjectSessions[]>('get_all_sessions'),
-  getRecentSessions: (limit: number) => invoke<ProjectSessions[]>('get_recent_sessions', { limit }),
-  getProjectSessions: (folderPath: string) =>
-    invoke<SessionInfo[]>('get_project_sessions', { folderPath }),
-  getSessionHistory: (folderPath: string, sessionId: string) =>
-    invoke<HistoryMessage[]>('get_session_history', { folderPath, sessionId }),
+  getAllSessions: (backend?: string) => invoke<ProjectSessions[]>('get_all_sessions', { backend }),
+  getRecentSessions: (limit: number, backend?: string) => invoke<ProjectSessions[]>('get_recent_sessions', { limit, backend }),
+  getProjectSessions: (folderPath: string, backend?: string) =>
+    invoke<SessionInfo[]>('get_project_sessions', { folderPath, backend }),
+  getSessionHistory: (folderPath: string, sessionId: string, backend?: string) =>
+    invoke<HistoryMessage[]>('get_session_history', { folderPath, sessionId, backend }),
 
   // Session
   createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string, cliPath?: string, backend?: string) =>
     invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId, cliPath, backend }),
   destroySession: (sessionId: string) =>
     invoke<void>('destroy_session', { sessionId }),
-  sendMessage: (sessionId: string, message: string) =>
-    invoke<void>('send_message', { sessionId, message }),
+  sendMessage: (sessionId: string, message: string, turnId?: string) =>
+    invoke<void>('send_message', { sessionId, message, turnId }),
   abortSession: (sessionId: string) =>
     invoke<void>('abort_session', { sessionId }),
 
@@ -60,6 +59,7 @@ export const api = {
   revalidateLicenseBackground: () => invoke<void>('revalidate_license_background'),
 
   // CLI Path
-  getCliPath: () => invoke<string | null>('get_cli_path'),
-  setCliPath: (path?: string) => invoke<void>('set_cli_path', { path }),
+  getBackendCliPath: (backend: string) => invoke<string | null>('get_backend_cli_path', { backend }),
+  setBackendCliPath: (backend: string, path?: string) =>
+    invoke<void>('set_backend_cli_path', { backend, path }),
 };

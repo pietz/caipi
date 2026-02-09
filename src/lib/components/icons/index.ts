@@ -1,5 +1,4 @@
-// Brand icon (kept as custom component)
+// Brand icons
 export { default as CaipiIcon } from './CaipiIcon.svelte';
-
-// Note: All other icons have been replaced with lucide-svelte
-// Usage: import { IconName } from 'lucide-svelte';
+export { default as ClaudeIcon } from './ClaudeIcon.svelte';
+export { default as OpenAIIcon } from './OpenAIIcon.svelte';

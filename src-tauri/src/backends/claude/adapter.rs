@@ -4,14 +4,14 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
+use crate::backends::emit_chat_event;
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
-use crate::backends::CHAT_EVENT_CHANNEL;
 use crate::claude::agent::{AgentEvent, AgentSession};
 use crate::commands::chat::{ChatEvent, Message};
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
@@ -85,7 +85,9 @@ impl Backend for ClaudeBackend {
         config: SessionConfig,
         app_handle: AppHandle,
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
-        let permission_mode = config.permission_mode.unwrap_or_else(|| "default".to_string());
+        let permission_mode = config
+            .permission_mode
+            .unwrap_or_else(|| "default".to_string());
         let model = config.model.unwrap_or_else(|| "sonnet".to_string());
 
         let session = AgentSession::new(
@@ -135,23 +137,32 @@ impl BackendSession for ClaudeSession {
         &self.inner.folder_path
     }
 
-    async fn send_message(&self, message: &str) -> Result<(), BackendError> {
+    async fn send_message(&self, message: &str, turn_id: Option<&str>) -> Result<(), BackendError> {
         // Clone app_handle for the callback closure
         let app_handle = self.app_handle.clone();
+        let session_id = self.inner.id.clone();
+        let turn_id = turn_id.map(|id| id.to_string());
 
         self.inner
-            .send_message(message, move |event| {
+            .send_message(message, turn_id.clone(), move |event| {
                 // Convert AgentEvent to ChatEvent and emit
                 let chat_event = match event {
                     AgentEvent::Text(content) => ChatEvent::Text { content },
                     AgentEvent::SessionInit { auth_type } => ChatEvent::SessionInit { auth_type },
-                    AgentEvent::TokenUsage { total_tokens } => {
-                        ChatEvent::TokenUsage { total_tokens }
-                    }
+                    AgentEvent::TokenUsage { total_tokens } => ChatEvent::TokenUsage {
+                        total_tokens,
+                        context_tokens: None,
+                        context_window: None,
+                    },
                     AgentEvent::Complete => ChatEvent::Complete,
                     AgentEvent::Error(msg) => ChatEvent::Error { message: msg },
                 };
-                let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &chat_event);
+                emit_chat_event(
+                    &app_handle,
+                    Some(session_id.as_str()),
+                    turn_id.as_deref(),
+                    &chat_event,
+                );
             })
             .await
             .map_err(|e| BackendError {

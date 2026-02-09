@@ -3,9 +3,11 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui';
+  import { ClaudeIcon, OpenAIIcon } from '$lib/components/icons';
   import { theme, type ThemePreference } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
   import { api } from '$lib/api';
+  import type { Backend } from '$lib/config/backends';
 
   interface Props {
     onClose: () => void;
@@ -17,10 +19,11 @@
   let deactivating = $state(false);
   let cliPathInput = $state(app.cliPath ?? '');
   let savingCliPath = $state(false);
+  let backendStatuses = $state<Record<string, { installed: boolean; authenticated: boolean; version?: string }>>({});
 
-  // Strip "(Claude Code)" or similar suffixes from version string
-  const cliVersion = $derived(() => {
-    const version = app.cliStatus?.version;
+  // Strip extra suffixes from version string
+  const cliVersion = $derived.by(() => {
+    const version = backendStatuses[app.defaultBackend]?.version;
     if (!version) return null;
     return version.replace(/\s*\(.*\)\s*$/, '').trim();
   });
@@ -34,7 +37,14 @@
 
   onMount(async () => {
     try {
-      appVersion = await getVersion();
+      const [version, statuses] = await Promise.all([
+        getVersion(),
+        api.checkAllBackendsStatus()
+      ]);
+      appVersion = version;
+      backendStatuses = Object.fromEntries(
+        statuses.map(s => [s.backend, { installed: s.installed, authenticated: s.authenticated, version: s.version }])
+      );
     } catch (e) {
       console.error('Failed to get app version:', e);
     }
@@ -73,8 +83,8 @@
     try {
       const trimmed = cliPathInput.trim();
       const pathToSave = trimmed === '' ? undefined : trimmed;
-      await api.setCliPath(pathToSave);
-      app.setCliPath(pathToSave ?? null);
+      await api.setBackendCliPath(app.defaultBackend, pathToSave);
+      app.setCliPath(pathToSave ?? null, app.defaultBackend);
     } catch (e) {
       console.error('Failed to save CLI path:', e);
     } finally {
@@ -86,6 +96,12 @@
     if (e.key === 'Enter') {
       saveCliPath();
     }
+  }
+
+  async function switchBackend(backend: Backend) {
+    if (backend === app.defaultBackend) return;
+    await app.setDefaultBackend(backend);
+    cliPathInput = app.getCliPath(backend) ?? '';
   }
 </script>
 
@@ -112,6 +128,31 @@
 
     <!-- Main Settings -->
     <div class="mb-6 space-y-4">
+      <div>
+        <span class="text-xs text-muted-foreground">Default Backend</span>
+        <div class="mt-1 flex gap-1 p-1 bg-muted rounded-lg">
+          {#each (['claudecli', 'codex'] as Backend[]) as backend}
+            {@const isReady = !!backendStatuses[backend]?.installed && !!backendStatuses[backend]?.authenticated}
+            <button
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {app.defaultBackend === backend ? 'bg-background shadow-sm' : 'hover:bg-background/50'} {isReady ? '' : 'opacity-50'}"
+              disabled={!isReady}
+              onclick={() => switchBackend(backend)}
+            >
+              {#if backend === 'claudecli'}
+                <ClaudeIcon size={12} />
+                Claude Code
+              {:else}
+                <OpenAIIcon size={12} />
+                Codex CLI
+              {/if}
+            </button>
+          {/each}
+        </div>
+        <p class="text-[10px] text-muted-foreground/70 mt-1">
+          Applies to new sessions only. Current chat continues on {app.sessionBackend ?? app.defaultBackend}.
+        </p>
+      </div>
+
       <div class="flex gap-1 p-1 bg-muted rounded-lg">
         <button
           class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {currentPreference === 'light' ? 'bg-background shadow-sm' : 'hover:bg-background/50'}"
@@ -137,13 +178,13 @@
       </div>
 
       <label class="block">
-        <span class="text-xs text-muted-foreground">Custom CLI Path</span>
+        <span class="text-xs text-muted-foreground">Custom CLI Path ({app.defaultBackend === 'claudecli' ? 'Claude Code' : 'Codex CLI'})</span>
         <div class="mt-1 flex gap-2">
           <input
             type="text"
             bind:value={cliPathInput}
             onkeydown={handleCliPathKeydown}
-            placeholder="/usr/local/bin/claude"
+            placeholder={app.defaultBackend === 'claudecli' ? '/usr/local/bin/claude' : '/usr/local/bin/codex'}
             class="flex-1 h-7 px-2 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <Button
@@ -173,8 +214,8 @@
           <span class="text-foreground">{appVersion ?? 'Loading...'}</span>
         </div>
         <div class="flex justify-between">
-          <span class="text-muted-foreground">Claude CLI Version</span>
-          <span class="text-foreground">{cliVersion() ?? 'Not installed'}</span>
+          <span class="text-muted-foreground">CLI Version</span>
+          <span class="text-foreground">{cliVersion ?? 'Not installed'}</span>
         </div>
         {#if email}
           <div class="flex justify-between">

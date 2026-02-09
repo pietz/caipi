@@ -23,7 +23,9 @@ pub trait BackendSession: Send + Sync {
     fn folder_path(&self) -> &str;
 
     /// Sends a message and streams responses via the event channel.
-    async fn send_message(&self, message: &str) -> Result<(), BackendError>;
+    ///
+    /// `turn_id` is an optional frontend-generated ID used for stale-event gating.
+    async fn send_message(&self, message: &str, turn_id: Option<&str>) -> Result<(), BackendError>;
 
     /// Aborts the current operation.
     async fn abort(&self) -> Result<(), BackendError>;

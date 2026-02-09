@@ -19,9 +19,11 @@ fn validate_path_within_root(path: &str, root_path: &str) -> Result<PathBuf, Str
     let root = PathBuf::from(root_path);
 
     // Canonicalize both paths to resolve symlinks and ../
-    let canonical_root = root.canonicalize()
+    let canonical_root = root
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve root path: {}", e))?;
-    let canonical_requested = requested.canonicalize()
+    let canonical_requested = requested
+        .canonicalize()
         .map_err(|e| format!("Failed to resolve requested path: {}", e))?;
 
     // Check that the requested path starts with the root path
@@ -36,7 +38,10 @@ fn validate_path_within_root(path: &str, root_path: &str) -> Result<PathBuf, Str
 }
 
 #[tauri::command]
-pub async fn list_directory(path: String, root_path: Option<String>) -> Result<Vec<FileEntry>, String> {
+pub async fn list_directory(
+    path: String,
+    root_path: Option<String>,
+) -> Result<Vec<FileEntry>, String> {
     // If root_path is provided, validate that the requested path is within it
     let dir_path = if let Some(root) = &root_path {
         validate_path_within_root(&path, root)?
@@ -77,7 +82,11 @@ pub async fn list_directory(path: String, root_path: Option<String>) -> Result<V
 
         let file_entry = FileEntry {
             name: file_name,
-            entry_type: if is_dir { "folder".to_string() } else { "file".to_string() },
+            entry_type: if is_dir {
+                "folder".to_string()
+            } else {
+                "file".to_string()
+            },
             path: file_path.to_string_lossy().to_string(),
             children: if is_dir { Some(Vec::new()) } else { None },
         };
@@ -86,12 +95,10 @@ pub async fn list_directory(path: String, root_path: Option<String>) -> Result<V
     }
 
     // Sort: folders first, then files, alphabetically within each group
-    entries.sort_by(|a, b| {
-        match (&a.entry_type[..], &b.entry_type[..]) {
-            ("folder", "file") => std::cmp::Ordering::Less,
-            ("file", "folder") => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (&a.entry_type[..], &b.entry_type[..]) {
+        ("folder", "file") => std::cmp::Ordering::Less,
+        ("file", "folder") => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
     Ok(entries)

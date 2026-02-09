@@ -44,7 +44,11 @@ pub fn load_user_settings() -> Option<ClaudeSettings> {
 /// - `"Skill(email)"` - tool with specific argument
 /// - `"Bash(ls:*)"` - bash with command prefix (`:*` means any suffix)
 /// - `"Bash(uv init)"` - exact command match (no `:*`)
-pub fn is_tool_allowed(settings: &ClaudeSettings, tool_name: &str, tool_input: &serde_json::Value) -> bool {
+pub fn is_tool_allowed(
+    settings: &ClaudeSettings,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+) -> bool {
     for pattern in &settings.permissions.allow {
         if matches_pattern(pattern, tool_name, tool_input) {
             return true;
@@ -168,18 +172,42 @@ mod tests {
     fn test_skill_exact_match() {
         let settings = settings_with_allow(vec!["Skill(email)", "Skill(calendar)"]);
 
-        assert!(is_tool_allowed(&settings, "Skill", &json!({"skill": "email"})));
-        assert!(is_tool_allowed(&settings, "Skill", &json!({"skill": "calendar"})));
-        assert!(!is_tool_allowed(&settings, "Skill", &json!({"skill": "commit"})));
+        assert!(is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "email"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "calendar"})
+        ));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "commit"})
+        ));
     }
 
     #[test]
     fn test_skill_prefix_match() {
         let settings = settings_with_allow(vec!["Skill(frontend-:*)"]);
 
-        assert!(is_tool_allowed(&settings, "Skill", &json!({"skill": "frontend-design"})));
-        assert!(is_tool_allowed(&settings, "Skill", &json!({"skill": "frontend-test"})));
-        assert!(!is_tool_allowed(&settings, "Skill", &json!({"skill": "backend"})));
+        assert!(is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "frontend-design"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "frontend-test"})
+        ));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Skill",
+            &json!({"skill": "backend"})
+        ));
     }
 
     // ============================================================================
@@ -190,30 +218,78 @@ mod tests {
     fn test_bash_prefix_match() {
         let settings = settings_with_allow(vec!["Bash(ls:*)", "Bash(pwd:*)"]);
 
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "ls"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "ls -la"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "ls /tmp"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "pwd"})));
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"command": "rm -rf /"})));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "ls"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "ls -la"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "ls /tmp"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "pwd"})
+        ));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "rm -rf /"})
+        ));
     }
 
     #[test]
     fn test_bash_exact_match() {
         let settings = settings_with_allow(vec!["Bash(uv init)"]);
 
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "uv init"})));
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"command": "uv init --help"})));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "uv init"})
+        ));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "uv init --help"})
+        ));
     }
 
     #[test]
     fn test_bash_complex_prefix() {
         let settings = settings_with_allow(vec!["Bash(npm run:*)", "Bash(cargo check:*)"]);
 
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "npm run dev"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "npm run build"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "cargo check"})));
-        assert!(is_tool_allowed(&settings, "Bash", &json!({"command": "cargo check --all-features"})));
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"command": "npm install"})));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "npm run dev"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "npm run build"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "cargo check"})
+        ));
+        assert!(is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "cargo check --all-features"})
+        ));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "npm install"})
+        ));
     }
 
     // ============================================================================
@@ -225,7 +301,11 @@ mod tests {
         let settings = settings_with_allow(vec![]);
 
         assert!(!is_tool_allowed(&settings, "WebFetch", &json!({})));
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"command": "ls"})));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "ls"})
+        ));
     }
 
     #[test]
@@ -233,7 +313,11 @@ mod tests {
         // Pattern with ( but no ) should not match
         let settings = settings_with_allow(vec!["Bash(ls"]);
 
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"command": "ls"})));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"command": "ls"})
+        ));
     }
 
     #[test]
@@ -242,6 +326,10 @@ mod tests {
 
         // Missing command field should not crash, just not match
         assert!(!is_tool_allowed(&settings, "Bash", &json!({})));
-        assert!(!is_tool_allowed(&settings, "Bash", &json!({"other": "field"})));
+        assert!(!is_tool_allowed(
+            &settings,
+            "Bash",
+            &json!({"other": "field"})
+        ));
     }
 }

@@ -23,7 +23,7 @@
     try {
       loading = true;
       // Backend handles: filtering non-existent folders, sorting, limiting to 100
-      projects = await api.getRecentSessions(100);
+      projects = await api.getRecentSessions(100, app.defaultBackend);
       expandedFolders = new Set();
     } catch (e) {
       console.error('Failed to load sessions:', e);
@@ -57,7 +57,13 @@
       // Reset state before loading different session
       chat.reset();
       resetEventState();
-      await app.resumeSession(session.folderPath, session.sessionId);
+      // Only hard-pin Codex sessions; Claude-family sessions should use current backend selection.
+      const resumeBackend = session.backend === 'codex' ? 'codex' : undefined;
+      await app.resumeSession(
+        session.folderPath,
+        session.sessionId,
+        resumeBackend
+      );
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to resume session';
     } finally {

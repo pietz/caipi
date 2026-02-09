@@ -90,6 +90,8 @@
 
     // Add user message
     chat.addUserMessage(message);
+    const turnId = crypto.randomUUID();
+    chat.setActiveTurnId(turnId);
 
     // Start streaming
     chat.setStreaming(true);
@@ -97,9 +99,10 @@
     scrollToBottom();
 
     try {
-      await api.sendMessage(app.sessionId, message);
+      await api.sendMessage(app.sessionId, message, turnId);
     } catch (e) {
       console.error('Failed to send message:', e);
+      chat.setActiveTurnId(null);
       chat.setStreaming(false);
     }
   }
@@ -116,6 +119,8 @@
 
     // Add user message now, right before sending
     chat.addUserMessage(nextMessage);
+    const turnId = crypto.randomUUID();
+    chat.setActiveTurnId(turnId);
 
     // Keep streaming state active
     chat.setStreaming(true);
@@ -123,9 +128,10 @@
     scrollToBottom();
 
     try {
-      await api.sendMessage(app.sessionId, nextMessage);
+      await api.sendMessage(app.sessionId, nextMessage, turnId);
     } catch (e) {
       console.error('Failed to send queued message:', e);
+      chat.setActiveTurnId(null);
       chat.setStreaming(false);
     }
   }

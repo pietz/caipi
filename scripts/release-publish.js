@@ -1,9 +1,18 @@
-import { readFile, writeFile, copyFile } from "fs/promises";
-import { execSync } from "child_process";
+import { readFile, writeFile, access } from "fs/promises";
+import { execFileSync, execSync } from "child_process";
 import { join } from "path";
 
 const CAIPI_AI_PATH = "/Users/pietz/Private/caipi.ai";
 const BUNDLE_PATH = "src-tauri/target/release/bundle";
+
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function publish() {
   // 1. Get version from tauri.conf.json
@@ -15,7 +24,6 @@ async function publish() {
   const sigPath = join(BUNDLE_PATH, "macos/caipi.app.tar.gz.sig");
   const signature = (await readFile(sigPath, "utf-8")).trim();
 
-  // 3. Generate latest.json
   const latestJson = {
     version,
     notes: "",
@@ -27,6 +35,25 @@ async function publish() {
       },
     },
   };
+
+  const winExePath = join(BUNDLE_PATH, "nsis/caipi_x64.exe");
+  const winSigPath = join(BUNDLE_PATH, "nsis/caipi_x64.exe.sig");
+  const hasWinExe = await fileExists(winExePath);
+  const hasWinSig = await fileExists(winSigPath);
+
+  if (hasWinExe !== hasWinSig) {
+    throw new Error(
+      "Windows updater artifacts are incomplete: expected both caipi_x64.exe and caipi_x64.exe.sig"
+    );
+  }
+
+  if (hasWinExe && hasWinSig) {
+    const windowsSignature = (await readFile(winSigPath, "utf-8")).trim();
+    latestJson.platforms["windows-x86_64"] = {
+      signature: windowsSignature,
+      url: `https://github.com/pietz/caipi.ai/releases/download/v${version}/caipi_x64.exe`,
+    };
+  }
 
   const latestPath = join(BUNDLE_PATH, "latest.json");
   await writeFile(latestPath, JSON.stringify(latestJson, null, 2));
@@ -59,21 +86,34 @@ async function publish() {
 
   try {
     // Delete existing release if it exists (for re-runs)
-    execSync(`gh release delete v${version} --repo pietz/caipi.ai --yes 2>/dev/null || true`, {
-      encoding: "utf-8",
-    });
+    try {
+      execFileSync("gh", ["release", "delete", `v${version}`, "--repo", "pietz/caipi.ai", "--yes"], {
+        stdio: "ignore",
+      });
+    } catch {
+      // Ignore if release doesn't exist
+    }
 
     // Create release and upload files
     const releaseNotes = process.env.RELEASE_NOTES || `Release v${version}`;
-    execSync(
-      `gh release create v${version} \
-        "${dmgFile}" \
-        "${tgzFile}" \
-        "${sigFile}" \
-        "${latestPath}" \
-        --repo pietz/caipi.ai \
-        --title "v${version}" \
-        --notes "${releaseNotes.replace(/"/g, '\\"')}"`,
+    const releaseFiles = [dmgFile, tgzFile, sigFile, latestPath];
+    if (hasWinExe && hasWinSig) {
+      releaseFiles.push(winExePath, winSigPath);
+    }
+    execFileSync(
+      "gh",
+      [
+        "release",
+        "create",
+        `v${version}`,
+        ...releaseFiles,
+        "--repo",
+        "pietz/caipi.ai",
+        "--title",
+        `v${version}`,
+        "--notes",
+        releaseNotes,
+      ],
       { stdio: "inherit" }
     );
     console.log(`\n✓ GitHub release created`);

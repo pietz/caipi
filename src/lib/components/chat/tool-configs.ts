@@ -106,6 +106,26 @@ export const toolConfigs: Record<string, ToolConfig> = {
     label: 'ask'
   },
 
+  // Codex CLI tool names
+  command_execution: {
+    icon: Terminal,
+    className: 'bg-purple-500/10 border-purple-500/20 text-purple-500',
+    iconColor: 'text-purple-500',
+    label: 'bash'
+  },
+  web_search: {
+    icon: Globe,
+    className: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500',
+    iconColor: 'text-emerald-500',
+    label: 'search'
+  },
+  file_change: {
+    icon: Pencil,
+    className: 'bg-amber-500/10 border-amber-500/20 text-amber-500',
+    iconColor: 'text-amber-500',
+    label: 'patch'
+  },
+
   // Thinking
   Thinking: {
     icon: Brain,
@@ -123,5 +143,5 @@ export const defaultConfig: ToolConfig = {
 };
 
 export function getToolConfig(toolType: string): ToolConfig {
-  return toolConfigs[toolType] ?? defaultConfig;
+  return toolConfigs[toolType] ?? toolConfigs[toolType.toLowerCase()] ?? defaultConfig;
 }

@@ -37,12 +37,23 @@ export interface TodoItem {
   active: boolean;
 }
 
+function ensureUniqueToolIds(tools: ToolState[]): ToolState[] {
+  const seen = new Map<string, number>();
+  return tools.map((tool) => {
+    const count = seen.get(tool.id) ?? 0;
+    seen.set(tool.id, count + 1);
+    if (count === 0) return tool;
+    return { ...tool, id: `${tool.id}__dup_${count}` };
+  });
+}
+
 class ChatState {
   // Messages (finalized)
   messages = $state<Message[]>([]);
 
   // Streaming state
   isStreaming = $state(false);
+  activeTurnId = $state<string | null>(null);
   streamItems = $state<StreamItem[]>([]);
   private streamItemCounter = $state(0);
 
@@ -56,6 +67,7 @@ class ChatState {
   todos = $state<TodoItem[]>([]);
   activeSkills = $state<string[]>([]);
   tokenCount = $state(0);
+  contextWindow = $state<number | null>(null);
   sessionDuration = $state(0);
 
   // --- Message methods ---
@@ -93,7 +105,12 @@ class ChatState {
       this.streamItems = [];
       this.streamItemCounter = 0;
       this.tools = new Map();
+      this.activeTurnId = null;
     }
+  }
+
+  setActiveTurnId(turnId: string | null) {
+    this.activeTurnId = turnId;
   }
 
   appendText(content: string) {
@@ -233,6 +250,7 @@ class ChatState {
 
     this.messages = newMessages;
     this.isStreaming = false;
+    this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
     this.tools = new Map();
@@ -283,6 +301,7 @@ class ChatState {
   reset() {
     this.messages = [];
     this.isStreaming = false;
+    this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
     this.tools = new Map();
@@ -290,6 +309,7 @@ class ChatState {
     this.todos = [];
     this.activeSkills = [];
     this.tokenCount = 0;
+    this.contextWindow = null;
     this.sessionDuration = 0;
   }
 
@@ -319,7 +339,7 @@ class ChatState {
 
       if (canMerge) {
         // Merge tools into previous assistant message
-        lastMessage.tools = [...(lastMessage.tools || []), ...tools];
+        lastMessage.tools = ensureUniqueToolIds([...(lastMessage.tools || []), ...tools]);
       } else {
         // Create new message
         mergedMessages.push({
@@ -327,7 +347,7 @@ class ChatState {
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
           timestamp: msg.timestamp,
-          tools: tools.length > 0 ? tools : undefined,
+          tools: tools.length > 0 ? ensureUniqueToolIds(tools) : undefined,
         });
       }
     }

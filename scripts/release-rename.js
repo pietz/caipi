@@ -75,6 +75,15 @@ async function rename() {
       const dest = join(winNsisDir, "caipi_x64.exe");
       await copyFile(join(winNsisDir, exe), dest);
       console.log(`Created: ${dest}`);
+
+      // Copy updater signature for the renamed installer if present.
+      // Tauri emits a ".sig" file next to the installer when updater artifacts are enabled.
+      const exeSig = nsisFiles.find((f) => f === `${exe}.sig`);
+      if (exeSig) {
+        const sigDest = join(winNsisDir, "caipi_x64.exe.sig");
+        await copyFile(join(winNsisDir, exeSig), sigDest);
+        console.log(`Created: ${sigDest}`);
+      }
     }
   }
 }

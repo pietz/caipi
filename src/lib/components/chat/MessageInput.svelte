@@ -3,7 +3,7 @@
   import { Shield, Pencil, AlertTriangle, ArrowUp, Brain } from 'lucide-svelte';
   import { Button, ContextIndicator, Tooltip } from '$lib/components/ui';
   import ModelSizeIcon from '$lib/components/icons/ModelSizeIcon.svelte';
-  import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
+  import { app, type PermissionMode } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { cn } from '$lib/utils';
 
@@ -15,7 +15,7 @@
     placeholder?: string;
   }
 
-  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask Claude anything...' }: Props = $props();
+  let { onSend, onQueue, onAbort, isStreaming = false, placeholder = 'Ask anything...' }: Props = $props();
   let value = $state('');
 
   const modeConfig: Record<PermissionMode, { label: string; icon: typeof Shield; danger?: boolean }> = {
@@ -24,18 +24,13 @@
     bypassPermissions: { label: 'Allow All', icon: AlertTriangle, danger: true },
   };
 
-  const modelConfig: Record<Model, { label: string; size: 'large' | 'medium' | 'small' }> = {
-    opus: { label: 'Opus 4.6', size: 'large' },
-    sonnet: { label: 'Sonnet 4.5', size: 'medium' },
-    haiku: { label: 'Haiku 4.5', size: 'small' },
-  };
-
-  // Calculate context percentage (200k token limit)
-  const contextPercentage = $derived(Math.round((chat.tokenCount / 200000) * 100));
+  // Prefer runtime context window when provided by backend, else fallback to static config.
+  const contextLimit = $derived(chat.contextWindow ?? app.backendConfig.contextLimit);
+  const contextPercentage = $derived(Math.round((chat.tokenCount / contextLimit) * 100));
 
   // Get current thinking option label
   const thinkingLabel = $derived(
-    app.backendConfig.thinkingOptions.find(opt => opt.value === app.thinkingLevel)?.label ?? 'Off'
+    app.thinkingOptions.find(opt => opt.value === app.thinkingLevel)?.label ?? ''
   );
 
   function handleModeClick() {
@@ -85,7 +80,9 @@
 
   const hasContent = $derived(value.trim().length > 0);
   const currentMode = $derived(modeConfig[app.permissionMode]);
-  const currentModel = $derived(modelConfig[app.model]);
+  const currentModel = $derived(
+    app.backendConfig.models.find((m) => m.id === app.model) ?? app.backendConfig.models[0]
+  );
   const ModeIcon = $derived(currentMode.icon);
 </script>
 
@@ -127,42 +124,44 @@
       <!-- Footer -->
       <div class="flex items-center p-1 border-t border-border">
         <div class="flex items-center gap-2">
-          <Tooltip text="Claude Model">
+          <Tooltip text="Model">
             <Button
               variant="ghost"
               size="sm"
-              class="w-28 justify-start gap-2 h-8 text-xs"
+              class="justify-start gap-2 h-8 text-xs whitespace-nowrap"
               onclick={handleModelClick}
             >
               <ModelSizeIcon size={currentModel.size} />
-              {currentModel.label}
+              {currentModel.name}
             </Button>
           </Tooltip>
+
+          {#if app.thinkingOptions.length > 0}
+            <Tooltip text="Thinking">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="justify-start gap-2 h-8 text-xs whitespace-nowrap"
+                onclick={handleThinkingClick}
+              >
+                <Brain size={14} />
+                {thinkingLabel}
+              </Button>
+            </Tooltip>
+          {/if}
 
           <Tooltip text="Permission Mode">
             <Button
               variant="ghost"
               size="sm"
               class={cn(
-                'w-24 justify-start gap-2 h-8 text-xs',
+                'justify-start gap-2 h-8 text-xs whitespace-nowrap',
                 currentMode.danger && 'text-red-500 hover:text-red-500'
               )}
               onclick={handleModeClick}
             >
               <ModeIcon size={14} />
               {currentMode.label}
-            </Button>
-          </Tooltip>
-
-          <Tooltip text="Extended Thinking">
-            <Button
-              variant="ghost"
-              size="sm"
-              class="w-16 justify-start gap-2 h-8 text-xs"
-              onclick={handleThinkingClick}
-            >
-              <Brain size={14} />
-              {thinkingLabel}
             </Button>
           </Tooltip>
         </div>

@@ -1,11 +1,12 @@
 mod backends;
-mod commands;
 mod claude;
+mod commands;
 mod storage;
 
-use backends::{BackendKind, BackendRegistry, BackendSession};
 use backends::claude::{ClaudeBackend, ClaudeCliBackend};
+use backends::codex::CodexBackend;
 use backends::PermissionChannels;
+use backends::{BackendKind, BackendRegistry, BackendSession};
 use commands::chat::SessionStore;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub fn run() {
     let mut registry = BackendRegistry::new();
     registry.register(Arc::new(ClaudeBackend::new()));
     registry.register(Arc::new(ClaudeCliBackend::new()));
+    registry.register(Arc::new(CodexBackend::new()));
 
     // Allow overriding the default backend via environment variable for testing
     // Usage: CAIPI_BACKEND=claudecli npm run tauri dev
@@ -29,7 +31,10 @@ pub fn run() {
             eprintln!("[init] Using backend from CAIPI_BACKEND env var: {}", kind);
             registry.set_default(kind);
         } else {
-            eprintln!("[init] Warning: Unknown CAIPI_BACKEND value '{}', using default", backend_env);
+            eprintln!(
+                "[init] Warning: Unknown CAIPI_BACKEND value '{}', using default",
+                backend_env
+            );
         }
     }
 
@@ -75,12 +80,19 @@ pub fn run() {
             commands::check_cli_status,
             commands::check_cli_installed,
             commands::check_cli_authenticated,
+            commands::check_backend_cli_installed,
+            commands::check_backend_cli_authenticated,
+            commands::check_all_backends_status,
             commands::get_startup_info,
             commands::complete_onboarding,
             commands::reset_onboarding,
             commands::set_default_folder,
+            commands::get_default_backend,
+            commands::set_default_backend,
             commands::get_cli_path,
             commands::set_cli_path,
+            commands::get_backend_cli_path,
+            commands::set_backend_cli_path,
             // Folder commands
             commands::validate_folder,
             commands::get_recent_folders,

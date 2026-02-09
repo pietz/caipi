@@ -48,7 +48,16 @@
 
       // Set CLI path if available (for custom Claude CLI location)
       if (startupInfo.cliPath) {
-        app.setCliPath(startupInfo.cliPath);
+        app.setCliPath(startupInfo.cliPath, 'claudecli');
+      }
+      if (startupInfo.backendCliPaths) {
+        for (const [backend, path] of Object.entries(startupInfo.backendCliPaths)) {
+          app.setCliPath(path, backend as 'claude' | 'claudecli' | 'codex');
+        }
+      }
+      if (startupInfo.defaultBackend) {
+        app.defaultBackend = startupInfo.defaultBackend as 'claude' | 'claudecli' | 'codex';
+        app.ensureBackendState(app.defaultBackend);
       }
 
       // If onboarding is completed and we have a default folder, go directly to chat

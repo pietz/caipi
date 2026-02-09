@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -25,7 +25,7 @@ use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
-use crate::backends::{PermissionChannels, CHAT_EVENT_CHANNEL};
+use crate::backends::{emit_chat_event, PermissionChannels};
 use crate::claude::cli_protocol::{
     AssistantEvent, CliEvent, ContentBlock, IncomingControlRequest, OutgoingControlResponse,
     ResultEvent, SystemEvent, UsageInfo,
@@ -64,7 +64,7 @@ impl Backend for ClaudeCliBackend {
             supports_streaming: true,
             supports_abort: true,
             supports_resume: true,
-            supports_extended_thinking: true,
+            supports_extended_thinking: false,
             available_models: vec![
                 ModelInfo {
                     id: "opus".to_string(),
@@ -233,11 +233,14 @@ impl CliSession {
         let initial_messages = config
             .resume_session_id
             .as_deref()
-            .map(|session_id| load_session_log_messages(&config.folder_path, session_id).unwrap_or_default())
+            .map(|session_id| {
+                load_session_log_messages(&config.folder_path, session_id).unwrap_or_default()
+            })
             .unwrap_or_default();
 
         // Get permission channels from app state
-        let permission_channels: PermissionChannels = app_handle.state::<PermissionChannels>().inner().clone();
+        let permission_channels: PermissionChannels =
+            app_handle.state::<PermissionChannels>().inner().clone();
 
         Ok(Self {
             id: Uuid::new_v4().to_string(),
@@ -266,7 +269,11 @@ impl CliSession {
     }
 
     /// Internal spawn with resume control.
-    async fn spawn_cli_internal(&self, message: &str, use_resume: bool) -> Result<(), BackendError> {
+    async fn spawn_cli_internal(
+        &self,
+        message: &str,
+        use_resume: bool,
+    ) -> Result<(), BackendError> {
         let cli_cmd = self.cli_path.as_deref().unwrap_or("claude");
         let model = self.model.read().await.clone();
         let permission_mode = self.permission_mode.read().await.clone();
@@ -373,6 +380,8 @@ impl CliSession {
         let permission_channels = self.permission_channels.clone();
         let stdin_writer = self.stdin_writer.clone();
         let session_id = self.id.clone();
+        let session_id_for_stdout = session_id.clone();
+        let session_id_for_lifecycle = session_id;
         let messages = self.messages.clone();
         let cli_session_id = self.cli_session_id.clone();
         let process = self.process.clone();
@@ -415,7 +424,7 @@ impl CliSession {
                             &stdin_writer,
                             &abort_flag,
                             &abort_notify,
-                            &session_id,
+                            &session_id_for_stdout,
                             &mut active_tools,
                             &messages,
                             &cli_session_id,
@@ -424,7 +433,10 @@ impl CliSession {
                     }
                     Err(e) => {
                         // Log parse errors but continue
-                        eprintln!("[cli_adapter] Failed to parse event: {} - line: {}", e, line);
+                        eprintln!(
+                            "[cli_adapter] Failed to parse event: {} - line: {}",
+                            e, line
+                        );
                     }
                 }
             }
@@ -435,15 +447,17 @@ impl CliSession {
         let abort_flag = self.abort_flag.clone();
         let stdin_writer = self.stdin_writer.clone();
         tokio::spawn(async move {
-            if let Some(message) = Self::monitor_process_lifecycle(
-                process,
-                stdin_writer,
-                abort_flag,
-                spawned_pid,
-            )
-            .await
+            if let Some(message) =
+                Self::monitor_process_lifecycle(process, stdin_writer, abort_flag, spawned_pid)
+                    .await
             {
-                let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Error { message });
+                let error_event = ChatEvent::Error { message };
+                emit_chat_event(
+                    &app_handle,
+                    Some(session_id_for_lifecycle.as_str()),
+                    None,
+                    &error_event,
+                );
             }
         });
 
@@ -574,28 +588,29 @@ impl CliSession {
                 Self::handle_assistant_event(
                     assistant,
                     app_handle,
+                    session_id,
                     active_tools,
                     messages,
                 )
                 .await;
             }
             CliEvent::User(_user) => {
-                Self::handle_user_event(_user, app_handle, active_tools).await;
+                Self::handle_user_event(_user, app_handle, session_id, active_tools).await;
             }
             CliEvent::Result(result) => {
-                Self::handle_result_event(result, app_handle).await;
+                Self::handle_result_event(result, app_handle, session_id).await;
             }
             CliEvent::ControlRequest(request) => {
                 Self::handle_control_request(
                     request,
                     app_handle,
+                    session_id,
                     permission_mode,
                     user_settings,
                     permission_channels,
                     stdin_writer,
                     abort_flag,
                     abort_notify,
-                    session_id,
                     active_tools,
                 )
                 .await;
@@ -610,7 +625,7 @@ impl CliSession {
     async fn handle_system_event(
         event: SystemEvent,
         app_handle: &AppHandle,
-        _session_id: &str,
+        session_id: &str,
         cli_session_id: &Arc<RwLock<Option<String>>>,
     ) {
         if event.subtype == "init" {
@@ -633,7 +648,8 @@ impl CliSession {
             }
             .to_string();
 
-            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::SessionInit { auth_type });
+            let session_init = ChatEvent::SessionInit { auth_type };
+            emit_chat_event(app_handle, Some(session_id), None, &session_init);
         }
     }
 
@@ -642,23 +658,27 @@ impl CliSession {
     async fn handle_assistant_event(
         event: AssistantEvent,
         app_handle: &AppHandle,
+        session_id: &str,
         active_tools: &mut HashMap<String, String>,
         messages: &Arc<RwLock<Vec<Message>>>,
     ) {
         if let Some(usage) = &event.message.usage {
             let total_tokens = Self::context_tokens_from_usage(usage);
-            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::TokenUsage { total_tokens });
+            let token_usage = ChatEvent::TokenUsage {
+                total_tokens,
+                context_tokens: None,
+                context_window: None,
+            };
+            emit_chat_event(app_handle, Some(session_id), None, &token_usage);
         }
 
         for block in event.message.content {
             match block {
                 ContentBlock::Text(text_block) => {
-                    let _ = app_handle.emit(
-                        CHAT_EVENT_CHANNEL,
-                        &ChatEvent::Text {
-                            content: text_block.text.clone(),
-                        },
-                    );
+                    let text_event = ChatEvent::Text {
+                        content: text_block.text.clone(),
+                    };
+                    emit_chat_event(app_handle, Some(session_id), None, &text_event);
 
                     // Store message
                     let mut msgs = messages.write().await;
@@ -671,19 +691,13 @@ impl CliSession {
                 }
                 ContentBlock::Thinking(thinking_block) => {
                     let thinking_id = Uuid::new_v4().to_string();
-                    let _ = app_handle.emit(
-                        CHAT_EVENT_CHANNEL,
-                        &ChatEvent::ThinkingStart {
-                            thinking_id: thinking_id.clone(),
-                            content: thinking_block.thinking,
-                        },
-                    );
-                    let _ = app_handle.emit(
-                        CHAT_EVENT_CHANNEL,
-                        &ChatEvent::ThinkingEnd {
-                            thinking_id,
-                        },
-                    );
+                    let thinking_start = ChatEvent::ThinkingStart {
+                        thinking_id: thinking_id.clone(),
+                        content: thinking_block.thinking,
+                    };
+                    emit_chat_event(app_handle, Some(session_id), None, &thinking_start);
+                    let thinking_end = ChatEvent::ThinkingEnd { thinking_id };
+                    emit_chat_event(app_handle, Some(session_id), None, &thinking_end);
                 }
                 ContentBlock::ToolUse(tool_use) => {
                     // Track the tool for ToolEnd matching
@@ -699,13 +713,11 @@ impl CliSession {
                         } else {
                             "completed"
                         };
-                        let _ = app_handle.emit(
-                            CHAT_EVENT_CHANNEL,
-                            &ChatEvent::ToolEnd {
-                                id: tool_result.tool_use_id.clone(),
-                                status: status.to_string(),
-                            },
-                        );
+                        let tool_end = ChatEvent::ToolEnd {
+                            id: tool_result.tool_use_id.clone(),
+                            status: status.to_string(),
+                        };
+                        emit_chat_event(app_handle, Some(session_id), None, &tool_end);
                     }
                 }
                 ContentBlock::InputJsonDelta(_) => {
@@ -721,25 +733,29 @@ impl CliSession {
     async fn handle_user_event(
         event: crate::claude::cli_protocol::UserEvent,
         app_handle: &AppHandle,
+        session_id: &str,
         active_tools: &mut HashMap<String, String>,
     ) {
         if let Some(message) = event.extra.get("message") {
             if let Some(content_array) = message.get("content").and_then(|c| c.as_array()) {
                 for item in content_array {
                     if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                        if let Some(tool_use_id) = item.get("tool_use_id").and_then(|id| id.as_str()) {
+                        if let Some(tool_use_id) =
+                            item.get("tool_use_id").and_then(|id| id.as_str())
+                        {
                             // Emit once per tool ID. Assistant blocks may also contain tool_result
                             // in some protocol variants.
                             if active_tools.remove(tool_use_id).is_some() {
-                                let is_error = item.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                                let is_error = item
+                                    .get("is_error")
+                                    .and_then(|e| e.as_bool())
+                                    .unwrap_or(false);
                                 let status = if is_error { "error" } else { "completed" };
-                                let _ = app_handle.emit(
-                                    CHAT_EVENT_CHANNEL,
-                                    &ChatEvent::ToolEnd {
-                                        id: tool_use_id.to_string(),
-                                        status: status.to_string(),
-                                    },
-                                );
+                                let tool_end = ChatEvent::ToolEnd {
+                                    id: tool_use_id.to_string(),
+                                    status: status.to_string(),
+                                };
+                                emit_chat_event(app_handle, Some(session_id), None, &tool_end);
                             }
                         }
                     }
@@ -754,13 +770,13 @@ impl CliSession {
     async fn handle_control_request(
         request: IncomingControlRequest,
         app_handle: &AppHandle,
+        session_id: &str,
         permission_mode: &Arc<RwLock<String>>,
         user_settings: Option<&ClaudeSettings>,
         permission_channels: &PermissionChannels,
         stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
         abort_flag: &Arc<AtomicBool>,
         abort_notify: &Arc<Notify>,
-        _session_id: &str,
         active_tools: &mut HashMap<String, String>,
     ) {
         // Handle different control request types
@@ -771,6 +787,7 @@ impl CliSession {
                         &request,
                         input,
                         app_handle,
+                        session_id,
                         permission_mode,
                         user_settings,
                         permission_channels,
@@ -784,7 +801,8 @@ impl CliSession {
                     // Acknowledge PostToolUse.
                     // Tool completion is emitted from ToolResult blocks so we preserve
                     // the real final status (including errors) and avoid duplicate ToolEnd events.
-                    let response = OutgoingControlResponse::ack_posttool(request.request_id.clone());
+                    let response =
+                        OutgoingControlResponse::ack_posttool(request.request_id.clone());
                     if let Err(e) = Self::send_control_response(stdin_writer, response).await {
                         eprintln!("[cli_adapter] Failed to send PostToolUse ack: {}", e);
                     }
@@ -799,6 +817,7 @@ impl CliSession {
         request: &IncomingControlRequest,
         input: &crate::claude::cli_protocol::HookCallbackInput,
         app_handle: &AppHandle,
+        session_id: &str,
         permission_mode: &Arc<RwLock<String>>,
         user_settings: Option<&ClaudeSettings>,
         permission_channels: &PermissionChannels,
@@ -809,7 +828,11 @@ impl CliSession {
     ) {
         let tool_name = input.tool_name.clone().unwrap_or_default();
         let tool_input = input.tool_input.clone().unwrap_or(serde_json::json!({}));
-        let tool_use_id = request.request.tool_use_id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+        let tool_use_id = request
+            .request
+            .tool_use_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         // Track this tool
         active_tools.insert(tool_use_id.clone(), tool_name.clone());
@@ -824,16 +847,14 @@ impl CliSession {
             None
         };
 
-        let _ = app_handle.emit(
-            CHAT_EVENT_CHANNEL,
-            &ChatEvent::ToolStart {
-                tool_use_id: tool_use_id.clone(),
-                tool_type: tool_name.clone(),
-                target,
-                status: "pending".to_string(),
-                input: input_for_frontend,
-            },
-        );
+        let tool_start = ChatEvent::ToolStart {
+            tool_use_id: tool_use_id.clone(),
+            tool_type: tool_name.clone(),
+            target,
+            status: "pending".to_string(),
+            input: input_for_frontend,
+        };
+        emit_chat_event(app_handle, Some(session_id), None, &tool_start);
 
         // Check abort first
         if abort_flag.load(Ordering::SeqCst) {
@@ -856,19 +877,15 @@ impl CliSession {
         match decision {
             PermissionDecision::Allow(reason) => {
                 // Auto-approved - emit running status and send allow response
-                let _ = app_handle.emit(
-                    CHAT_EVENT_CHANNEL,
-                    &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_use_id.clone(),
-                        status: "running".to_string(),
-                        permission_request_id: None,
-                    },
-                );
+                let running_status = ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_use_id.clone(),
+                    status: "running".to_string(),
+                    permission_request_id: None,
+                };
+                emit_chat_event(app_handle, Some(session_id), None, &running_status);
 
-                let response = OutgoingControlResponse::allow_pretool(
-                    request.request_id.clone(),
-                    &reason,
-                );
+                let response =
+                    OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason);
                 if let Err(e) = Self::send_control_response(stdin_writer, response).await {
                     eprintln!("[cli_adapter] Failed to send allow response: {}", e);
                 }
@@ -876,19 +893,15 @@ impl CliSession {
             PermissionDecision::Deny(reason) => {
                 // Denied - remove from active_tools, emit denied status, send deny response
                 active_tools.remove(&tool_use_id);
-                let _ = app_handle.emit(
-                    CHAT_EVENT_CHANNEL,
-                    &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_use_id.clone(),
-                        status: "denied".to_string(),
-                        permission_request_id: None,
-                    },
-                );
+                let denied_status = ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_use_id.clone(),
+                    status: "denied".to_string(),
+                    permission_request_id: None,
+                };
+                emit_chat_event(app_handle, Some(session_id), None, &denied_status);
 
-                let response = OutgoingControlResponse::deny_pretool(
-                    request.request_id.clone(),
-                    &reason,
-                );
+                let response =
+                    OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason);
                 if let Err(e) = Self::send_control_response(stdin_writer, response).await {
                     eprintln!("[cli_adapter] Failed to send deny response: {}", e);
                 }
@@ -905,14 +918,12 @@ impl CliSession {
                 }
 
                 // Emit awaiting_permission status
-                let _ = app_handle.emit(
-                    CHAT_EVENT_CHANNEL,
-                    &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_use_id.clone(),
-                        status: "awaiting_permission".to_string(),
-                        permission_request_id: Some(permission_request_id.clone()),
-                    },
-                );
+                let awaiting_permission = ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_use_id.clone(),
+                    status: "awaiting_permission".to_string(),
+                    permission_request_id: Some(permission_request_id.clone()),
+                };
+                emit_chat_event(app_handle, Some(session_id), None, &awaiting_permission);
 
                 // Wait for user response with timeout and abort support
                 let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
@@ -948,14 +959,12 @@ impl CliSession {
 
                 // Emit final status and send control response
                 let status = if allowed { "running" } else { "denied" };
-                let _ = app_handle.emit(
-                    CHAT_EVENT_CHANNEL,
-                    &ChatEvent::ToolStatusUpdate {
-                        tool_use_id: tool_use_id.clone(),
-                        status: status.to_string(),
-                        permission_request_id: None,
-                    },
-                );
+                let final_status = ChatEvent::ToolStatusUpdate {
+                    tool_use_id: tool_use_id.clone(),
+                    status: status.to_string(),
+                    permission_request_id: None,
+                };
+                emit_chat_event(app_handle, Some(session_id), None, &final_status);
 
                 let response = if allowed {
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason)
@@ -970,16 +979,15 @@ impl CliSession {
     }
 
     /// Handle result events (completion).
-    async fn handle_result_event(event: ResultEvent, app_handle: &AppHandle) {
+    async fn handle_result_event(event: ResultEvent, app_handle: &AppHandle, session_id: &str) {
         if event.subtype == "success" {
-            let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &ChatEvent::Complete);
+            let complete_event = ChatEvent::Complete;
+            emit_chat_event(app_handle, Some(session_id), None, &complete_event);
         } else if event.subtype == "error" {
-            let _ = app_handle.emit(
-                CHAT_EVENT_CHANNEL,
-                &ChatEvent::Error {
-                    message: "CLI returned error".to_string(),
-                },
-            );
+            let error_event = ChatEvent::Error {
+                message: "CLI returned error".to_string(),
+            };
+            emit_chat_event(app_handle, Some(session_id), None, &error_event);
         }
 
         // Do not emit token usage from result totals here: result usage is
@@ -1001,7 +1009,11 @@ impl BackendSession for CliSession {
         &self.folder_path
     }
 
-    async fn send_message(&self, message: &str) -> Result<(), BackendError> {
+    async fn send_message(
+        &self,
+        message: &str,
+        _turn_id: Option<&str>,
+    ) -> Result<(), BackendError> {
         // Clear abort flag at start of new message (allows recovery after abort)
         self.abort_flag.store(false, Ordering::SeqCst);
 
@@ -1072,11 +1084,14 @@ impl BackendSession for CliSession {
         *self.stdin_writer.lock().await = None;
 
         // Emit abort complete
-        let _ = self.app_handle.emit(
-            CHAT_EVENT_CHANNEL,
-            &ChatEvent::AbortComplete {
-                session_id: self.id.clone(),
-            },
+        let abort_complete = ChatEvent::AbortComplete {
+            session_id: self.id.clone(),
+        };
+        emit_chat_event(
+            &self.app_handle,
+            Some(self.id.as_str()),
+            None,
+            &abort_complete,
         );
 
         Ok(())
@@ -1112,8 +1127,11 @@ impl BackendSession for CliSession {
     }
 
     async fn set_thinking_level(&self, _level: String) -> Result<(), BackendError> {
-        // CLI always has extended thinking enabled; no flag to control it
-        Ok(())
+        Err(BackendError {
+            message: "Thinking level control is not supported for the Claude CLI backend"
+                .to_string(),
+            recoverable: true,
+        })
     }
 
     async fn get_messages(&self) -> Vec<Message> {
@@ -1165,7 +1183,7 @@ mod tests {
         assert!(caps.supports_streaming);
         assert!(caps.supports_abort);
         assert!(caps.supports_resume);
-        assert!(caps.supports_extended_thinking);
+        assert!(!caps.supports_extended_thinking);
         assert_eq!(caps.permission_model, PermissionModel::PerOperation);
         assert_eq!(caps.available_models.len(), 3);
     }

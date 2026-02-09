@@ -465,7 +465,10 @@ pub struct OutgoingHookSpecificOutput {
     pub permission_decision: String,
 
     /// Reason for the decision
-    #[serde(rename = "permissionDecisionReason", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "permissionDecisionReason",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub permission_decision_reason: Option<String>,
 
     /// Modified tool input (if any)
@@ -897,7 +900,10 @@ mod tests {
 
         let event: CliEvent = serde_json::from_str(json).unwrap();
         match event {
-            CliEvent::ControlResponse(ControlResponseAck::Flat { subtype, request_id }) => {
+            CliEvent::ControlResponse(ControlResponseAck::Flat {
+                subtype,
+                request_id,
+            }) => {
                 assert_eq!(subtype, "success");
                 assert_eq!(request_id, "req_123");
             }
@@ -936,7 +942,10 @@ mod tests {
         assert_eq!(json["type"], "control_response");
         assert_eq!(json["request_id"], "req123");
         assert_eq!(json["hook_specific_output"]["permission_decision"], "allow");
-        assert_eq!(json["hook_specific_output"]["permission_decision_reason"], "User approved");
+        assert_eq!(
+            json["hook_specific_output"]["permission_decision_reason"],
+            "User approved"
+        );
     }
 
     #[test]
@@ -1025,24 +1034,41 @@ mod tests {
 
     #[test]
     fn test_serialize_outgoing_control_response() {
-        let response = OutgoingControlResponse::allow_pretool("req_123".to_string(), "User approved");
+        let response =
+            OutgoingControlResponse::allow_pretool("req_123".to_string(), "User approved");
 
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["type"], "control_response");
         assert_eq!(json["response"]["subtype"], "success");
         assert_eq!(json["response"]["request_id"], "req_123");
         assert_eq!(json["response"]["response"]["continue"], true);
-        assert_eq!(json["response"]["response"]["hookSpecificOutput"]["hookEventName"], "PreToolUse");
-        assert_eq!(json["response"]["response"]["hookSpecificOutput"]["permissionDecision"], "allow");
-        assert_eq!(json["response"]["response"]["hookSpecificOutput"]["permissionDecisionReason"], "User approved");
+        assert_eq!(
+            json["response"]["response"]["hookSpecificOutput"]["hookEventName"],
+            "PreToolUse"
+        );
+        assert_eq!(
+            json["response"]["response"]["hookSpecificOutput"]["permissionDecision"],
+            "allow"
+        );
+        assert_eq!(
+            json["response"]["response"]["hookSpecificOutput"]["permissionDecisionReason"],
+            "User approved"
+        );
     }
 
     #[test]
     fn test_serialize_deny_control_response() {
-        let response = OutgoingControlResponse::deny_pretool("req_456".to_string(), "Security policy");
+        let response =
+            OutgoingControlResponse::deny_pretool("req_456".to_string(), "Security policy");
 
         let json = serde_json::to_value(&response).unwrap();
-        assert_eq!(json["response"]["response"]["hookSpecificOutput"]["permissionDecision"], "deny");
-        assert_eq!(json["response"]["response"]["hookSpecificOutput"]["permissionDecisionReason"], "Security policy");
+        assert_eq!(
+            json["response"]["response"]["hookSpecificOutput"]["permissionDecision"],
+            "deny"
+        );
+        assert_eq!(
+            json["response"]["response"]["hookSpecificOutput"]["permissionDecisionReason"],
+            "Security policy"
+        );
     }
 }

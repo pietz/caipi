@@ -16,12 +16,24 @@ export interface CliAuthStatus {
   authenticated: boolean;
 }
 
+export interface BackendCliStatus {
+  backend: string;
+  installed: boolean;
+  authenticated: boolean;
+  version?: string;
+  path?: string;
+  installHint?: string;
+  authHint?: string;
+}
+
 export interface StartupInfo {
   onboardingCompleted: boolean;
   cliStatus?: CliStatus;
   cliStatusFresh: boolean;
   defaultFolder?: string;
   cliPath?: string;
+  defaultBackend: string;
+  backendCliPaths?: Record<string, string>;
 }
 
 // Folders
@@ -40,6 +52,7 @@ export interface SessionInfo {
   messageCount: number;
   created: string;
   modified: string;
+  backend?: string;
 }
 
 export interface ProjectSessions {

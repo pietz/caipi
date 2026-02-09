@@ -3,85 +3,76 @@ use serde_json::Value;
 /// Extract the target (file path, pattern, etc.) from a tool's input for display
 pub fn extract_tool_target(tool_name: &str, tool_input: &Value) -> String {
     match tool_name {
-        "Read" | "Write" | "Edit" => {
-            tool_input.get("file_path")
-                .or_else(|| tool_input.get("path"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        }
-        "Glob" => {
-            tool_input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("*")
-                .to_string()
-        }
-        "Grep" => {
-            tool_input.get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("...")
-                .to_string()
-        }
+        "Read" | "Write" | "Edit" => tool_input
+            .get("file_path")
+            .or_else(|| tool_input.get("path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        "Glob" => tool_input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("*")
+            .to_string(),
+        "Grep" => tool_input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("...")
+            .to_string(),
         "Bash" => {
             // Prefer description if available (human-readable)
-            tool_input.get("description")
+            tool_input
+                .get("description")
                 .and_then(|v| v.as_str())
                 .or_else(|| {
                     // Fall back to command if no description
-                    tool_input.get("command")
-                        .and_then(|v| v.as_str())
+                    tool_input.get("command").and_then(|v| v.as_str())
                 })
                 .unwrap_or("command")
                 .to_string()
         }
-        "WebSearch" => {
-            tool_input.get("query")
-                .and_then(|v| v.as_str())
-                .unwrap_or("searching...")
-                .to_string()
-        }
-        "WebFetch" => {
-            tool_input.get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("fetching...")
-                .to_string()
-        }
-        "Skill" => {
-            tool_input.get("skill")
-                .and_then(|v| v.as_str())
-                .unwrap_or("skill")
-                .to_string()
-        }
-        "Task" => {
-            tool_input.get("description")
-                .or_else(|| tool_input.get("prompt"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("task")
-                .to_string()
-        }
+        "WebSearch" => tool_input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("searching...")
+            .to_string(),
+        "WebFetch" => tool_input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fetching...")
+            .to_string(),
+        "Skill" => tool_input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .unwrap_or("skill")
+            .to_string(),
+        "Task" => tool_input
+            .get("description")
+            .or_else(|| tool_input.get("prompt"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("task")
+            .to_string(),
         "AskUserQuestion" => "asking question...".to_string(),
-        "NotebookEdit" => {
-            tool_input.get("notebook_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("notebook")
-                .to_string()
-        }
-        "TaskCreate" => {
-            tool_input.get("subject")
-                .and_then(|v| v.as_str())
-                .unwrap_or("new task")
-                .to_string()
-        }
-        "TaskUpdate" => {
-            tool_input.get("taskId")
-                .and_then(|v| v.as_str())
-                .map(|id| format!("task {}", id))
-                .unwrap_or_else(|| "task".to_string())
-        }
+        "NotebookEdit" => tool_input
+            .get("notebook_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("notebook")
+            .to_string(),
+        "TaskCreate" => tool_input
+            .get("subject")
+            .and_then(|v| v.as_str())
+            .unwrap_or("new task")
+            .to_string(),
+        "TaskUpdate" => tool_input
+            .get("taskId")
+            .and_then(|v| v.as_str())
+            .map(|id| format!("task {}", id))
+            .unwrap_or_else(|| "task".to_string()),
         "TaskList" | "TaskGet" => "tasks".to_string(),
         "TodoWrite" => {
             // Count how many todos in the array
-            tool_input.get("todos")
+            tool_input
+                .get("todos")
                 .and_then(|v| v.as_array())
                 .map(|arr| format!("{} todo(s)", arr.len()))
                 .unwrap_or_else(|| "todos".to_string())
@@ -89,7 +80,18 @@ pub fn extract_tool_target(tool_name: &str, tool_input: &Value) -> String {
         "TodoRead" => "reading todos".to_string(),
         _ => {
             // Try common field names for unknown tools
-            let fields = ["file_path", "path", "pattern", "command", "url", "query", "skill", "prompt", "subject", "name"];
+            let fields = [
+                "file_path",
+                "path",
+                "pattern",
+                "command",
+                "url",
+                "query",
+                "skill",
+                "prompt",
+                "subject",
+                "name",
+            ];
             for field in fields {
                 if let Some(val) = tool_input.get(field).and_then(|v| v.as_str()) {
                     return format!("{}: {}", tool_name, val);
@@ -143,7 +145,10 @@ mod tests {
             "command": "git commit -m 'Fix bug'",
             "description": "Create commit with fix message"
         });
-        assert_eq!(extract_tool_target("Bash", &input_with_desc), "Create commit with fix message");
+        assert_eq!(
+            extract_tool_target("Bash", &input_with_desc),
+            "Create commit with fix message"
+        );
 
         // Falls back to command if no description
         let input = json!({"command": "ls -la"});
@@ -176,7 +181,10 @@ mod tests {
 
         // Test with prompt field as fallback
         let input_prompt = json!({"prompt": "Search for bugs"});
-        assert_eq!(extract_tool_target("Task", &input_prompt), "Search for bugs");
+        assert_eq!(
+            extract_tool_target("Task", &input_prompt),
+            "Search for bugs"
+        );
     }
 
     #[test]
@@ -200,15 +208,24 @@ mod tests {
 
         // Test with file_path field
         let input_with_path = json!({"file_path": "/some/file.txt"});
-        assert_eq!(extract_tool_target("UnknownTool", &input_with_path), "UnknownTool: /some/file.txt");
+        assert_eq!(
+            extract_tool_target("UnknownTool", &input_with_path),
+            "UnknownTool: /some/file.txt"
+        );
 
         // Test with pattern field
         let input_with_pattern = json!({"pattern": "search_term"});
-        assert_eq!(extract_tool_target("CustomSearch", &input_with_pattern), "CustomSearch: search_term");
+        assert_eq!(
+            extract_tool_target("CustomSearch", &input_with_pattern),
+            "CustomSearch: search_term"
+        );
 
         // Test with no known fields - should fall back to tool name
         let input_no_fields = json!({"unknown_field": "value"});
-        assert_eq!(extract_tool_target("MyCustomTool", &input_no_fields), "MyCustomTool");
+        assert_eq!(
+            extract_tool_target("MyCustomTool", &input_no_fields),
+            "MyCustomTool"
+        );
 
         // Long values are passed through (CSS handles truncation)
         let long_value = "this is a very long value that would have been truncated before";
