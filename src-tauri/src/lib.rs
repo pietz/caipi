@@ -1,5 +1,5 @@
 mod backends;
-mod claude;
+pub mod claude;
 mod commands;
 mod storage;
 
