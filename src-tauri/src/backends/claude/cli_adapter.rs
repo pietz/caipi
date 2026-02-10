@@ -1,7 +1,7 @@
-//! Claude CLI direct wrapper backend adapter.
+//! Claude CLI backend adapter.
 //!
 //! This module implements a direct CLI wrapper that spawns `claude` as a subprocess
-//! and communicates via JSON over stdin/stdout, providing an alternative to the SDK.
+//! and communicates via JSON over stdin/stdout.
 
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -37,25 +37,25 @@ use crate::commands::chat::{ChatEvent, Message};
 use crate::commands::sessions::load_session_log_messages;
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
-/// Claude CLI backend implementation.
-pub struct ClaudeCliBackend;
+/// Claude backend implementation (CLI-backed).
+pub struct ClaudeBackend;
 
-impl ClaudeCliBackend {
+impl ClaudeBackend {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Default for ClaudeCliBackend {
+impl Default for ClaudeBackend {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl Backend for ClaudeCliBackend {
+impl Backend for ClaudeBackend {
     fn kind(&self) -> BackendKind {
-        BackendKind::ClaudeCli
+        BackendKind::Claude
     }
 
     fn capabilities(&self) -> BackendCapabilities {
@@ -1002,7 +1002,7 @@ impl BackendSession for CliSession {
     }
 
     fn backend_kind(&self) -> BackendKind {
-        BackendKind::ClaudeCli
+        BackendKind::Claude
     }
 
     fn folder_path(&self) -> &str {
@@ -1172,13 +1172,13 @@ mod tests {
 
     #[test]
     fn test_cli_backend_kind() {
-        let backend = ClaudeCliBackend::new();
-        assert_eq!(backend.kind(), BackendKind::ClaudeCli);
+        let backend = ClaudeBackend::new();
+        assert_eq!(backend.kind(), BackendKind::Claude);
     }
 
     #[test]
     fn test_cli_backend_capabilities() {
-        let backend = ClaudeCliBackend::new();
+        let backend = ClaudeBackend::new();
         let caps = backend.capabilities();
         assert!(caps.supports_streaming);
         assert!(caps.supports_abort);

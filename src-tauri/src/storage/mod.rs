@@ -276,8 +276,24 @@ pub fn clear_license() -> Result<(), StorageError> {
 
 pub fn get_cli_path() -> Result<Option<String>, StorageError> {
     let data = load_data()?;
-    if let Some(path) = data.backend_cli_paths.get("claudecli") {
+    if let Some(path) = data.backend_cli_paths.get("claude") {
         return Ok(Some(path.clone()));
+    }
+    if let Some(path) = data.backend_cli_paths.get("claudecli") {
+        // BACKWARDS COMPATIBILITY:
+        // Older builds stored Claude CLI path under "claudecli". Migrate to "claude".
+        let path = path.clone();
+        let _guard = get_storage_lock().lock();
+        let mut data = load_data()?;
+        if data.backend_cli_paths.get("claude").is_none() {
+            if let Some(old) = data.backend_cli_paths.remove("claudecli") {
+                data.backend_cli_paths.insert("claude".to_string(), old.clone());
+                // Keep the legacy cli_path field in sync.
+                data.cli_path = Some(old);
+                save_data(&data)?;
+            }
+        }
+        return Ok(Some(path));
     }
     Ok(data.cli_path)
 }
@@ -288,9 +304,11 @@ pub fn set_cli_path(path: Option<String>) -> Result<(), StorageError> {
     data.cli_path = path.clone();
     match path {
         Some(path) => {
-            data.backend_cli_paths.insert("claudecli".to_string(), path);
+            data.backend_cli_paths.insert("claude".to_string(), path);
+            data.backend_cli_paths.remove("claudecli");
         }
         None => {
+            data.backend_cli_paths.remove("claude");
             data.backend_cli_paths.remove("claudecli");
         }
     }
@@ -313,28 +331,68 @@ pub fn set_default_backend(backend: Option<String>) -> Result<(), StorageError> 
 
 pub fn get_backend_cli_paths() -> Result<HashMap<String, String>, StorageError> {
     let data = load_data()?;
+    // Normalize legacy keys for callers that display/select backends.
+    if data.backend_cli_paths.contains_key("claudecli") && !data.backend_cli_paths.contains_key("claude") {
+        let _guard = get_storage_lock().lock();
+        let mut data = load_data()?;
+        if data.backend_cli_paths.contains_key("claudecli") && !data.backend_cli_paths.contains_key("claude") {
+            if let Some(path) = data.backend_cli_paths.remove("claudecli") {
+                data.backend_cli_paths.insert("claude".to_string(), path.clone());
+                data.cli_path = Some(path);
+                save_data(&data)?;
+            }
+        }
+        return Ok(data.backend_cli_paths);
+    }
     Ok(data.backend_cli_paths)
 }
 
 pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageError> {
     let data = load_data()?;
-    Ok(data.backend_cli_paths.get(backend).cloned())
+    let key = if backend == "claudecli" { "claude" } else { backend };
+    if let Some(path) = data.backend_cli_paths.get(key) {
+        return Ok(Some(path.clone()));
+    }
+    if key == "claude" {
+        if let Some(path) = data.backend_cli_paths.get("claudecli") {
+            // Migrate and return.
+            let path = path.clone();
+            let _guard = get_storage_lock().lock();
+            let mut data = load_data()?;
+            if data.backend_cli_paths.get("claude").is_none() {
+                if let Some(old) = data.backend_cli_paths.remove("claudecli") {
+                    data.backend_cli_paths.insert("claude".to_string(), old.clone());
+                    data.cli_path = Some(old);
+                    save_data(&data)?;
+                }
+            }
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 pub fn set_backend_cli_path(backend: &str, path: Option<String>) -> Result<(), StorageError> {
     let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
+    let key = if backend == "claudecli" { "claude" } else { backend };
     match path {
         Some(path) => {
-            data.backend_cli_paths.insert(backend.to_string(), path);
+            data.backend_cli_paths.insert(key.to_string(), path);
+            if key == "claude" {
+                data.backend_cli_paths.remove("claudecli");
+            }
         }
         None => {
-            data.backend_cli_paths.remove(backend);
+            data.backend_cli_paths.remove(key);
+            if key == "claude" {
+                data.backend_cli_paths.remove("claudecli");
+            }
         }
     }
 
-    if backend == "claudecli" {
-        data.cli_path = data.backend_cli_paths.get("claudecli").cloned();
+    if key == "claude" {
+        data.cli_path = data.backend_cli_paths.get("claude").cloned();
     }
 
     save_data(&data)?;
@@ -469,7 +527,7 @@ mod tests {
             default_folder: Some("/default/path".to_string()),
             license: None,
             cli_path: None,
-            default_backend: Some("claudecli".to_string()),
+            default_backend: Some("claude".to_string()),
             backend_cli_paths: HashMap::new(),
         };
 

@@ -135,16 +135,17 @@ pub async fn create_session(
         }
     };
 
-    let kind = selected_backend
+    let kind: crate::backends::BackendKind = selected_backend
         .parse()
         .map_err(|e: crate::backends::BackendError| e.to_string())?;
+    let backend_name = kind.to_string();
     let backend_impl = registry
         .get(kind)
-        .ok_or_else(|| format!("Backend not registered: {}", selected_backend))?;
+        .ok_or_else(|| format!("Backend not registered: {}", backend_name))?;
 
     let resolved_cli_path = match cli_path {
         Some(path) => Some(path),
-        None => storage::get_backend_cli_path(&selected_backend).map_err(|e| e.to_string())?,
+        None => storage::get_backend_cli_path(&backend_name).map_err(|e| e.to_string())?,
     };
 
     // Create session config

@@ -1,14 +1,14 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use crate::claude::tool_utils::extract_tool_target;
 use crate::commands::chat::Message as ChatMessage;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SessionInfo {
     #[serde(rename = "sessionId")]
     pub session_id: String,
@@ -35,6 +35,71 @@ pub struct ProjectSessions {
     pub sessions: Vec<SessionInfo>,
     #[serde(rename = "latestModified")]
     pub latest_modified: String,
+}
+
+/// Session index cache: stores parsed session summaries keyed by (file_path, mtime_secs).
+/// Avoids re-parsing unchanged files across app launches.
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct SessionIndexCache {
+    /// Map from file path string to (mtime_secs, SessionInfo)
+    entries: HashMap<String, (u64, SessionInfo)>,
+}
+
+impl SessionIndexCache {
+    fn cache_path() -> Option<PathBuf> {
+        let folder = if cfg!(debug_assertions) {
+            "caipi-dev"
+        } else {
+            "caipi"
+        };
+        dirs::data_local_dir().map(|d| d.join(folder).join("session-index-cache.json"))
+    }
+
+    fn load() -> Self {
+        let Some(path) = Self::cache_path() else {
+            return Self::default();
+        };
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self) {
+        let Some(path) = Self::cache_path() else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let Ok(content) = serde_json::to_string(self) else {
+            return;
+        };
+        if let Ok(mut tmp) = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))
+        {
+            if tmp.write_all(content.as_bytes()).is_ok() {
+                let _ = tmp.persist(&path);
+            }
+        }
+    }
+
+    fn get(&self, file_path: &str, mtime_secs: u64) -> Option<&SessionInfo> {
+        self.entries
+            .get(file_path)
+            .filter(|(cached_mtime, _)| *cached_mtime == mtime_secs)
+            .map(|(_, info)| info)
+    }
+
+    fn insert(&mut self, file_path: String, mtime_secs: u64, info: SessionInfo) {
+        self.entries.insert(file_path, (mtime_secs, info));
+    }
+}
+
+fn mtime_to_secs(mtime: std::time::SystemTime) -> u64 {
+    mtime
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Get folder name from path (handles both Unix and Windows paths)
@@ -208,7 +273,7 @@ fn parse_claude_session_summary_fast(
             created
         },
         modified,
-        backend: Some("claudecli".to_string()),
+        backend: Some("claude".to_string()),
     })
 }
 
@@ -355,6 +420,7 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     None
 }
 
+#[cfg(test)]
 fn codex_message_count(path: &Path) -> u32 {
     let file = match File::open(path) {
         Ok(file) => file,
@@ -488,7 +554,7 @@ fn parse_codex_session_summary_fast(
         folder_path,
         folder_name,
         first_prompt,
-        message_count: codex_message_count(path),
+        message_count: 0, // Skip full-file scan for speed
         created: if created.is_empty() {
             modified.clone()
         } else {
@@ -516,13 +582,30 @@ fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<SessionInfo>, St
         files.truncate(n);
     }
 
-    let mut sessions: Vec<SessionInfo> = files
-        .into_iter()
-        .filter_map(|(path, mtime)| parse_codex_session_summary_fast(&path, mtime))
-        .collect();
+    let mut cache = SessionIndexCache::load();
+    let mut cache_dirty = false;
+    let mut sessions: Vec<SessionInfo> = Vec::new();
 
-    // Already sorted by mtime from the file sort, but re-sort by the formatted string
-    // to be consistent
+    for (path, mtime) in files {
+        let path_str = path.to_string_lossy().to_string();
+        let mtime_s = mtime_to_secs(mtime);
+
+        let session = if let Some(cached) = cache.get(&path_str, mtime_s) {
+            cached.clone()
+        } else if let Some(parsed) = parse_codex_session_summary_fast(&path, mtime) {
+            cache.insert(path_str, mtime_s, parsed.clone());
+            cache_dirty = true;
+            parsed
+        } else {
+            continue;
+        };
+        sessions.push(session);
+    }
+
+    if cache_dirty {
+        cache.save();
+    }
+
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(sessions)
 }
@@ -771,25 +854,70 @@ async fn get_recent_sessions_by_backend(
     let entries = fs::read_dir(&projects_dir)
         .map_err(|e| format!("Failed to read projects directory: {}", e))?;
 
-    // Collect all sessions from all projects, filtering out non-existent folders
-    let mut all_sessions: Vec<(SessionInfo, String)> = Vec::new(); // (session, folder_path)
-
+    // Phase 1: Collect all (path, mtime) pairs across all project dirs - metadata only, no parsing
+    let mut all_files: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
     for entry in entries.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
-        let sessions = load_claude_session_index(&entry.path(), None);
-        for session in sessions {
-            let folder_path = session.folder_path.clone();
-            if !std::path::Path::new(&folder_path).exists() {
-                continue;
+        let dir = entry.path();
+        if let Ok(dir_entries) = fs::read_dir(&dir) {
+            for file_entry in dir_entries.filter_map(|e| e.ok()) {
+                let path = file_entry.path();
+                if path.is_dir() {
+                    continue;
+                }
+                if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if !is_uuid_filename(stem) {
+                    continue;
+                }
+                let mtime = file_entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                all_files.push((path, mtime));
             }
+        }
+    }
+
+    // Phase 2: Sort by mtime descending, truncate to limit BEFORE parsing
+    all_files.sort_by(|a, b| b.1.cmp(&a.1));
+    all_files.truncate(limit as usize);
+
+    // Phase 3: Parse only the top N files, using cache for unchanged files
+    let mut cache = SessionIndexCache::load();
+    let mut cache_dirty = false;
+    let mut all_sessions: Vec<(SessionInfo, String)> = Vec::new();
+
+    for (path, mtime) in all_files {
+        let path_str = path.to_string_lossy().to_string();
+        let mtime_s = mtime_to_secs(mtime);
+
+        let session = if let Some(cached) = cache.get(&path_str, mtime_s) {
+            cached.clone()
+        } else if let Some(parsed) = parse_claude_session_summary_fast(&path, mtime) {
+            cache.insert(path_str, mtime_s, parsed.clone());
+            cache_dirty = true;
+            parsed
+        } else {
+            continue;
+        };
+
+        let folder_path = session.folder_path.clone();
+        if std::path::Path::new(&folder_path).exists() {
             all_sessions.push((session, folder_path));
         }
     }
 
-    // Sort all sessions by modified date (most recent first)
-    all_sessions.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
+    if cache_dirty {
+        cache.save();
+    }
 
-    // Take top N sessions
-    all_sessions.truncate(limit as usize);
+    // Re-sort since parsed timestamps may differ slightly from mtime
+    all_sessions.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
 
     // Regroup by project, preserving order of first appearance
     let mut project_map: std::collections::HashMap<String, ProjectSessions> =
@@ -1151,7 +1279,7 @@ mod tests {
         assert_eq!(session.session_id, "dba2996f-69e1-4353-9f41-415af1d4232c");
         assert_eq!(session.folder_path, "/Users/test/project");
         assert_eq!(session.first_prompt, "hello world");
-        assert_eq!(session.backend.as_deref(), Some("claudecli"));
+        assert_eq!(session.backend.as_deref(), Some("claude"));
     }
 
     #[test]
@@ -1376,7 +1504,7 @@ mod tests {
         assert_eq!(session.session_id, "019a4b60-a492-7f12-9abe-73797723f5b1");
         assert_eq!(session.folder_path, "/tmp/project");
         assert_eq!(session.first_prompt, "hello world");
-        assert_eq!(session.message_count, 4);
+        assert_eq!(session.message_count, 0); // Skipped for speed in index view
         assert_eq!(session.backend.as_deref(), Some("codex"));
     }
 

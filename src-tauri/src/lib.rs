@@ -3,7 +3,7 @@ pub mod claude;
 mod commands;
 mod storage;
 
-use backends::claude::{ClaudeBackend, ClaudeCliBackend};
+use backends::claude::ClaudeBackend;
 use backends::codex::CodexBackend;
 use backends::PermissionChannels;
 use backends::{BackendKind, BackendRegistry, BackendSession};
@@ -18,14 +18,13 @@ pub fn run() {
     let session_store: SessionStore = Arc::new(Mutex::new(HashMap::new()));
     let permission_channels: PermissionChannels = Arc::new(Mutex::new(HashMap::new()));
 
-    // Initialize backend registry with Claude backends
+    // Initialize backend registry
     let mut registry = BackendRegistry::new();
     registry.register(Arc::new(ClaudeBackend::new()));
-    registry.register(Arc::new(ClaudeCliBackend::new()));
     registry.register(Arc::new(CodexBackend::new()));
 
     // Allow overriding the default backend via environment variable for testing
-    // Usage: CAIPI_BACKEND=claudecli npm run tauri dev
+    // Usage: CAIPI_BACKEND=claude npm run tauri dev
     if let Ok(backend_env) = std::env::var("CAIPI_BACKEND") {
         if let Ok(kind) = backend_env.parse::<BackendKind>() {
             eprintln!("[init] Using backend from CAIPI_BACKEND env var: {}", kind);

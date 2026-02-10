@@ -10,7 +10,7 @@ export const defaultCliStatus: CliStatus = {
 export const defaultStartupInfo: StartupInfo = {
   onboardingCompleted: false,
   cliStatusFresh: true,
-  defaultBackend: 'claudecli',
+  defaultBackend: 'claude',
 };
 
 export function makeStartupInfo(overrides: Partial<StartupInfo> = {}): StartupInfo {

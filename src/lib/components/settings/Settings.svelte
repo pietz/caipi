@@ -131,14 +131,14 @@
       <div>
         <span class="text-xs text-muted-foreground">Default Backend</span>
         <div class="mt-1 flex gap-1 p-1 bg-muted rounded-lg">
-          {#each (['claudecli', 'codex'] as Backend[]) as backend}
+          {#each (['claude', 'codex'] as Backend[]) as backend}
             {@const isReady = !!backendStatuses[backend]?.installed && !!backendStatuses[backend]?.authenticated}
             <button
               class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {app.defaultBackend === backend ? 'bg-background shadow-sm' : 'hover:bg-background/50'} {isReady ? '' : 'opacity-50'}"
               disabled={!isReady}
               onclick={() => switchBackend(backend)}
             >
-              {#if backend === 'claudecli'}
+              {#if backend === 'claude'}
                 <ClaudeIcon size={12} />
                 Claude Code
               {:else}
@@ -178,13 +178,13 @@
       </div>
 
       <label class="block">
-        <span class="text-xs text-muted-foreground">Custom CLI Path ({app.defaultBackend === 'claudecli' ? 'Claude Code' : 'Codex CLI'})</span>
+        <span class="text-xs text-muted-foreground">Custom CLI Path ({app.defaultBackend === 'claude' ? 'Claude Code' : 'Codex CLI'})</span>
         <div class="mt-1 flex gap-2">
           <input
             type="text"
             bind:value={cliPathInput}
             onkeydown={handleCliPathKeydown}
-            placeholder={app.defaultBackend === 'claudecli' ? '/usr/local/bin/claude' : '/usr/local/bin/codex'}
+            placeholder={app.defaultBackend === 'claude' ? '/usr/local/bin/claude' : '/usr/local/bin/codex'}
             class="flex-1 h-7 px-2 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <Button

@@ -57,18 +57,23 @@ gh release edit v0.1.XX --repo pietz/caipi.ai --notes "## What's New
 - Change 2"
 ```
 
+## Backend CLI Changelogs
+
+- Claude Code: https://github.com/anthropics/claude-code/releases
+- Codex CLI: https://github.com/openai/codex/releases
+
 ## Tech Stack
 
 - **Frontend**: Svelte 5 (runes) + TypeScript + SvelteKit + Tailwind CSS
-- **Backend**: Rust + Tauri 2.0 + `claude-agent-sdk-rs`
+- **Backend**: Rust + Tauri 2.0 (CLI-backed backends: Claude, Codex)
 
 ## Architecture
 
-- **Data flow**: User message → Tauri command → Rust SDK → streaming events → frontend UI
-- **Events**: `claude:text`, `claude:tool_start`, `claude:tool_end`, `claude:permission_request`, `claude:complete`, `claude:error`
+- **Data flow**: User message → Tauri command → Rust backend → CLI subprocess → `chat:event` stream → frontend UI
+- **Events**: `chat:event`, `license:invalid`
 - **Stores**: `app` (screen, folder, settings), `chat` (messages, tools, streaming), `files` (tree state)
 - **Permission modes**: Default (prompts), Edit (auto-allow edits), Danger (bypass all)
-- **Models**: Opus 4.5, Sonnet 4.5, Haiku 4.5
+- **Models**: Opus 4.6, Sonnet 4.5, Haiku 4.5
 
 ## Svelte 5 Runes
 

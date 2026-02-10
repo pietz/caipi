@@ -48,15 +48,21 @@
 
       // Set CLI path if available (for custom Claude CLI location)
       if (startupInfo.cliPath) {
-        app.setCliPath(startupInfo.cliPath, 'claudecli');
+        app.setCliPath(startupInfo.cliPath, 'claude');
       }
       if (startupInfo.backendCliPaths) {
         for (const [backend, path] of Object.entries(startupInfo.backendCliPaths)) {
-          app.setCliPath(path, backend as 'claude' | 'claudecli' | 'codex');
+          const normalized = backend === 'claudecli' ? 'claude' : backend;
+          if (normalized === 'claude' || normalized === 'codex') {
+            app.setCliPath(path, normalized);
+          }
         }
       }
       if (startupInfo.defaultBackend) {
-        app.defaultBackend = startupInfo.defaultBackend as 'claude' | 'claudecli' | 'codex';
+        const normalized = startupInfo.defaultBackend === 'claudecli' ? 'claude' : startupInfo.defaultBackend;
+        if (normalized === 'claude' || normalized === 'codex') {
+          app.defaultBackend = normalized;
+        }
         app.ensureBackendState(app.defaultBackend);
       }
 

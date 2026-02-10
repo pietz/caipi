@@ -8,7 +8,7 @@ use crate::commands::chat::Message;
 /// Trait for a backend session.
 ///
 /// Sessions are created by backends and handle the actual conversation.
-/// Each session wraps the backend-specific implementation (e.g., AgentSession for Claude).
+/// Each session wraps the backend-specific implementation (e.g., a CLI session).
 #[async_trait]
 pub trait BackendSession: Send + Sync {
     /// Returns the session ID.

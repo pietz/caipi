@@ -12,10 +12,8 @@ use super::session::BackendSession;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
-    /// Claude Code SDK (uses claude-agent-sdk-rs)
+    /// Claude CLI direct wrapper (spawns `claude` CLI directly)
     Claude,
-    /// Claude CLI direct wrapper (spawns claude CLI directly)
-    ClaudeCli,
     /// Codex CLI direct wrapper (spawns codex CLI directly)
     Codex,
     // Future backends:
@@ -27,7 +25,6 @@ impl std::fmt::Display for BackendKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendKind::Claude => write!(f, "claude"),
-            BackendKind::ClaudeCli => write!(f, "claudecli"),
             BackendKind::Codex => write!(f, "codex"),
         }
     }
@@ -38,8 +35,10 @@ impl std::str::FromStr for BackendKind {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "claude" => Ok(BackendKind::Claude),
-            "claudecli" => Ok(BackendKind::ClaudeCli),
+            // Backwards compatibility:
+            // - "claude" previously referred to an SDK-backed backend (now removed)
+            // - "claudecli" was the CLI-backed backend (now renamed to "claude")
+            "claude" | "claudecli" => Ok(BackendKind::Claude),
             "codex" => Ok(BackendKind::Codex),
             _ => Err(BackendError {
                 message: format!("Unknown backend: {}", s),
@@ -163,7 +162,7 @@ impl BackendRegistry {
     pub fn new() -> Self {
         Self {
             backends: HashMap::new(),
-            default: BackendKind::ClaudeCli,
+            default: BackendKind::Claude,
         }
     }
 

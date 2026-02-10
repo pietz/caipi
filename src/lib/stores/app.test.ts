@@ -421,11 +421,11 @@ describe('AppState Store', () => {
       app.setThinkingLevel('off');
       expect(app.thinkingLevel).toBe('off');
       // Key includes both backend and model
-      expect(mockLocalStorage[`caipi:thinking:claudecli:${app.model}`]).toBe('off');
+      expect(mockLocalStorage[`caipi:thinking:claude:${app.model}`]).toBe('off');
 
       app.setThinkingLevel('on');
       expect(app.thinkingLevel).toBe('on');
-      expect(mockLocalStorage[`caipi:thinking:claudecli:${app.model}`]).toBe('on');
+      expect(mockLocalStorage[`caipi:thinking:claude:${app.model}`]).toBe('on');
     });
   });
 
@@ -575,7 +575,7 @@ describe('AppState Store', () => {
           permissionMode: app.permissionMode,
           model: app.model,
           resumeSessionId: 'session-abc',
-          backend: 'claudecli',
+          backend: 'claude',
         })
       );
       expect(invoke).not.toHaveBeenCalledWith(
@@ -585,7 +585,7 @@ describe('AppState Store', () => {
       expect(invoke).toHaveBeenCalledWith('get_session_history', {
         folderPath: '/test/project',
         sessionId: 'session-abc',
-        backend: 'claudecli',
+        backend: 'claude',
       });
       expect(chat.loadHistory).toHaveBeenCalledWith(history);
       expect(app.screen).toBe('chat');

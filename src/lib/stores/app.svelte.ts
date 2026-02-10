@@ -23,7 +23,7 @@ export interface CliStatus {
 
 function getDefaultModel(backend: Backend): Model {
   const models = getBackendConfig(backend).models;
-  if (backend === 'claude' || backend === 'claudecli') {
+  if (backend === 'claude') {
     return models.find((m) => m.id === 'sonnet')?.id ?? models[0]?.id ?? '';
   }
   return models[0]?.id ?? '';
@@ -35,6 +35,15 @@ function getPersistedModel(backend: Backend): Model {
   if (typeof localStorage !== 'undefined') {
     const scoped = localStorage.getItem(`caipi:model:${backend}`);
     if (scoped && validModels.includes(scoped)) return scoped;
+
+    // Backwards compatibility: older builds used "claudecli" as the Claude backend key.
+    if (backend === 'claude') {
+      const legacyScoped = localStorage.getItem('caipi:model:claudecli');
+      if (legacyScoped && validModels.includes(legacyScoped)) {
+        localStorage.setItem(`caipi:model:${backend}`, legacyScoped);
+        return legacyScoped;
+      }
+    }
 
     // Legacy fallback for older builds that used a single shared model key.
     const legacy = localStorage.getItem('caipi:model');
@@ -57,6 +66,19 @@ function getPersistedThinkingLevel(backend: Backend, model: Model): string {
       const config = getBackendConfig(backend);
       const modelConfig = config.models.find((m) => m.id === model);
       if (modelConfig?.thinkingOptions.some((o) => o.value === saved)) return saved;
+    }
+
+    // Backwards compatibility: older builds used "claudecli" as the Claude backend key.
+    if (backend === 'claude') {
+      const legacySaved = localStorage.getItem(`caipi:thinking:claudecli:${model}`);
+      if (legacySaved) {
+        const config = getBackendConfig(backend);
+        const modelConfig = config.models.find((m) => m.id === model);
+        if (modelConfig?.thinkingOptions.some((o) => o.value === legacySaved)) {
+          localStorage.setItem(`caipi:thinking:${backend}:${model}`, legacySaved);
+          return legacySaved;
+        }
+      }
     }
   }
   return getDefaultThinkingLevel(backend, model);
@@ -81,14 +103,14 @@ class AppState {
   settingsOpen = $state(false);
 
   // Backend default
-  defaultBackend = $state<Backend>('claudecli');
+  defaultBackend = $state<Backend>('claude');
   sessionBackend = $state<Backend | null>(null);
   backendCliPaths = $state<Record<string, string>>({});
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
-  model = $state<Model>(getPersistedModel('claudecli'));
-  thinkingLevel = $state<string>(getPersistedThinkingLevel('claudecli', getPersistedModel('claudecli')));
+  model = $state<Model>(getPersistedModel('claude'));
+  thinkingLevel = $state<string>(getPersistedThinkingLevel('claude', getPersistedModel('claude')));
 
   // Auth info
   authType = $state<string | null>(null);

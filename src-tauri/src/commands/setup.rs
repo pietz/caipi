@@ -441,7 +441,7 @@ pub async fn check_backend_cli_installed_internal(backend: &str) -> CliInstallSt
 /// Internal function for checking if Claude CLI is installed.
 /// Used by both the Tauri command and the Claude backend adapter.
 pub async fn check_cli_installed_internal() -> CliInstallStatus {
-    check_backend_cli_installed_internal("claudecli").await
+    check_backend_cli_installed_internal("claude").await
 }
 
 #[tauri::command]
@@ -615,7 +615,7 @@ pub async fn check_backend_cli_authenticated(backend: String) -> Result<CliAuthS
 
 #[tauri::command]
 pub async fn check_all_backends_status() -> Result<Vec<BackendCliStatus>, String> {
-    let backends = [BackendKind::ClaudeCli, BackendKind::Codex];
+    let backends = [BackendKind::Claude, BackendKind::Codex];
 
     let futures: Vec<_> = backends
         .iter()
@@ -672,7 +672,7 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
                 .ok()
                 .map(|kind| kind.to_string())
         })
-        .unwrap_or_else(|| "claudecli".to_string());
+        .unwrap_or_else(|| "claude".to_string());
     let backend_cli_paths = storage::get_backend_cli_paths().map_err(|e| e.to_string())?;
 
     let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;

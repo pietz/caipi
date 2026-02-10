@@ -119,7 +119,7 @@
   const readyBackends = $derived(backendStatuses.filter(b => b.installed && b.authenticated));
   const canProceed = $derived(!!selectedBackend && !!selectedFolder && !completing);
   const backendRows = $derived(
-    (['claudecli', 'codex'] as Backend[]).map((id) => {
+    (['claude', 'codex'] as Backend[]).map((id) => {
       const status = backendStatuses.find((b) => b.backend === id);
       return {
         backend: id,
@@ -183,7 +183,7 @@
           >
             <div class="flex items-center gap-3">
               <div class="shrink-0 text-foreground/70">
-                {#if backend.backend === 'claudecli'}
+                {#if backend.backend === 'claude'}
                   <ClaudeIcon size={32} />
                 {:else}
                   <OpenAIIcon size={32} />
@@ -191,7 +191,7 @@
               </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="text-sm text-foreground">{backend.backend === 'claudecli' ? 'Claude Code' : 'Codex CLI'}</div>
+                  <div class="text-sm text-foreground">{backend.backend === 'claude' ? 'Claude Code' : 'Codex CLI'}</div>
                   {#if checkingCli}
                     <Loader2 size={14} class="text-muted-foreground animate-spin" />
                   {:else if ready}

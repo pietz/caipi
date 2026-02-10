@@ -1,6 +1,6 @@
 // Backend configuration for different AI coding CLIs
 
-export type Backend = 'claude' | 'claudecli' | 'codex';
+export type Backend = 'claude' | 'codex';
 
 export interface ThinkingOption {
   value: string;
@@ -23,22 +23,7 @@ export interface BackendConfig {
 export const backendConfigs: Record<Backend, BackendConfig> = {
   claude: {
     models: [
-      { id: 'opus', name: 'Opus 4.6', size: 'large', thinkingOptions: [
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Med' },
-        { value: 'high', label: 'High' },
-        { value: 'max', label: 'Max' },
-      ], defaultThinking: 'high' },
-      { id: 'sonnet', name: 'Sonnet 4.5', size: 'medium', thinkingOptions: [
-        { value: 'off', label: 'Off' },
-        { value: 'on', label: 'On' },
-      ], defaultThinking: 'on' },
-      { id: 'haiku', name: 'Haiku 4.5', size: 'small', thinkingOptions: [], defaultThinking: '' },
-    ],
-    contextLimit: 200_000,
-  },
-  claudecli: {
-    models: [
+      // CLI backend currently doesn't support toggling thinking levels programmatically.
       { id: 'opus', name: 'Opus 4.6', size: 'large', thinkingOptions: [], defaultThinking: '' },
       { id: 'sonnet', name: 'Sonnet 4.5', size: 'medium', thinkingOptions: [], defaultThinking: '' },
       { id: 'haiku', name: 'Haiku 4.5', size: 'small', thinkingOptions: [], defaultThinking: '' },
@@ -64,6 +49,6 @@ export const backendConfigs: Record<Backend, BackendConfig> = {
 };
 
 // Get config for the current backend
-export function getBackendConfig(backend: Backend = 'claudecli'): BackendConfig {
+export function getBackendConfig(backend: Backend = 'claude'): BackendConfig {
   return backendConfigs[backend];
 }
