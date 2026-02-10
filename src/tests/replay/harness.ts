@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { handleClaudeEvent, resetEventState, type ChatEvent } from '$lib/utils/events';
+import { handleChatEvent, resetEventState, type ChatEvent } from '$lib/utils/events';
 import { chat } from '$lib/stores/chat.svelte';
 import { app } from '$lib/stores/app.svelte';
 import {
@@ -56,7 +56,7 @@ export function replay(events: ChatEvent[], opts: ReplayOptions = {}): ReplayRes
   };
 
   for (let i = 0; i < events.length; i++) {
-    handleClaudeEvent(events[i], eventOptions);
+    handleChatEvent(events[i], eventOptions);
 
     // Advance fake timers to flush text buffer (150ms is the FLUSH_DELAY_MS)
     vi.advanceTimersByTime(200);

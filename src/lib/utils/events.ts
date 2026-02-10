@@ -1,4 +1,4 @@
-// Event handling utility for Claude events
+// Event handling utility for backend-neutral chat events
 import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
@@ -41,7 +41,7 @@ export function setOnContentChange(callback: (() => void) | null) {
   onContentChange = callback;
 }
 
-export function handleClaudeEvent(event: ChatEvent, options: EventHandlerOptions = {}) {
+export function handleChatEvent(event: ChatEvent, options: EventHandlerOptions = {}) {
   const { onComplete, onError } = options;
 
   if (shouldIgnoreEvent(event)) {

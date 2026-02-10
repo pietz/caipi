@@ -6,6 +6,7 @@
   import { app } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
   import { resetEventState } from '$lib/utils/events';
+  import type { Backend } from '$lib/config/backends';
 
   interface Props {
     showClose?: boolean;
@@ -57,8 +58,11 @@
       // Reset state before loading different session
       chat.reset();
       resetEventState();
-      // Only hard-pin Codex sessions; Claude-family sessions should use current backend selection.
-      const resumeBackend = session.backend === 'codex' ? 'codex' : undefined;
+      // Sessions are backend-specific; resume with the backend recorded on the session when present.
+      const resumeBackend =
+        session.backend === 'claude' || session.backend === 'codex'
+          ? (session.backend as Backend)
+          : undefined;
       await app.resumeSession(
         session.folderPath,
         session.sessionId,
@@ -242,22 +246,29 @@
                 {#if isExpanded}
                   <div class="ml-6 border-l border-border/50">
                     {#each project.sessions as session}
-                      <button
-                        type="button"
-                        class="flex items-center justify-between w-full py-2 px-3 hover:bg-muted transition-colors text-left"
-                        onclick={() => resumeSession(session)}
-                        disabled={validating}
-                      >
-                        <div class="flex-1 min-w-0 pr-3">
-                          <div class="text-sm text-foreground truncate">
-                            {truncatePrompt(session.firstPrompt)}
-                          </div>
+                    <button
+                      type="button"
+                      class="flex items-center justify-between w-full py-2 px-3 hover:bg-muted transition-colors text-left"
+                      onclick={() => resumeSession(session)}
+                      disabled={validating}
+                    >
+                      <div class="flex-1 min-w-0 pr-3">
+                        <div class="text-sm text-foreground truncate">
+                          {truncatePrompt(session.firstPrompt)}
                         </div>
-                        <span class="text-xs text-muted-foreground/50 flex-shrink-0">
+                      </div>
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        {#if session.backend}
+                          <span class="text-[10px] px-1.5 py-0.5 rounded border border-border/60 text-muted-foreground/70">
+                            {session.backend === 'claude' ? 'Claude' : session.backend === 'codex' ? 'Codex' : session.backend}
+                          </span>
+                        {/if}
+                        <span class="text-xs text-muted-foreground/50">
                           {formatTime(session.modified)}
                         </span>
-                      </button>
-                    {/each}
+                      </div>
+                    </button>
+                  {/each}
                   </div>
                 {/if}
               </div>

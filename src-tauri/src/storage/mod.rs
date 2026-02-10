@@ -32,6 +32,10 @@ pub enum StorageError {
 pub struct CliStatusCache {
     pub status: CliStatus,
     pub cached_at: u64, // Unix timestamp in seconds
+    /// Which backend this cached status applies to.
+    /// Older builds did not store this field; treat missing as "claude".
+    #[serde(default)]
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -174,7 +178,7 @@ pub fn get_cli_status_cache() -> Result<Option<CliStatusCache>, StorageError> {
     Ok(data.cli_status_cache)
 }
 
-pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
+pub fn set_cli_status_cache(status: CliStatus, backend: Option<String>) -> Result<(), StorageError> {
     let _guard = get_storage_lock().lock();
     let mut data = load_data()?;
     let now = SystemTime::now()
@@ -184,6 +188,7 @@ pub fn set_cli_status_cache(status: CliStatus) -> Result<(), StorageError> {
     data.cli_status_cache = Some(CliStatusCache {
         status,
         cached_at: now,
+        backend,
     });
     save_data(&data)?;
     Ok(())
@@ -523,6 +528,7 @@ mod tests {
                     path: Some("/usr/local/bin/claude".to_string()),
                 },
                 cached_at: 12345,
+                backend: Some("claude".to_string()),
             }),
             default_folder: Some("/default/path".to_string()),
             license: None,
@@ -694,6 +700,7 @@ mod tests {
         data.cli_status_cache = Some(CliStatusCache {
             status: cli_status.clone(),
             cached_at: now,
+            backend: None,
         });
 
         save_data_to(&data_path, &data).unwrap();
@@ -721,6 +728,7 @@ mod tests {
                 path: Some("/usr/bin/claude".to_string()),
             },
             cached_at: 12345,
+            backend: None,
         });
 
         save_data_to(&data_path, &data).unwrap();

@@ -603,6 +603,26 @@ pub async fn check_cli_status() -> Result<CliStatus, String> {
     })
 }
 
+async fn check_backend_cli_status_internal(backend: &str) -> CliStatus {
+    let install = check_backend_cli_installed_internal(backend).await;
+    if !install.installed {
+        return CliStatus {
+            installed: false,
+            version: None,
+            authenticated: false,
+            path: None,
+        };
+    }
+
+    let auth = check_backend_cli_authenticated_internal(backend).await;
+    CliStatus {
+        installed: install.installed,
+        version: install.version,
+        authenticated: auth.authenticated,
+        path: install.path,
+    }
+}
+
 #[tauri::command]
 pub async fn check_backend_cli_installed(backend: String) -> Result<CliInstallStatus, String> {
     Ok(check_backend_cli_installed_internal(&backend).await)
@@ -676,16 +696,22 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
     let backend_cli_paths = storage::get_backend_cli_paths().map_err(|e| e.to_string())?;
 
     let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;
-
     let (cli_status, cli_status_fresh) = match cache {
         Some(cached) => {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_secs();
-            let age = now.saturating_sub(cached.cached_at);
-            let fresh = age < CLI_CACHE_TTL_SECONDS;
-            (Some(cached.status), fresh)
+            // Only surface cached status when it matches the default backend.
+            // Legacy caches without backend are treated as "claude".
+            let cached_backend = cached.backend.as_deref().unwrap_or("claude");
+            if cached_backend != default_backend {
+                (None, false)
+            } else {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs();
+                let age = now.saturating_sub(cached.cached_at);
+                let fresh = age < CLI_CACHE_TTL_SECONDS;
+                (Some(cached.status), fresh)
+            }
         }
         None => (None, false),
     };
@@ -708,9 +734,13 @@ pub async fn complete_onboarding(
 ) -> Result<(), String> {
     let default_backend = validate_backend_option(default_backend)?;
 
-    // Get fresh CLI status and cache it
-    let status = check_cli_status().await?;
-    storage::set_cli_status_cache(status).map_err(|e| e.to_string())?;
+    // Cache the selected backend's status.
+    let backend_name = default_backend
+        .clone()
+        .unwrap_or_else(|| "claude".to_string());
+    let status = check_backend_cli_status_internal(&backend_name).await;
+    storage::set_cli_status_cache(status, Some(backend_name))
+        .map_err(|e| e.to_string())?;
 
     // Save the default folder
     storage::set_default_folder(default_folder).map_err(|e| e.to_string())?;

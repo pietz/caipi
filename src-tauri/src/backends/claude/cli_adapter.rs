@@ -133,6 +133,10 @@ pub struct CliSession {
     abort_flag: Arc<AtomicBool>,
     /// Notify for abort signaling
     abort_notify: Arc<Notify>,
+    /// Best-effort: ensure one in-flight turn at a time (matches Codex behavior).
+    in_flight: Arc<AtomicBool>,
+    /// Frontend-generated turn id used for stale-event gating in the UI.
+    current_turn_id: Arc<RwLock<Option<String>>>,
     /// User settings loaded from ~/.claude/settings.json
     user_settings: Option<ClaudeSettings>,
     /// Running CLI process (if any)
@@ -160,6 +164,8 @@ impl CliSession {
         process: Arc<Mutex<Option<Child>>>,
         stdin_writer: Arc<Mutex<Option<tokio::process::ChildStdin>>>,
         abort_flag: Arc<AtomicBool>,
+        in_flight: Arc<AtomicBool>,
+        current_turn_id: Arc<RwLock<Option<String>>>,
         expected_pid: Option<u32>,
     ) -> Option<String> {
         let status = loop {
@@ -188,6 +194,8 @@ impl CliSession {
                     *stdin_writer.lock().await = None;
 
                     if !abort_flag.load(Ordering::SeqCst) {
+                        in_flight.store(false, Ordering::SeqCst);
+                        *current_turn_id.write().await = None;
                         return Some(
                             "Lost connection to Claude CLI process. Send another message to recover."
                                 .to_string(),
@@ -209,6 +217,8 @@ impl CliSession {
 
         // Skip error UI for intentional abort path.
         if !abort_flag.load(Ordering::SeqCst) {
+            in_flight.store(false, Ordering::SeqCst);
+            *current_turn_id.write().await = None;
             return Some(format!(
                 "Claude CLI process exited unexpectedly ({}). Send another message to resume.",
                 status_str
@@ -221,6 +231,17 @@ impl CliSession {
     /// This tracks effective input-side context load for the current call.
     fn context_tokens_from_usage(usage: &UsageInfo) -> u64 {
         usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+    }
+
+    async fn cleanup_process(&self) {
+        // Kill process if running
+        let mut process_guard = self.process.lock().await;
+        if let Some(ref mut child) = *process_guard {
+            let _ = child.kill().await;
+        }
+        *process_guard = None;
+        *self.stdin_writer.lock().await = None;
+        *self.process_model.write().await = None;
     }
 
     /// Create a new CLI session.
@@ -253,6 +274,8 @@ impl CliSession {
             app_handle,
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
+            in_flight: Arc::new(AtomicBool::new(false)),
+            current_turn_id: Arc::new(RwLock::new(None)),
             user_settings,
             process: Arc::new(Mutex::new(None)),
             stdin_writer: Arc::new(Mutex::new(None)),
@@ -375,6 +398,8 @@ impl CliSession {
         let app_handle = self.app_handle.clone();
         let abort_flag = self.abort_flag.clone();
         let abort_notify = self.abort_notify.clone();
+        let in_flight = self.in_flight.clone();
+        let current_turn_id = self.current_turn_id.clone();
         let permission_mode = self.permission_mode.clone();
         let user_settings = self.user_settings.clone();
         let permission_channels = self.permission_channels.clone();
@@ -407,6 +432,9 @@ impl CliSession {
                     break;
                 }
 
+                // Best-effort: tag events with the currently active frontend turn id.
+                let turn_id = current_turn_id.read().await.clone();
+
                 // Skip empty lines
                 if line.trim().is_empty() {
                     continue;
@@ -418,6 +446,7 @@ impl CliSession {
                         Self::handle_event(
                             event,
                             &app_handle,
+                            turn_id.as_deref(),
                             &permission_mode,
                             user_settings.as_ref(),
                             &permission_channels,
@@ -428,6 +457,8 @@ impl CliSession {
                             &mut active_tools,
                             &messages,
                             &cli_session_id,
+                            &in_flight,
+                            &current_turn_id,
                         )
                         .await;
                     }
@@ -446,16 +477,26 @@ impl CliSession {
         let app_handle = self.app_handle.clone();
         let abort_flag = self.abort_flag.clone();
         let stdin_writer = self.stdin_writer.clone();
+        let in_flight = self.in_flight.clone();
+        let current_turn_id = self.current_turn_id.clone();
         tokio::spawn(async move {
             if let Some(message) =
-                Self::monitor_process_lifecycle(process, stdin_writer, abort_flag, spawned_pid)
+                Self::monitor_process_lifecycle(
+                    process,
+                    stdin_writer,
+                    abort_flag,
+                    in_flight,
+                    current_turn_id.clone(),
+                    spawned_pid,
+                )
                     .await
             {
+                let turn_id = current_turn_id.read().await.clone();
                 let error_event = ChatEvent::Error { message };
                 emit_chat_event(
                     &app_handle,
                     Some(session_id_for_lifecycle.as_str()),
-                    None,
+                    turn_id.as_deref(),
                     &error_event,
                 );
             }
@@ -569,6 +610,7 @@ impl CliSession {
     async fn handle_event(
         event: CliEvent,
         app_handle: &AppHandle,
+        turn_id: Option<&str>,
         permission_mode: &Arc<RwLock<String>>,
         user_settings: Option<&ClaudeSettings>,
         permission_channels: &PermissionChannels,
@@ -579,32 +621,45 @@ impl CliSession {
         active_tools: &mut HashMap<String, String>,
         messages: &Arc<RwLock<Vec<Message>>>,
         cli_session_id: &Arc<RwLock<Option<String>>>,
+        in_flight: &Arc<AtomicBool>,
+        current_turn_id: &Arc<RwLock<Option<String>>>,
     ) {
         match event {
             CliEvent::System(system) => {
-                Self::handle_system_event(system, app_handle, session_id, cli_session_id).await;
+                Self::handle_system_event(system, app_handle, session_id, turn_id, cli_session_id)
+                    .await;
             }
             CliEvent::Assistant(assistant) => {
                 Self::handle_assistant_event(
                     assistant,
                     app_handle,
                     session_id,
+                    turn_id,
                     active_tools,
                     messages,
                 )
                 .await;
             }
             CliEvent::User(_user) => {
-                Self::handle_user_event(_user, app_handle, session_id, active_tools).await;
+                Self::handle_user_event(_user, app_handle, session_id, turn_id, active_tools).await;
             }
             CliEvent::Result(result) => {
-                Self::handle_result_event(result, app_handle, session_id).await;
+                Self::handle_result_event(
+                    result,
+                    app_handle,
+                    session_id,
+                    turn_id,
+                    in_flight,
+                    current_turn_id,
+                )
+                .await;
             }
             CliEvent::ControlRequest(request) => {
                 Self::handle_control_request(
                     request,
                     app_handle,
                     session_id,
+                    turn_id,
                     permission_mode,
                     user_settings,
                     permission_channels,
@@ -626,6 +681,7 @@ impl CliSession {
         event: SystemEvent,
         app_handle: &AppHandle,
         session_id: &str,
+        turn_id: Option<&str>,
         cli_session_id: &Arc<RwLock<Option<String>>>,
     ) {
         if event.subtype == "init" {
@@ -649,7 +705,7 @@ impl CliSession {
             .to_string();
 
             let session_init = ChatEvent::SessionInit { auth_type };
-            emit_chat_event(app_handle, Some(session_id), None, &session_init);
+            emit_chat_event(app_handle, Some(session_id), turn_id, &session_init);
         }
     }
 
@@ -659,6 +715,7 @@ impl CliSession {
         event: AssistantEvent,
         app_handle: &AppHandle,
         session_id: &str,
+        turn_id: Option<&str>,
         active_tools: &mut HashMap<String, String>,
         messages: &Arc<RwLock<Vec<Message>>>,
     ) {
@@ -669,7 +726,7 @@ impl CliSession {
                 context_tokens: None,
                 context_window: None,
             };
-            emit_chat_event(app_handle, Some(session_id), None, &token_usage);
+            emit_chat_event(app_handle, Some(session_id), turn_id, &token_usage);
         }
 
         for block in event.message.content {
@@ -678,7 +735,7 @@ impl CliSession {
                     let text_event = ChatEvent::Text {
                         content: text_block.text.clone(),
                     };
-                    emit_chat_event(app_handle, Some(session_id), None, &text_event);
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &text_event);
 
                     // Store message
                     let mut msgs = messages.write().await;
@@ -695,9 +752,9 @@ impl CliSession {
                         thinking_id: thinking_id.clone(),
                         content: thinking_block.thinking,
                     };
-                    emit_chat_event(app_handle, Some(session_id), None, &thinking_start);
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_start);
                     let thinking_end = ChatEvent::ThinkingEnd { thinking_id };
-                    emit_chat_event(app_handle, Some(session_id), None, &thinking_end);
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_end);
                 }
                 ContentBlock::ToolUse(tool_use) => {
                     // Track the tool for ToolEnd matching
@@ -717,7 +774,7 @@ impl CliSession {
                             id: tool_result.tool_use_id.clone(),
                             status: status.to_string(),
                         };
-                        emit_chat_event(app_handle, Some(session_id), None, &tool_end);
+                        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
                     }
                 }
                 ContentBlock::InputJsonDelta(_) => {
@@ -734,6 +791,7 @@ impl CliSession {
         event: crate::claude::cli_protocol::UserEvent,
         app_handle: &AppHandle,
         session_id: &str,
+        turn_id: Option<&str>,
         active_tools: &mut HashMap<String, String>,
     ) {
         if let Some(message) = event.extra.get("message") {
@@ -755,7 +813,7 @@ impl CliSession {
                                     id: tool_use_id.to_string(),
                                     status: status.to_string(),
                                 };
-                                emit_chat_event(app_handle, Some(session_id), None, &tool_end);
+                                emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
                             }
                         }
                     }
@@ -771,6 +829,7 @@ impl CliSession {
         request: IncomingControlRequest,
         app_handle: &AppHandle,
         session_id: &str,
+        turn_id: Option<&str>,
         permission_mode: &Arc<RwLock<String>>,
         user_settings: Option<&ClaudeSettings>,
         permission_channels: &PermissionChannels,
@@ -788,6 +847,7 @@ impl CliSession {
                         input,
                         app_handle,
                         session_id,
+                        turn_id,
                         permission_mode,
                         user_settings,
                         permission_channels,
@@ -818,6 +878,7 @@ impl CliSession {
         input: &crate::claude::cli_protocol::HookCallbackInput,
         app_handle: &AppHandle,
         session_id: &str,
+        turn_id: Option<&str>,
         permission_mode: &Arc<RwLock<String>>,
         user_settings: Option<&ClaudeSettings>,
         permission_channels: &PermissionChannels,
@@ -854,7 +915,7 @@ impl CliSession {
             status: "pending".to_string(),
             input: input_for_frontend,
         };
-        emit_chat_event(app_handle, Some(session_id), None, &tool_start);
+        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_start);
 
         // Check abort first
         if abort_flag.load(Ordering::SeqCst) {
@@ -882,7 +943,7 @@ impl CliSession {
                     status: "running".to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), None, &running_status);
+                emit_chat_event(app_handle, Some(session_id), turn_id, &running_status);
 
                 let response =
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason);
@@ -898,7 +959,7 @@ impl CliSession {
                     status: "denied".to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), None, &denied_status);
+                emit_chat_event(app_handle, Some(session_id), turn_id, &denied_status);
 
                 let response =
                     OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason);
@@ -923,7 +984,7 @@ impl CliSession {
                     status: "awaiting_permission".to_string(),
                     permission_request_id: Some(permission_request_id.clone()),
                 };
-                emit_chat_event(app_handle, Some(session_id), None, &awaiting_permission);
+                emit_chat_event(app_handle, Some(session_id), turn_id, &awaiting_permission);
 
                 // Wait for user response with timeout and abort support
                 let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
@@ -964,7 +1025,7 @@ impl CliSession {
                     status: status.to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), None, &final_status);
+                emit_chat_event(app_handle, Some(session_id), turn_id, &final_status);
 
                 let response = if allowed {
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason)
@@ -979,16 +1040,26 @@ impl CliSession {
     }
 
     /// Handle result events (completion).
-    async fn handle_result_event(event: ResultEvent, app_handle: &AppHandle, session_id: &str) {
+    async fn handle_result_event(
+        event: ResultEvent,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        in_flight: &Arc<AtomicBool>,
+        current_turn_id: &Arc<RwLock<Option<String>>>,
+    ) {
         if event.subtype == "success" {
             let complete_event = ChatEvent::Complete;
-            emit_chat_event(app_handle, Some(session_id), None, &complete_event);
+            emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
         } else if event.subtype == "error" {
             let error_event = ChatEvent::Error {
                 message: "CLI returned error".to_string(),
             };
-            emit_chat_event(app_handle, Some(session_id), None, &error_event);
+            emit_chat_event(app_handle, Some(session_id), turn_id, &error_event);
         }
+
+        in_flight.store(false, Ordering::SeqCst);
+        *current_turn_id.write().await = None;
 
         // Do not emit token usage from result totals here: result usage is
         // cumulative session accounting and does not match context usage semantics.
@@ -1012,8 +1083,17 @@ impl BackendSession for CliSession {
     async fn send_message(
         &self,
         message: &str,
-        _turn_id: Option<&str>,
+        turn_id: Option<&str>,
     ) -> Result<(), BackendError> {
+        if self.in_flight.swap(true, Ordering::SeqCst) {
+            return Err(BackendError {
+                message: "Claude session is busy".to_string(),
+                recoverable: true,
+            });
+        }
+
+        *self.current_turn_id.write().await = turn_id.map(|id| id.to_string());
+
         // Clear abort flag at start of new message (allows recovery after abort)
         self.abort_flag.store(false, Ordering::SeqCst);
 
@@ -1036,9 +1116,9 @@ impl BackendSession for CliSession {
         let process_model = self.process_model.read().await.clone();
         let model_changed = has_process && process_model.as_ref() != Some(&current_model);
 
-        if model_changed {
+        let result = if model_changed {
             // Model changed - kill old process and respawn with --resume to preserve conversation
-            self.cleanup().await;
+            self.cleanup_process().await;
             self.spawn_cli_internal(message, true).await
         } else if has_process {
             // Send message to existing process
@@ -1052,10 +1132,19 @@ impl BackendSession for CliSession {
             } else {
                 self.spawn_cli(message).await
             }
+        };
+
+        if result.is_err() {
+            self.in_flight.store(false, Ordering::SeqCst);
+            *self.current_turn_id.write().await = None;
         }
+
+        result
     }
 
     async fn abort(&self) -> Result<(), BackendError> {
+        let turn_id = self.current_turn_id.read().await.clone();
+
         // Set abort flag
         self.abort_flag.store(true, Ordering::SeqCst);
         self.abort_notify.notify_waiters();
@@ -1083,6 +1172,9 @@ impl BackendSession for CliSession {
         // Clear stdin writer
         *self.stdin_writer.lock().await = None;
 
+        self.in_flight.store(false, Ordering::SeqCst);
+        *self.current_turn_id.write().await = None;
+
         // Emit abort complete
         let abort_complete = ChatEvent::AbortComplete {
             session_id: self.id.clone(),
@@ -1090,7 +1182,7 @@ impl BackendSession for CliSession {
         emit_chat_event(
             &self.app_handle,
             Some(self.id.as_str()),
-            None,
+            turn_id.as_deref(),
             &abort_complete,
         );
 
@@ -1098,14 +1190,9 @@ impl BackendSession for CliSession {
     }
 
     async fn cleanup(&self) {
-        // Kill process if running
-        let mut process_guard = self.process.lock().await;
-        if let Some(ref mut child) = *process_guard {
-            let _ = child.kill().await;
-        }
-        *process_guard = None;
-        *self.stdin_writer.lock().await = None;
-        *self.process_model.write().await = None;
+        self.cleanup_process().await;
+        self.in_flight.store(false, Ordering::SeqCst);
+        *self.current_turn_id.write().await = None;
     }
 
     async fn get_permission_mode(&self) -> String {
@@ -1144,7 +1231,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
-    use tokio::sync::Mutex;
+    use tokio::sync::{Mutex, RwLock};
 
     async fn spawn_fast_exit_process(code: i32) -> Child {
         #[cfg(target_os = "windows")]
@@ -1207,11 +1294,15 @@ mod tests {
         let process = Arc::new(Mutex::new(Some(child)));
         let stdin_writer = Arc::new(Mutex::new(None));
         let abort_flag = Arc::new(AtomicBool::new(false));
+        let in_flight = Arc::new(AtomicBool::new(true));
+        let current_turn_id = Arc::new(RwLock::new(Some("turn-1".to_string())));
 
         let message = CliSession::monitor_process_lifecycle(
             process.clone(),
             stdin_writer.clone(),
             abort_flag,
+            in_flight.clone(),
+            current_turn_id.clone(),
             pid,
         )
         .await;
@@ -1220,6 +1311,8 @@ mod tests {
         assert!(stdin_writer.lock().await.is_none());
         assert!(message.is_some());
         assert!(message.unwrap().contains("exited unexpectedly"));
+        assert!(!in_flight.load(Ordering::SeqCst));
+        assert!(current_turn_id.read().await.is_none());
     }
 
     #[tokio::test]
@@ -1229,11 +1322,15 @@ mod tests {
         let process = Arc::new(Mutex::new(Some(child)));
         let stdin_writer = Arc::new(Mutex::new(None));
         let abort_flag = Arc::new(AtomicBool::new(true));
+        let in_flight = Arc::new(AtomicBool::new(true));
+        let current_turn_id = Arc::new(RwLock::new(Some("turn-2".to_string())));
 
         let message = CliSession::monitor_process_lifecycle(
             process.clone(),
             stdin_writer.clone(),
             abort_flag,
+            in_flight,
+            current_turn_id,
             pid,
         )
         .await;

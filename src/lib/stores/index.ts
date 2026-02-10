@@ -12,4 +12,4 @@ export type { FileEntry } from './files.svelte';
 export type { UpdateStatus } from './updater.svelte';
 
 // Event handling utilities
-export { handleClaudeEvent, respondToPermission, resetEventState, type ChatEvent, type EventHandlerOptions } from '$lib/utils/events';
+export { handleChatEvent, respondToPermission, resetEventState, type ChatEvent, type EventHandlerOptions } from '$lib/utils/events';

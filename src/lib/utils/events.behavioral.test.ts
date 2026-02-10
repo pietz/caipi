@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleClaudeEvent, resetEventState, type ChatEvent } from './events';
+import { handleChatEvent, resetEventState, type ChatEvent } from './events';
 import { chat } from '$lib/stores/chat.svelte';
 import { app } from '$lib/stores/app.svelte';
 import {
@@ -55,7 +55,7 @@ describe('Behavioral Tests', () => {
       chat.setStreaming(true);
       chat.enqueueMessage('Queued message');
 
-      handleClaudeEvent(makeAbortCompleteEvent());
+      handleChatEvent(makeAbortCompleteEvent());
       vi.advanceTimersByTime(200);
 
       expect(chat.messageQueue).toHaveLength(0);
@@ -64,7 +64,7 @@ describe('Behavioral Tests', () => {
 
   describe('Text buffer timing', () => {
     it('does not flush text without newline before 150ms', () => {
-      handleClaudeEvent(makeTextEvent('Hello'));
+      handleChatEvent(makeTextEvent('Hello'));
 
       // No flush yet
       expect(chat.streamItems).toHaveLength(0);
@@ -75,7 +75,7 @@ describe('Behavioral Tests', () => {
     });
 
     it('flushes text without newline after 150ms', () => {
-      handleClaudeEvent(makeTextEvent('Hello'));
+      handleChatEvent(makeTextEvent('Hello'));
 
       vi.advanceTimersByTime(150);
 
@@ -84,7 +84,7 @@ describe('Behavioral Tests', () => {
     });
 
     it('flushes text with newline immediately', () => {
-      handleClaudeEvent(makeTextEvent('Hello\n'));
+      handleChatEvent(makeTextEvent('Hello\n'));
 
       // Should be flushed immediately (no timer needed)
       expect(chat.streamItems).toHaveLength(1);
@@ -92,10 +92,10 @@ describe('Behavioral Tests', () => {
     });
 
     it('resets flush timer on new content', () => {
-      handleClaudeEvent(makeTextEvent('First'));
+      handleChatEvent(makeTextEvent('First'));
       vi.advanceTimersByTime(100);
 
-      handleClaudeEvent(makeTextEvent(' Second'));
+      handleChatEvent(makeTextEvent(' Second'));
       vi.advanceTimersByTime(100);
 
       // Still not flushed (timer was reset)
@@ -108,11 +108,11 @@ describe('Behavioral Tests', () => {
     });
 
     it('ToolStart flushes buffered text', () => {
-      handleClaudeEvent(makeTextEvent('Buffered'));
+      handleChatEvent(makeTextEvent('Buffered'));
 
       expect(chat.streamItems).toHaveLength(0);
 
-      handleClaudeEvent(makeToolStartEvent());
+      handleChatEvent(makeToolStartEvent());
 
       // Buffer should have been flushed before tool
       expect(chat.streamItems).toHaveLength(2);
@@ -122,11 +122,11 @@ describe('Behavioral Tests', () => {
     });
 
     it('Complete flushes buffered text', () => {
-      handleClaudeEvent(makeTextEvent('Final text'));
+      handleChatEvent(makeTextEvent('Final text'));
 
       expect(chat.streamItems).toHaveLength(0);
 
-      handleClaudeEvent(makeCompleteEvent());
+      handleChatEvent(makeCompleteEvent());
 
       // After finalize, streamItems are cleared, but messages should have the content
       expect(chat.messages).toHaveLength(1);
@@ -139,7 +139,7 @@ describe('Behavioral Tests', () => {
       const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX';
 
       for (const char of chars) {
-        handleClaudeEvent(makeTextEvent(char));
+        handleChatEvent(makeTextEvent(char));
       }
 
       // Flush the buffer
@@ -154,11 +154,11 @@ describe('Behavioral Tests', () => {
     });
 
     it('handles interleaved text and newlines correctly', () => {
-      handleClaudeEvent(makeTextEvent('Line 1'));
-      handleClaudeEvent(makeTextEvent('\n'));
-      handleClaudeEvent(makeTextEvent('Line 2'));
-      handleClaudeEvent(makeTextEvent('\n'));
-      handleClaudeEvent(makeTextEvent('Partial'));
+      handleChatEvent(makeTextEvent('Line 1'));
+      handleChatEvent(makeTextEvent('\n'));
+      handleChatEvent(makeTextEvent('Line 2'));
+      handleChatEvent(makeTextEvent('\n'));
+      handleChatEvent(makeTextEvent('Partial'));
 
       vi.advanceTimersByTime(200);
 
@@ -186,7 +186,7 @@ describe('Behavioral Tests', () => {
 
       expect(chat.tools.size).toBe(1);
 
-      handleClaudeEvent(makeAbortCompleteEvent());
+      handleChatEvent(makeAbortCompleteEvent());
       vi.advanceTimersByTime(200);
 
       // After abort: streaming stopped, tools cleared (via finalize + setStreaming(false))

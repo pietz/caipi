@@ -15,7 +15,7 @@
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import { app } from '$lib/stores/app.svelte';
   import { chat, type StreamItem, type ToolState } from '$lib/stores/chat.svelte';
-  import { handleClaudeEvent, respondToPermission, resetEventState, setOnContentChange, type ChatEvent } from '$lib/utils/events';
+  import { handleChatEvent, respondToPermission, resetEventState, setOnContentChange, type ChatEvent } from '$lib/utils/events';
 
   // Types for grouped stream items
   type GroupedTextItem = { type: 'text'; content: string };
@@ -32,7 +32,7 @@
 
     // Listen for backend-neutral chat events
     unlisten = await listen<ChatEvent>('chat:event', (event) => {
-      handleClaudeEvent(event.payload, { onComplete: processQueuedMessages });
+      handleChatEvent(event.payload, { onComplete: processQueuedMessages });
       scrollToBottom();
     });
 

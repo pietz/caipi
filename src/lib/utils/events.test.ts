@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  handleClaudeEvent,
+  handleChatEvent,
   resetEventState,
   respondToPermission,
   setOnContentChange,
@@ -44,7 +44,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
-describe('handleClaudeEvent', () => {
+describe('handleChatEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetEventState();
@@ -63,7 +63,7 @@ describe('handleClaudeEvent', () => {
         content: 'Hello',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       // Should not append yet - waiting for newline
       expect(chat.appendText).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe('handleClaudeEvent', () => {
         content: 'Hello\n',
       };
 
-      handleClaudeEvent(event1);
+      handleChatEvent(event1);
 
       expect(chat.appendText).toHaveBeenCalledWith('Hello\n');
       expect(chat.appendText).toHaveBeenCalledTimes(1);
@@ -87,7 +87,7 @@ describe('handleClaudeEvent', () => {
         content: 'Line 1\nLine 2\nLine 3\n',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.appendText).toHaveBeenCalledWith('Line 1\nLine 2\nLine 3\n');
       expect(chat.appendText).toHaveBeenCalledTimes(1);
@@ -103,10 +103,10 @@ describe('handleClaudeEvent', () => {
         content: 'world\n',
       };
 
-      handleClaudeEvent(event1);
+      handleChatEvent(event1);
       expect(chat.appendText).not.toHaveBeenCalled();
 
-      handleClaudeEvent(event2);
+      handleChatEvent(event2);
       expect(chat.appendText).toHaveBeenCalledWith('Hello world\n');
     });
 
@@ -116,7 +116,7 @@ describe('handleClaudeEvent', () => {
         content: 'No newline here',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.appendText).not.toHaveBeenCalled();
 
@@ -136,10 +136,10 @@ describe('handleClaudeEvent', () => {
         content: ' Second',
       };
 
-      handleClaudeEvent(event1);
+      handleChatEvent(event1);
       vi.advanceTimersByTime(100); // Not enough to trigger
 
-      handleClaudeEvent(event2);
+      handleChatEvent(event2);
       vi.advanceTimersByTime(100); // Still not enough (timer was reset)
 
       expect(chat.appendText).not.toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe('handleClaudeEvent', () => {
         content: 'Complete line\nIncomplete',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.appendText).toHaveBeenCalledWith('Complete line\n');
       expect(chat.appendText).toHaveBeenCalledTimes(1);
@@ -178,7 +178,7 @@ describe('handleClaudeEvent', () => {
         content: 'Hello\n',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(onChange).toHaveBeenCalledTimes(1);
       setOnContentChange(null);
@@ -193,7 +193,7 @@ describe('handleClaudeEvent', () => {
         content: 'No newline',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
       vi.advanceTimersByTime(150);
 
       expect(onChange).toHaveBeenCalledTimes(1);
@@ -208,7 +208,7 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       const toolEvent: ChatEvent = {
         type: 'ToolStart',
@@ -219,7 +219,7 @@ describe('handleClaudeEvent', () => {
         input: { file_path: '/path/to/file.txt' },
       };
 
-      handleClaudeEvent(toolEvent);
+      handleChatEvent(toolEvent);
 
       // Should flush buffered text first
       expect(chat.appendText).toHaveBeenCalledWith('Buffered text');
@@ -247,7 +247,7 @@ describe('handleClaudeEvent', () => {
         permissionRequestId: 'perm-456',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateToolStatus).toHaveBeenCalledWith(
         'tool-123',
@@ -263,7 +263,7 @@ describe('handleClaudeEvent', () => {
         status: 'running',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateToolStatus).toHaveBeenCalledWith(
         'tool-123',
@@ -283,7 +283,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateToolStatus).toHaveBeenCalledWith('tool-123', 'completed');
     });
@@ -295,7 +295,7 @@ describe('handleClaudeEvent', () => {
         status: 'error',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateToolStatus).toHaveBeenCalledWith('tool-123', 'error');
     });
@@ -318,7 +318,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.addActiveSkill).toHaveBeenCalledWith('pdf');
     });
@@ -341,7 +341,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.addActiveSkill).not.toHaveBeenCalled();
     });
@@ -371,7 +371,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.setTodos).toHaveBeenCalledWith([
         { id: '1', text: 'Task 1', done: false, active: false },
@@ -401,7 +401,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.setTodos).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -431,7 +431,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.setTodos).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -461,7 +461,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.setTodos).toHaveBeenCalledWith([
         expect.objectContaining({
@@ -492,7 +492,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.addTodo).toHaveBeenCalledWith({
         id: 'tool-123',
@@ -521,7 +521,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.addTodo).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -552,7 +552,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateTodo).toHaveBeenCalledWith('task-456', {
         done: true,
@@ -582,7 +582,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateTodo).toHaveBeenCalledWith('task-456', {
         done: false,
@@ -613,7 +613,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateTodo).toHaveBeenCalledWith('task-456', {
         done: false,
@@ -643,7 +643,7 @@ describe('handleClaudeEvent', () => {
         status: 'completed',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.updateTodo).not.toHaveBeenCalled();
     });
@@ -666,7 +666,7 @@ describe('handleClaudeEvent', () => {
         status: 'error',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.addActiveSkill).not.toHaveBeenCalled();
     });
@@ -683,13 +683,13 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       const completeEvent: ChatEvent = {
         type: 'Complete',
       };
 
-      handleClaudeEvent(completeEvent, { onComplete });
+      handleChatEvent(completeEvent, { onComplete });
 
       expect(chat.appendText).toHaveBeenCalledWith('Buffered text');
       expect(chat.finalize).toHaveBeenCalled();
@@ -701,7 +701,7 @@ describe('handleClaudeEvent', () => {
         type: 'Complete',
       };
 
-      expect(() => handleClaudeEvent(event)).not.toThrow();
+      expect(() => handleChatEvent(event)).not.toThrow();
       expect(chat.finalize).toHaveBeenCalled();
     });
 
@@ -710,7 +710,7 @@ describe('handleClaudeEvent', () => {
         type: 'Complete',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.appendText).not.toHaveBeenCalled();
       expect(chat.finalize).toHaveBeenCalled();
@@ -724,14 +724,14 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       const abortEvent: ChatEvent = {
         type: 'AbortComplete',
         sessionId: 'session-123',
       };
 
-      handleClaudeEvent(abortEvent);
+      handleChatEvent(abortEvent);
 
       expect(chat.appendText).toHaveBeenCalledWith('Buffered text');
       expect(chat.finalize).toHaveBeenCalled();
@@ -746,7 +746,7 @@ describe('handleClaudeEvent', () => {
         sessionId: 'session-123',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.appendText).not.toHaveBeenCalled();
       expect(chat.finalize).toHaveBeenCalled();
@@ -763,7 +763,7 @@ describe('handleClaudeEvent', () => {
         message: 'Something went wrong',
       };
 
-      handleClaudeEvent(event, { onError });
+      handleChatEvent(event, { onError });
 
       expect(chat.finalize).toHaveBeenCalled();
       expect(chat.addErrorMessage).toHaveBeenCalledWith('Something went wrong');
@@ -779,7 +779,7 @@ describe('handleClaudeEvent', () => {
         message: 'Error without callback',
       };
 
-      expect(() => handleClaudeEvent(event)).not.toThrow();
+      expect(() => handleChatEvent(event)).not.toThrow();
       expect(chat.addErrorMessage).toHaveBeenCalledWith('Error without callback');
     });
   });
@@ -790,7 +790,7 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       const thinkingEvent: ChatEvent = {
         type: 'ThinkingStart',
@@ -798,7 +798,7 @@ describe('handleClaudeEvent', () => {
         content: 'This is a long thought',
       };
 
-      handleClaudeEvent(thinkingEvent);
+      handleChatEvent(thinkingEvent);
 
       expect(chat.appendText).toHaveBeenCalledWith('Buffered text');
       expect(chat.addTool).toHaveBeenCalledWith(
@@ -819,7 +819,7 @@ describe('handleClaudeEvent', () => {
         content: longText,
       };
 
-      handleClaudeEvent(thinkingEvent);
+      handleChatEvent(thinkingEvent);
 
       expect(chat.addTool).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -836,7 +836,7 @@ describe('handleClaudeEvent', () => {
         auth_type: 'api_key',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(app.setAuthType).toHaveBeenCalledWith('api_key');
     });
@@ -848,7 +848,7 @@ describe('handleClaudeEvent', () => {
         model: 'opus',
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(app.syncState).toHaveBeenCalledWith('acceptEdits', 'opus');
     });
@@ -859,7 +859,7 @@ describe('handleClaudeEvent', () => {
         totalTokens: 1234,
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.tokenCount).toBe(1234);
       expect(chat.contextWindow).toBeNull();
@@ -873,7 +873,7 @@ describe('handleClaudeEvent', () => {
         contextWindow: 200000,
       };
 
-      handleClaudeEvent(event);
+      handleChatEvent(event);
 
       expect(chat.tokenCount).toBe(800);
       expect(chat.contextWindow).toBe(200000);
@@ -889,7 +889,7 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       resetEventState();
 
@@ -897,7 +897,7 @@ describe('handleClaudeEvent', () => {
       const completeEvent: ChatEvent = {
         type: 'Complete',
       };
-      handleClaudeEvent(completeEvent);
+      handleChatEvent(completeEvent);
 
       expect(chat.appendText).not.toHaveBeenCalled();
     });
@@ -908,7 +908,7 @@ describe('handleClaudeEvent', () => {
         type: 'Text',
         content: 'Buffered text',
       };
-      handleClaudeEvent(textEvent);
+      handleChatEvent(textEvent);
 
       resetEventState();
 
