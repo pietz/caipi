@@ -66,95 +66,197 @@ fn encode_folder_path(path: &str) -> String {
     without_drive.replace('/', "-")
 }
 
-/// Verify that a project directory actually corresponds to the given folder path
-/// by checking the projectPath field in sessions-index.json
-fn verify_project_path(folder_path: &str, project_dir: &std::path::Path) -> bool {
-    let index_path = project_dir.join("sessions-index.json");
-    if !index_path.exists() {
-        return false;
-    }
+/// Check if a filename stem is a valid UUID (8-4-4-4-12 hex pattern)
+fn is_uuid_filename(stem: &str) -> bool {
+    let parts: Vec<&str> = stem.split('-').collect();
+    parts.len() == 5
+        && is_hex_with_len(parts[0], 8)
+        && is_hex_with_len(parts[1], 4)
+        && is_hex_with_len(parts[2], 4)
+        && is_hex_with_len(parts[3], 4)
+        && is_hex_with_len(parts[4], 12)
+}
 
-    let content = match fs::read_to_string(&index_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
+/// Fast summary: reads only the first ~20 lines of a Claude session .jsonl file
+/// to extract session metadata and first prompt.
+/// Uses filesystem mtime for the `modified` field.
+fn parse_claude_session_summary_fast(
+    path: &Path,
+    mtime: std::time::SystemTime,
+) -> Option<SessionInfo> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
 
-    let json: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
+    let session_id = path.file_stem()?.to_str()?.to_string();
+    let mut folder_path = String::new();
+    let mut created = String::new();
+    let mut first_prompt = String::new();
+    let mut lines_read = 0u32;
+    let mut has_real_message = false;
 
-    // Check first entry's projectPath to verify this is the right directory
-    if let Some(entries) = json.get("entries").and_then(|e| e.as_array()) {
-        if let Some(first) = entries.first() {
-            if let Some(stored_path) = first.get("projectPath").and_then(|p| p.as_str()) {
-                return stored_path == folder_path;
+    for line in reader.lines().map_while(Result::ok) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        lines_read += 1;
+
+        let json: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        // Skip non-message types for prompt extraction
+        if event_type == "queue-operation" || event_type == "file-history-snapshot" {
+            continue;
+        }
+
+        // Skip meta messages
+        if json
+            .get("isMeta")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
+        // Extract cwd from any user/assistant event
+        if folder_path.is_empty() {
+            if let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()) {
+                folder_path = cwd.to_string();
             }
+        }
+
+        // Extract timestamp
+        if created.is_empty() {
+            if let Some(ts) = json.get("timestamp").and_then(|v| v.as_str()) {
+                if !ts.is_empty() {
+                    created = ts.to_string();
+                }
+            }
+        }
+
+        // Track if we have at least one user+assistant pair
+        if event_type == "user" || event_type == "assistant" {
+            has_real_message = true;
+        }
+
+        // Extract first prompt from the first user message
+        if event_type == "user" && first_prompt.is_empty() {
+            if let Some(message) = json.get("message") {
+                if let Some(content_str) = message.get("content").and_then(|v| v.as_str()) {
+                    first_prompt = content_str.to_string();
+                } else if let Some(content_arr) = message.get("content").and_then(|v| v.as_array())
+                {
+                    // Array content: extract text blocks
+                    let texts: Vec<&str> = content_arr
+                        .iter()
+                        .filter_map(|block| {
+                            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                block.get("text").and_then(|v| v.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    first_prompt = texts.join("\n");
+                }
+            }
+        }
+
+        // Once we have folder_path and first_prompt, stop
+        if !folder_path.is_empty() && !first_prompt.is_empty() {
+            break;
+        }
+
+        if lines_read >= 30 {
+            break;
         }
     }
 
-    // No entries means we can't verify, treat as not matching
-    false
+    if session_id.is_empty() || folder_path.is_empty() || !has_real_message {
+        return None;
+    }
+
+    let folder_name = get_folder_name(&folder_path);
+    if first_prompt.is_empty() {
+        first_prompt = "No prompt".to_string();
+    }
+
+    // Truncate long prompts
+    if first_prompt.len() > 200 {
+        first_prompt = first_prompt[..200].to_string();
+    }
+
+    let modified = mtime
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default();
+
+    Some(SessionInfo {
+        session_id,
+        folder_path,
+        folder_name,
+        first_prompt,
+        message_count: 0, // Skip full-file scan for speed
+        created: if created.is_empty() {
+            modified.clone()
+        } else {
+            created
+        },
+        modified,
+        backend: Some("claudecli".to_string()),
+    })
 }
 
-/// Read and parse sessions-index.json from a project directory
-fn read_sessions_index(project_dir: &PathBuf) -> Option<Vec<SessionInfo>> {
-    let index_path = project_dir.join("sessions-index.json");
-    let content = fs::read_to_string(&index_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+/// Scan a Claude project directory for session .jsonl files and return session summaries.
+fn load_claude_session_index(
+    project_dir: &Path,
+    limit: Option<usize>,
+) -> Vec<SessionInfo> {
+    let entries = match fs::read_dir(project_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
 
-    let entries = json.get("entries")?.as_array()?;
-
-    let sessions: Vec<SessionInfo> = entries
-        .iter()
+    // Collect UUID-named .jsonl files with their mtimes
+    let mut files: Vec<(PathBuf, std::time::SystemTime)> = entries
+        .filter_map(|e| e.ok())
         .filter_map(|entry| {
-            let session_id = entry.get("sessionId")?.as_str()?.to_string();
-            // Use projectPath directly from entry (Claude stores the full path)
-            let folder_path = entry.get("projectPath")?.as_str()?.to_string();
-            let folder_name = get_folder_name(&folder_path);
-            let first_prompt = entry
-                .get("firstPrompt")
-                .and_then(|v| v.as_str())
-                .unwrap_or("No prompt")
-                .to_string();
-            let message_count = entry
-                .get("messageCount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            let created = entry
-                .get("created")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let modified = entry
-                .get("modified")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            // Skip sessions with very low message counts or no real prompt
-            if message_count < 2 {
+            let path = entry.path();
+            if path.is_dir() {
                 return None;
             }
-
-            Some(SessionInfo {
-                session_id,
-                folder_path,
-                folder_name,
-                first_prompt,
-                message_count,
-                created,
-                modified,
-                backend: Some("claudecli".to_string()),
-            })
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                return None;
+            }
+            let stem = path.file_stem()?.to_str()?;
+            if !is_uuid_filename(stem) {
+                return None;
+            }
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            Some((path, mtime))
         })
         .collect();
 
-    if sessions.is_empty() {
-        None
-    } else {
-        Some(sessions)
+    // Sort by mtime descending (most recent first)
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Truncate before parsing for speed
+    if let Some(n) = limit {
+        files.truncate(n);
     }
+
+    files
+        .into_iter()
+        .filter_map(|(path, mtime)| parse_claude_session_summary_fast(&path, mtime))
+        .collect()
 }
 
 fn parse_rfc3339_timestamp(timestamp: &str) -> i64 {
@@ -673,19 +775,13 @@ async fn get_recent_sessions_by_backend(
     let mut all_sessions: Vec<(SessionInfo, String)> = Vec::new(); // (session, folder_path)
 
     for entry in entries.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
-        if let Some(sessions) = read_sessions_index(&entry.path()) {
-            if let Some(first) = sessions.first() {
-                let folder_path = first.folder_path.clone();
-
-                // Check if folder still exists - skip if not
-                if !std::path::Path::new(&folder_path).exists() {
-                    continue;
-                }
-
-                for session in sessions {
-                    all_sessions.push((session, folder_path.clone()));
-                }
+        let sessions = load_claude_session_index(&entry.path(), None);
+        for session in sessions {
+            let folder_path = session.folder_path.clone();
+            if !std::path::Path::new(&folder_path).exists() {
+                continue;
             }
+            all_sessions.push((session, folder_path));
         }
     }
 
@@ -765,13 +861,10 @@ pub async fn get_project_sessions(
         return Ok(Vec::new());
     }
 
-    // Verify the project directory actually belongs to this folder path
-    // This prevents collisions like /Users/foo-bar and /Users/foo/bar
-    if !verify_project_path(&folder_path, &project_dir) {
-        return Ok(Vec::new());
-    }
-
-    let mut sessions = read_sessions_index(&project_dir).unwrap_or_default();
+    let mut sessions: Vec<SessionInfo> = load_claude_session_index(&project_dir, None)
+        .into_iter()
+        .filter(|s| s.folder_path == folder_path)
+        .collect();
 
     // Sort by modified date (most recent first)
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
@@ -808,11 +901,6 @@ fn resolve_session_file(folder_path: &str, session_id: &str) -> Result<Option<Pa
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
 
     if !session_file.exists() {
-        return Ok(None);
-    }
-
-    // Verify the project directory actually belongs to this folder path
-    if !verify_project_path(folder_path, &project_dir) {
         return Ok(None);
     }
 
@@ -1038,91 +1126,137 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_project_path_matching() {
-        let temp_dir = TempDir::new().unwrap();
-        let index_path = temp_dir.path().join("sessions-index.json");
-
-        let content = r#"{
-            "entries": [
-                {"sessionId": "abc123", "projectPath": "/Users/test/my-project"}
-            ]
-        }"#;
-        std::fs::write(&index_path, content).unwrap();
-
-        assert!(verify_project_path(
-            "/Users/test/my-project",
-            temp_dir.path()
-        ));
+    fn test_is_uuid_filename() {
+        assert!(is_uuid_filename("16703562-a9c7-4af0-8fd6-8f453295c8fc"));
+        assert!(is_uuid_filename("dba2996f-69e1-4353-9f41-415af1d4232c"));
+        assert!(!is_uuid_filename("not-a-uuid"));
+        assert!(!is_uuid_filename("sessions-index"));
+        assert!(!is_uuid_filename(""));
     }
 
     #[test]
-    fn test_verify_project_path_not_matching() {
+    fn test_parse_claude_session_summary_fast_basic() {
         let temp_dir = TempDir::new().unwrap();
-        let index_path = temp_dir.path().join("sessions-index.json");
+        let path = temp_dir
+            .path()
+            .join("dba2996f-69e1-4353-9f41-415af1d4232c.jsonl");
+        let content = r#"{"type":"user","cwd":"/Users/test/project","sessionId":"dba2996f-69e1-4353-9f41-415af1d4232c","message":{"role":"user","content":"hello world"},"uuid":"abc","timestamp":"2026-02-03T16:25:55.830Z"}
+{"type":"assistant","cwd":"/Users/test/project","sessionId":"dba2996f-69e1-4353-9f41-415af1d4232c","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]},"uuid":"def","timestamp":"2026-02-03T16:26:00.000Z"}"#;
+        std::fs::write(&path, content).unwrap();
 
-        let content = r#"{
-            "entries": [
-                {"sessionId": "abc123", "projectPath": "/Users/test/other-project"}
-            ]
-        }"#;
-        std::fs::write(&index_path, content).unwrap();
-
-        // This simulates the collision case: requesting /Users/test/my-project
-        // but the directory contains sessions for /Users/test/other-project
-        assert!(!verify_project_path(
-            "/Users/test/my-project",
-            temp_dir.path()
-        ));
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let result = parse_claude_session_summary_fast(&path, mtime);
+        assert!(result.is_some());
+        let session = result.unwrap();
+        assert_eq!(session.session_id, "dba2996f-69e1-4353-9f41-415af1d4232c");
+        assert_eq!(session.folder_path, "/Users/test/project");
+        assert_eq!(session.first_prompt, "hello world");
+        assert_eq!(session.backend.as_deref(), Some("claudecli"));
     }
 
     #[test]
-    fn test_verify_project_path_collision_scenario() {
-        // Simulate: /Users/foo-bar and /Users/foo/bar both encode to -Users-foo-bar
+    fn test_parse_claude_session_summary_fast_skips_queue_operations() {
         let temp_dir = TempDir::new().unwrap();
-        let index_path = temp_dir.path().join("sessions-index.json");
+        let path = temp_dir
+            .path()
+            .join("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl");
+        let content = r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-02-03T16:25:55.825Z","sessionId":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
+{"type":"user","cwd":"/tmp/test","sessionId":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","message":{"role":"user","content":"test prompt"},"uuid":"abc","timestamp":"2026-02-03T16:25:56.000Z"}
+{"type":"assistant","cwd":"/tmp/test","sessionId":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","message":{"role":"assistant","content":[{"type":"text","text":"response"}]},"uuid":"def","timestamp":"2026-02-03T16:26:00.000Z"}"#;
+        std::fs::write(&path, content).unwrap();
 
-        // Directory contains sessions for /Users/foo/bar
-        let content = r#"{
-            "entries": [
-                {"sessionId": "abc123", "projectPath": "/Users/foo/bar"}
-            ]
-        }"#;
-        std::fs::write(&index_path, content).unwrap();
-
-        // Request for /Users/foo/bar should match
-        assert!(verify_project_path("/Users/foo/bar", temp_dir.path()));
-
-        // Request for /Users/foo-bar should NOT match (collision case)
-        assert!(!verify_project_path("/Users/foo-bar", temp_dir.path()));
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let result = parse_claude_session_summary_fast(&path, mtime);
+        assert!(result.is_some());
+        let session = result.unwrap();
+        assert_eq!(session.first_prompt, "test prompt");
+        assert_eq!(session.folder_path, "/tmp/test");
     }
 
     #[test]
-    fn test_verify_project_path_no_index_file() {
+    fn test_parse_claude_session_summary_fast_skips_meta_messages() {
         let temp_dir = TempDir::new().unwrap();
-        // No sessions-index.json file exists
-        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
+        let path = temp_dir
+            .path()
+            .join("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl");
+        let content = r#"{"type":"user","isMeta":true,"cwd":"/tmp/test","sessionId":"x","message":{"role":"user","content":"meta stuff"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"user","cwd":"/tmp/test","sessionId":"x","message":{"role":"user","content":"real prompt"},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}
+{"type":"assistant","cwd":"/tmp/test","sessionId":"x","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"uuid":"c","timestamp":"2026-01-01T00:00:02Z"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let result = parse_claude_session_summary_fast(&path, mtime);
+        assert!(result.is_some());
+        let session = result.unwrap();
+        assert_eq!(session.first_prompt, "real prompt");
     }
 
     #[test]
-    fn test_verify_project_path_empty_entries() {
+    fn test_parse_claude_session_summary_fast_no_messages() {
         let temp_dir = TempDir::new().unwrap();
-        let index_path = temp_dir.path().join("sessions-index.json");
+        let path = temp_dir
+            .path()
+            .join("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl");
+        let content = r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-02-03T16:25:55.825Z"}"#;
+        std::fs::write(&path, content).unwrap();
 
-        let content = r#"{"entries": []}"#;
-        std::fs::write(&index_path, content).unwrap();
-
-        // No entries to verify against, return false to be safe
-        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(parse_claude_session_summary_fast(&path, mtime).is_none());
     }
 
     #[test]
-    fn test_verify_project_path_invalid_json() {
+    fn test_load_claude_session_index_filters_uuid_files() {
         let temp_dir = TempDir::new().unwrap();
-        let index_path = temp_dir.path().join("sessions-index.json");
 
-        std::fs::write(&index_path, "not valid json").unwrap();
+        // Valid session file
+        let session_content = r#"{"type":"user","cwd":"/tmp/proj","sessionId":"x","message":{"role":"user","content":"hi"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/tmp/proj","sessionId":"x","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}"#;
+        std::fs::write(
+            temp_dir
+                .path()
+                .join("dba2996f-69e1-4353-9f41-415af1d4232c.jsonl"),
+            session_content,
+        )
+        .unwrap();
 
-        assert!(!verify_project_path("/Users/test/project", temp_dir.path()));
+        // Non-UUID file (should be skipped)
+        std::fs::write(
+            temp_dir.path().join("sessions-index.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.path().join("not-a-session.jsonl"),
+            session_content,
+        )
+        .unwrap();
+
+        let sessions = load_claude_session_index(temp_dir.path(), None);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "dba2996f-69e1-4353-9f41-415af1d4232c");
+    }
+
+    #[test]
+    fn test_load_claude_session_index_respects_limit() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"{"type":"user","cwd":"/tmp/proj","sessionId":"x","message":{"role":"user","content":"hi"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/tmp/proj","sessionId":"x","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}"#;
+
+        // Create 3 session files
+        for uuid in [
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "cccccccc-dddd-eeee-ffff-aaaaaaaaaaaa",
+        ] {
+            std::fs::write(
+                temp_dir.path().join(format!("{}.jsonl", uuid)),
+                content,
+            )
+            .unwrap();
+        }
+
+        let sessions = load_claude_session_index(temp_dir.path(), Some(2));
+        assert_eq!(sessions.len(), 2);
     }
 
     #[test]
