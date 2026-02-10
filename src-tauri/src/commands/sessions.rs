@@ -1154,4 +1154,160 @@ mod tests {
 
         assert_eq!(codex_message_count(&path), 2);
     }
+
+    #[test]
+    fn test_codex_tool_from_payload_function_call() {
+        let payload = serde_json::json!({
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"ls -la\"}"
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "command_execution");
+        assert_eq!(target, "ls -la");
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_web_search() {
+        let payload = serde_json::json!({
+            "type": "web_search_call",
+            "action": {
+                "query": "rust async"
+            }
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "web_search");
+        assert_eq!(target, "rust async");
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_unknown_type() {
+        let payload = serde_json::json!({
+            "type": "text",
+            "content": "hello"
+        });
+        assert!(codex_tool_from_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_custom_function_name() {
+        let payload = serde_json::json!({
+            "type": "function_call",
+            "name": "search_files",
+            "arguments": "{\"query\":\"TODO\"}"
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "search_files");
+        assert_eq!(target, "TODO");
+    }
+
+    #[test]
+    fn test_codex_message_count_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("empty.jsonl");
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(codex_message_count(&path), 0);
+    }
+
+    #[test]
+    fn test_codex_message_count_malformed_lines() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("malformed.jsonl");
+        let content = "not json\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"hi\"}}\n\n{broken json\n";
+        std::fs::write(&path, content).unwrap();
+        assert_eq!(codex_message_count(&path), 1);
+    }
+
+    #[test]
+    fn test_codex_session_summary_fast_basic() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("session-019a4b60-a492-7f12-9abe-73797723f5b1.jsonl");
+        let content = r#"{"type":"session_meta","payload":{"id":"019a4b60-a492-7f12-9abe-73797723f5b1","cwd":"/tmp/project"},"timestamp":"2026-01-01T00:00:00Z"}
+{"type":"event_msg","payload":{"type":"user_message","message":"hello world"},"timestamp":"2026-01-01T00:00:01Z"}
+{"type":"event_msg","payload":{"type":"agent_message","message":"hi"},"timestamp":"2026-01-01T00:00:02Z"}
+{"type":"event_msg","payload":{"type":"user_message","message":"bye"},"timestamp":"2026-01-01T00:00:03Z"}
+{"type":"event_msg","payload":{"type":"agent_message","message":"goodbye"},"timestamp":"2026-01-01T00:00:04Z"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let result = parse_codex_session_summary_fast(&path, mtime);
+        assert!(result.is_some());
+        let session = result.unwrap();
+        assert_eq!(session.session_id, "019a4b60-a492-7f12-9abe-73797723f5b1");
+        assert_eq!(session.folder_path, "/tmp/project");
+        assert_eq!(session.first_prompt, "hello world");
+        assert_eq!(session.message_count, 4);
+        assert_eq!(session.backend.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn test_codex_session_summary_fast_missing_meta() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("no-meta.jsonl");
+        let content = r#"{"type":"event_msg","payload":{"type":"user_message","message":"hello"},"timestamp":"2026-01-01T00:00:00Z"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        // No session_meta means no folder_path => should return None
+        let result = parse_codex_session_summary_fast(&path, mtime);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_web_search_url() {
+        let payload = serde_json::json!({
+            "type": "web_search_call",
+            "action": {
+                "url": "https://example.com"
+            }
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "web_search");
+        assert_eq!(target, "https://example.com");
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_function_call_command_key() {
+        let payload = serde_json::json!({
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": "{\"command\":\"npm install\"}"
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (_, target) = result.unwrap();
+        assert_eq!(target, "npm install");
+    }
+
+    #[test]
+    fn test_read_codex_session_meta_valid() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("session.jsonl");
+        let content = r#"{"type":"session_meta","payload":{"id":"abc-123","cwd":"/home/user/project"},"timestamp":"2026-01-01T00:00:00Z"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        let result = read_codex_session_meta(&path);
+        assert!(result.is_some());
+        let (id, cwd) = result.unwrap();
+        assert_eq!(id, "abc-123");
+        assert_eq!(cwd, "/home/user/project");
+    }
+
+    #[test]
+    fn test_read_codex_session_meta_no_meta_line() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("no-meta.jsonl");
+        let content = r#"{"type":"event_msg","payload":{"type":"user_message","message":"hi"},"timestamp":"2026-01-01T00:00:00Z"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        assert!(read_codex_session_meta(&path).is_none());
+    }
 }
