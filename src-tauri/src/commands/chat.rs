@@ -145,7 +145,19 @@ pub async fn create_session(
 
     let resolved_cli_path = match cli_path {
         Some(path) => Some(path),
-        None => storage::get_backend_cli_path(&backend_name).map_err(|e| e.to_string())?,
+        None => {
+            let stored = storage::get_backend_cli_path(&backend_name).map_err(|e| e.to_string())?;
+            match stored {
+                Some(path) => Some(path),
+                None => {
+                    // No path stored — run detection to find the binary.
+                    // Tauri apps don't inherit the user's shell PATH, so bare
+                    // binary names like "codex" won't resolve.
+                    let status = crate::commands::setup::check_backend_cli_installed_internal(&backend_name).await;
+                    status.path
+                }
+            }
+        }
     };
 
     // Create session config
