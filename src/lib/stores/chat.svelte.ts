@@ -60,6 +60,10 @@ class ChatState {
   // Tools (keyed by tool_use_id)
   tools = $state<Map<string, ToolState>>(new Map());
 
+  // UI state: tool stack expanded/collapsed by stable stack key.
+  // We key stacks by the first tool id in the group so this survives the stream -> finalized remount.
+  toolStackExpanded = $state<Record<string, boolean>>({});
+
   // Message queue (for sending while streaming)
   messageQueue = $state<string[]>([]);
 
@@ -186,6 +190,14 @@ class ChatState {
     return this.tools.get(id);
   }
 
+  getToolStackExpanded(key: string): boolean {
+    return this.toolStackExpanded[key] ?? false;
+  }
+
+  setToolStackExpanded(key: string, expanded: boolean) {
+    this.toolStackExpanded = { ...this.toolStackExpanded, [key]: expanded };
+  }
+
   getToolsAwaitingPermission(): ToolState[] {
     return [...this.tools.values()]
       .filter(t => t.status === 'awaiting_permission')
@@ -305,6 +317,7 @@ class ChatState {
     this.streamItems = [];
     this.streamItemCounter = 0;
     this.tools = new Map();
+    this.toolStackExpanded = {};
     this.messageQueue = [];
     this.todos = [];
     this.activeSkills = [];

@@ -11,6 +11,7 @@ import {
   ListTodo,
   BookOpen,
   Brain,
+  Clock,
 } from 'lucide-svelte';
 import type { ComponentType } from 'svelte';
 
@@ -118,6 +119,36 @@ export const toolConfigs: Record<string, ToolConfig> = {
     className: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500',
     iconColor: 'text-emerald-500',
     label: 'search'
+  },
+  web_fetch: {
+    icon: Globe,
+    className: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500',
+    iconColor: 'text-emerald-500',
+    label: 'fetch'
+  },
+  spawn_agent: {
+    icon: ListTodo,
+    className: 'bg-purple-500/10 border-purple-500/20 text-purple-500',
+    iconColor: 'text-purple-500',
+    label: 'agent'
+  },
+  wait: {
+    icon: Clock,
+    className: 'bg-blue-500/10 border-blue-500/20 text-blue-500',
+    iconColor: 'text-blue-500',
+    label: 'wait'
+  },
+  update_plan: {
+    icon: ListTodo,
+    className: 'bg-blue-500/10 border-blue-500/20 text-blue-500',
+    iconColor: 'text-blue-500',
+    label: 'plan'
+  },
+  'web.run': {
+    icon: Globe,
+    className: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500',
+    iconColor: 'text-emerald-500',
+    label: 'web'
   },
   file_change: {
     icon: Pencil,

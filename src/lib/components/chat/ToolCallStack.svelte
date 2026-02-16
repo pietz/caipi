@@ -1,7 +1,9 @@
 <script lang="ts">
   import { ChevronDown, Check, Ban } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
+  import { chat } from '$lib/stores/chat.svelte';
   import { getToolConfig } from './tool-configs';
+  import { getCompactToolTarget } from './tool-target-format';
   import ToolStackIcon from './ToolStackIcon.svelte';
   import ToolExpandedRow from './ToolExpandedRow.svelte';
 
@@ -14,6 +16,16 @@
 
   let expanded = $state(false);
   let pendingPermission = $state(false);
+
+  // Stable key for this tool stack across streaming -> finalized remount.
+  // The first tool id is stable for a contiguous tool group.
+  const stackKey = $derived(tools[0]?.id ?? '');
+
+  // Restore persisted expanded state on mount/remount.
+  $effect(() => {
+    if (!stackKey) return;
+    expanded = chat.getToolStackExpanded(stackKey);
+  });
 
   // Maximum number of visible icons in the stack
   const MAX_VISIBLE_ICONS = 5;
@@ -42,11 +54,17 @@
     tools.filter(t => revealedIds.includes(t.id))
   );
 
+  // Animate only when *this component* reveals a new tool (avoid remount flicker on completion).
+  let animatedId = $state<string | null>(null);
+
   // Currently displayed tool (last revealed)
   const currentTool = $derived(
     revealedTools.length > 0 ? revealedTools[revealedTools.length - 1] : null
   );
   const currentConfig = $derived(currentTool ? getToolConfig(currentTool.toolType) : null);
+  const currentToolTarget = $derived(
+    currentTool ? getCompactToolTarget(currentTool.toolType, currentTool.target) : ''
+  );
 
   // Simple reveal logic:
   // - Always reveal tools up to (and including) the first one needing permission
@@ -79,6 +97,7 @@
 
     if (idsToReveal.length > 0) {
       revealedIds = [...revealedIds, ...idsToReveal];
+      animatedId = idsToReveal[idsToReveal.length - 1] ?? null;
     }
   });
 
@@ -88,10 +107,7 @@
     tools.find(t => t.status === 'awaiting_permission')
   );
 
-  // The ID of the most recently revealed tool (for animation)
-  const lastRevealedId = $derived(
-    revealedIds.length > 0 ? revealedIds[revealedIds.length - 1] : null
-  );
+  // Note: don't derive animation from revealedIds directly, or completed-message remounts will re-animate.
 
   // Calculate the visual index for each tool (can be negative for off-screen tools)
   // This allows sliding out animation instead of instant disappear
@@ -116,6 +132,13 @@
     visibleCount > 0 ? (visibleCount - 1) * 16 + 24 : 0
   );
 
+  function toggleExpanded() {
+    expanded = !expanded;
+    if (stackKey) {
+      chat.setToolStackExpanded(stackKey, expanded);
+    }
+  }
+
   function handlePermissionResponse(toolId: string, allowed: boolean) {
     if (pendingPermission) return;
     pendingPermission = true;
@@ -133,7 +156,7 @@
       <button
         type="button"
         class="flex items-center gap-2 min-w-0 flex-1 h-full hover:opacity-80 transition-opacity"
-        onclick={() => expanded = !expanded}
+        onclick={toggleExpanded}
       >
         <!-- Stacked icons with overflow hidden for slide-out effect -->
         {#if stackWidth > 0}
@@ -144,7 +167,7 @@
               <ToolStackIcon
                 toolType={tool.toolType}
                 index={visualIndex}
-                animate={tool.id === lastRevealedId}
+                animate={tool.id === animatedId}
               />
             {/each}
           </div>
@@ -157,7 +180,7 @@
               {currentConfig.label}
             </span>
             <span class="text-xs text-muted-foreground/70 truncate tool-label-animate min-w-0 flex-1 text-left mr-3">
-              {currentTool.target}
+              {currentToolTarget}
             </span>
           {/key}
         {/if}
@@ -189,7 +212,7 @@
         <button
           type="button"
           class="flex items-center gap-2 h-full hover:opacity-80 transition-opacity"
-          onclick={() => expanded = !expanded}
+          onclick={toggleExpanded}
         >
           <span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             {tools.length}

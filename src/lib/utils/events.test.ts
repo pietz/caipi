@@ -27,6 +27,7 @@ vi.mock('$lib/stores/chat.svelte', () => ({
     clearMessageQueue: vi.fn(),
     clearPendingPermissions: vi.fn(),
     addErrorMessage: vi.fn(),
+    activeTurnId: null,
     tokenCount: 0,
     contextWindow: null,
   },
@@ -34,6 +35,7 @@ vi.mock('$lib/stores/chat.svelte', () => ({
 
 vi.mock('$lib/stores/app.svelte', () => ({
   app: {
+    sessionId: null,
     setAuthType: vi.fn(),
     syncState: vi.fn(),
   },
@@ -49,6 +51,8 @@ describe('handleChatEvent', () => {
     vi.clearAllMocks();
     resetEventState();
     vi.useFakeTimers();
+    (app as { sessionId: string | null }).sessionId = null;
+    (chat as { activeTurnId: string | null }).activeTurnId = null;
   });
 
   afterEach(() => {
@@ -471,6 +475,66 @@ describe('handleChatEvent', () => {
       ]);
     });
 
+    it('should sync todos from update_plan tool', () => {
+      const mockTool: ToolState = {
+        id: 'tool-123',
+        toolType: 'update_plan',
+        target: '',
+        status: 'completed',
+        input: {
+          plan: [
+            { step: 'Read files', status: 'completed' },
+            { step: 'Patch mapping', status: 'in_progress' },
+            { step: 'Run tests', status: 'pending' },
+          ],
+        },
+        timestamp: Date.now() / 1000,
+        insertionIndex: 0,
+      };
+
+      vi.mocked(chat.getTool).mockReturnValue(mockTool);
+
+      const event: ChatEvent = {
+        type: 'ToolEnd',
+        id: 'tool-123',
+        status: 'completed',
+      };
+
+      handleChatEvent(event);
+
+      expect(chat.setTodos).toHaveBeenCalledWith([
+        { id: '0:Read files', text: 'Read files', done: true, active: false },
+        { id: '1:Patch mapping', text: 'Patch mapping', done: false, active: true },
+        { id: '2:Run tests', text: 'Run tests', done: false, active: false },
+      ]);
+    });
+
+    it('should not sync todos from update_plan when plan is missing', () => {
+      const mockTool: ToolState = {
+        id: 'tool-123',
+        toolType: 'update_plan',
+        target: '',
+        status: 'completed',
+        input: {
+          explanation: 'No explicit plan',
+        },
+        timestamp: Date.now() / 1000,
+        insertionIndex: 0,
+      };
+
+      vi.mocked(chat.getTool).mockReturnValue(mockTool);
+
+      const event: ChatEvent = {
+        type: 'ToolEnd',
+        id: 'tool-123',
+        status: 'completed',
+      };
+
+      handleChatEvent(event);
+
+      expect(chat.setTodos).not.toHaveBeenCalled();
+    });
+
     it('should handle TaskCreate tool', () => {
       const mockTool: ToolState = {
         id: 'tool-123',
@@ -877,6 +941,56 @@ describe('handleChatEvent', () => {
 
       expect(chat.tokenCount).toBe(800);
       expect(chat.contextWindow).toBe(200000);
+    });
+
+    it('should ignore TokenUsage without matching sessionId', () => {
+      (app as { sessionId: string | null }).sessionId = 'main-session';
+      chat.tokenCount = 50;
+      chat.contextWindow = 1000;
+
+      const event: ChatEvent = {
+        type: 'TokenUsage',
+        totalTokens: 1234,
+      };
+
+      handleChatEvent(event);
+
+      expect(chat.tokenCount).toBe(50);
+      expect(chat.contextWindow).toBe(1000);
+    });
+
+    it('should ignore TokenUsage without matching turnId', () => {
+      (app as { sessionId: string | null }).sessionId = 'main-session';
+      (chat as { activeTurnId: string | null }).activeTurnId = 'turn-main';
+      chat.tokenCount = 50;
+      chat.contextWindow = 1000;
+
+      const event: ChatEvent = {
+        type: 'TokenUsage',
+        sessionId: 'main-session',
+        totalTokens: 1234,
+      };
+
+      handleChatEvent(event);
+
+      expect(chat.tokenCount).toBe(50);
+      expect(chat.contextWindow).toBe(1000);
+    });
+
+    it('should handle TokenUsage with matching sessionId and turnId', () => {
+      (app as { sessionId: string | null }).sessionId = 'main-session';
+      (chat as { activeTurnId: string | null }).activeTurnId = 'turn-main';
+
+      const event: ChatEvent = {
+        type: 'TokenUsage',
+        sessionId: 'main-session',
+        turnId: 'turn-main',
+        totalTokens: 1234,
+      };
+
+      handleChatEvent(event);
+
+      expect(chat.tokenCount).toBe(1234);
     });
 
     // Note: Tests for missing fields removed - discriminated union types enforce required fields at compile time

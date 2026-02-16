@@ -5,4 +5,5 @@ export const HIDDEN_TOOL_TYPES = [
   'TaskUpdate',
   'TaskList',
   'TaskGet',
+  'update_plan',
 ];

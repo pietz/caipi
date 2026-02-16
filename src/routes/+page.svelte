@@ -66,6 +66,10 @@
         app.ensureBackendState(app.defaultBackend);
       }
 
+      // Warm recent sessions for both backends in the background so opening
+      // the session picker is responsive.
+      app.prewarmRecentSessions();
+
       // If onboarding is completed and we have a default folder, go directly to chat
       if (startupInfo.onboardingCompleted && startupInfo.defaultFolder) {
         // Validate the folder still exists/is accessible

@@ -93,6 +93,17 @@ impl SessionIndexCache {
     fn insert(&mut self, file_path: String, mtime_secs: u64, info: SessionInfo) {
         self.entries.insert(file_path, (mtime_secs, info));
     }
+
+    fn cap_first_prompt_lengths(&mut self, max_len: usize) -> bool {
+        let mut changed = false;
+        for (_, (_, info)) in self.entries.iter_mut() {
+            if info.first_prompt.len() > max_len {
+                info.first_prompt.truncate(max_len);
+                changed = true;
+            }
+        }
+        changed
+    }
 }
 
 fn mtime_to_secs(mtime: std::time::SystemTime) -> u64 {
@@ -282,6 +293,10 @@ fn load_claude_session_index(
     project_dir: &Path,
     limit: Option<usize>,
 ) -> Vec<SessionInfo> {
+    if matches!(limit, Some(0)) {
+        return Vec::new();
+    }
+
     let entries = match fs::read_dir(project_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -313,15 +328,19 @@ fn load_claude_session_index(
     // Sort by mtime descending (most recent first)
     files.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // Truncate before parsing for speed
-    if let Some(n) = limit {
-        files.truncate(n);
+    let mut sessions: Vec<SessionInfo> = Vec::new();
+    for (path, mtime) in files {
+        if let Some(session) = parse_claude_session_summary_fast(&path, mtime) {
+            sessions.push(session);
+            if let Some(n) = limit {
+                if sessions.len() >= n {
+                    break;
+                }
+            }
+        }
     }
 
-    files
-        .into_iter()
-        .filter_map(|(path, mtime)| parse_claude_session_summary_fast(&path, mtime))
-        .collect()
+    sessions
 }
 
 fn parse_rfc3339_timestamp(timestamp: &str) -> i64 {
@@ -537,6 +556,9 @@ fn parse_codex_session_summary_fast(
     if first_prompt.is_empty() {
         first_prompt = "No prompt".to_string();
     }
+    if first_prompt.len() > 200 {
+        first_prompt.truncate(200);
+    }
 
     // Use filesystem mtime for modified timestamp
     let modified = mtime
@@ -566,6 +588,10 @@ fn parse_codex_session_summary_fast(
 }
 
 fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<SessionInfo>, String> {
+    if matches!(limit, Some(0)) {
+        return Ok(Vec::new());
+    }
+
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let sessions_root = home_dir.join(".codex").join("sessions");
     if !sessions_root.exists() {
@@ -577,13 +603,8 @@ fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<SessionInfo>, St
     // Sort by mtime descending (most recent first)
     files.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // If a limit is given, only parse that many files
-    if let Some(n) = limit {
-        files.truncate(n);
-    }
-
     let mut cache = SessionIndexCache::load();
-    let mut cache_dirty = false;
+    let mut cache_dirty = cache.cap_first_prompt_lengths(200);
     let mut sessions: Vec<SessionInfo> = Vec::new();
 
     for (path, mtime) in files {
@@ -600,6 +621,12 @@ fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<SessionInfo>, St
             continue;
         };
         sessions.push(session);
+        // Stop once we have enough valid sessions so limit reflects parsed output.
+        if let Some(n) = limit {
+            if sessions.len() >= n {
+                break;
+            }
+        }
     }
 
     if cache_dirty {
@@ -608,6 +635,76 @@ fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<SessionInfo>, St
 
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(sessions)
+}
+
+fn load_recent_codex_sessions(limit: usize) -> Result<Vec<(SessionInfo, String)>, String> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
+    let sessions_root = home_dir.join(".codex").join("sessions");
+    if !sessions_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = walk_jsonl_files_with_mtime(&sessions_root);
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut cache = SessionIndexCache::load();
+    let mut cache_dirty = cache.cap_first_prompt_lengths(200);
+    let mut collected: Vec<(SessionInfo, String)> = Vec::new();
+
+    for (path, mtime) in files {
+        let path_str = path.to_string_lossy().to_string();
+        let mtime_s = mtime_to_secs(mtime);
+
+        let session = if let Some(cached) = cache.get(&path_str, mtime_s) {
+            cached.clone()
+        } else if let Some(parsed) = parse_codex_session_summary_fast(&path, mtime) {
+            cache.insert(path_str, mtime_s, parsed.clone());
+            cache_dirty = true;
+            parsed
+        } else {
+            continue;
+        };
+
+        let folder_path = session.folder_path.clone();
+        if !std::path::Path::new(&folder_path).exists() {
+            continue;
+        }
+
+        collected.push((session, folder_path));
+        if collected.len() >= limit {
+            break;
+        }
+    }
+
+    if cache_dirty {
+        cache.save();
+    }
+
+    collected.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
+    Ok(collected)
+}
+
+#[cfg(test)]
+fn collect_existing_sessions_with_limit(
+    sessions: impl IntoIterator<Item = SessionInfo>,
+    limit: usize,
+) -> Vec<(SessionInfo, String)> {
+    let mut collected: Vec<(SessionInfo, String)> = Vec::new();
+    for session in sessions {
+        let folder_path = session.folder_path.clone();
+        if !std::path::Path::new(&folder_path).exists() {
+            continue;
+        }
+        collected.push((session, folder_path));
+        if limit != 0 && collected.len() >= limit {
+            break;
+        }
+    }
+    collected
 }
 
 fn resolve_codex_session_file(
@@ -640,6 +737,84 @@ fn resolve_codex_session_file(
 
 /// Extract tool info from a Codex `response_item` payload.
 /// Returns `(tool_type, target)` or `None` if the payload is not a tool event.
+fn parse_function_arguments(payload: &Value) -> Option<Value> {
+    let arguments = payload.get("arguments")?;
+    if arguments.is_object() || arguments.is_array() {
+        return Some(arguments.clone());
+    }
+    arguments
+        .as_str()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+}
+
+fn first_array_entry<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value.get(key)?.as_array()?.first()
+}
+
+fn web_run_target_from_args(args: &Value) -> String {
+    if let Some(query) = args
+        .get("search_query")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
+        .and_then(Value::as_str)
+    {
+        return query.to_string();
+    }
+
+    if let Some(query) = args
+        .get("image_query")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
+        .and_then(Value::as_str)
+    {
+        return query.to_string();
+    }
+
+    if let Some(reference) = first_array_entry(args, "open")
+        .and_then(|entry| entry.get("ref_id"))
+        .and_then(Value::as_str)
+    {
+        return reference.to_string();
+    }
+
+    if let Some(pattern) = first_array_entry(args, "find")
+        .and_then(|entry| entry.get("pattern"))
+        .and_then(Value::as_str)
+    {
+        return pattern.to_string();
+    }
+
+    if let Some(location) = first_array_entry(args, "weather")
+        .and_then(|entry| entry.get("location"))
+        .and_then(Value::as_str)
+    {
+        return location.to_string();
+    }
+
+    if let Some(ticker) = first_array_entry(args, "finance")
+        .and_then(|entry| entry.get("ticker"))
+        .and_then(Value::as_str)
+    {
+        return ticker.to_string();
+    }
+
+    if let Some(offset) = first_array_entry(args, "time")
+        .and_then(|entry| entry.get("utc_offset"))
+        .and_then(Value::as_str)
+    {
+        return offset.to_string();
+    }
+
+    if let Some(reference) = first_array_entry(args, "click")
+        .and_then(|entry| entry.get("ref_id"))
+        .and_then(Value::as_str)
+    {
+        return reference.to_string();
+    }
+
+    "web.run".to_string()
+}
+
 fn codex_tool_from_payload(payload: &Value) -> Option<(String, String)> {
     let payload_type = payload.get("type").and_then(|v| v.as_str())?;
     match payload_type {
@@ -648,19 +823,44 @@ fn codex_tool_from_payload(payload: &Value) -> Option<(String, String)> {
                 .get("name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("command_execution");
+            let args = parse_function_arguments(payload);
+
+            if name == "web.run" {
+                let has_search_queries = args
+                    .as_ref()
+                    .map(|value| {
+                        value
+                            .get("search_query")
+                            .or_else(|| value.get("image_query"))
+                            .is_some()
+                    })
+                    .unwrap_or(false);
+                let tool_type = if has_search_queries {
+                    "web_search"
+                } else {
+                    "web_fetch"
+                };
+                let target = args
+                    .as_ref()
+                    .map(web_run_target_from_args)
+                    .unwrap_or_else(|| "web.run".to_string());
+                return Some((tool_type.to_string(), target));
+            }
+
             let tool_type = match name {
                 "exec_command" => "command_execution",
                 _ => name,
             };
-            // Parse the arguments JSON string to extract the target
-            let target = payload
-                .get("arguments")
-                .and_then(|v| v.as_str())
-                .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                .and_then(|args| {
-                    args.get("cmd")
-                        .or_else(|| args.get("query"))
-                        .or_else(|| args.get("command"))
+            let target = args
+                .as_ref()
+                .and_then(|value| {
+                    value
+                        .get("cmd")
+                        .or_else(|| value.get("query"))
+                        .or_else(|| value.get("command"))
+                        .or_else(|| value.get("task"))
+                        .or_else(|| value.get("prompt"))
+                        .or_else(|| value.get("description"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                 })
@@ -798,18 +998,12 @@ async fn get_recent_sessions_by_backend(
     limit: u32,
     backend: Option<String>,
 ) -> Result<Vec<ProjectSessions>, String> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
     if matches!(backend.as_deref(), Some("codex")) {
-        let mut all_sessions: Vec<(SessionInfo, String)> =
-            load_codex_session_index(Some(limit as usize))?
-                .into_iter()
-                .filter_map(|session| {
-                    let folder_path = session.folder_path.clone();
-                    if !std::path::Path::new(&folder_path).exists() {
-                        return None;
-                    }
-                    Some((session, folder_path))
-                })
-                .collect();
+        let mut all_sessions = load_recent_codex_sessions(limit as usize)?;
 
         all_sessions.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
         all_sessions.truncate(limit as usize);
@@ -883,15 +1077,16 @@ async fn get_recent_sessions_by_backend(
         }
     }
 
-    // Phase 2: Sort by mtime descending, truncate to limit BEFORE parsing
+    // Phase 2: Sort by mtime descending
     all_files.sort_by(|a, b| b.1.cmp(&a.1));
-    all_files.truncate(limit as usize);
 
-    // Phase 3: Parse only the top N files, using cache for unchanged files
+    // Phase 3: Parse in recency order, using cache for unchanged files
     let mut cache = SessionIndexCache::load();
     let mut cache_dirty = false;
     let mut all_sessions: Vec<(SessionInfo, String)> = Vec::new();
 
+    let limit_usize = limit as usize;
+    // Keep parsing candidates until we gather up to the requested limit after validation.
     for (path, mtime) in all_files {
         let path_str = path.to_string_lossy().to_string();
         let mtime_s = mtime_to_secs(mtime);
@@ -909,6 +1104,9 @@ async fn get_recent_sessions_by_backend(
         let folder_path = session.folder_path.clone();
         if std::path::Path::new(&folder_path).exists() {
             all_sessions.push((session, folder_path));
+            if limit_usize != 0 && all_sessions.len() >= limit_usize {
+                break;
+            }
         }
     }
 
@@ -1388,6 +1586,69 @@ mod tests {
     }
 
     #[test]
+    fn test_load_claude_session_index_fills_limit_after_invalid_recent_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let valid_content = r#"{"type":"user","cwd":"/tmp/proj","sessionId":"x","message":{"role":"user","content":"hi"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/tmp/proj","sessionId":"x","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}"#;
+        let invalid_content = r#"{"type":"file-history-snapshot","isSnapshot":true}"#;
+
+        let valid_old = temp_dir
+            .path()
+            .join("11111111-1111-4111-8111-111111111111.jsonl");
+        let valid_new = temp_dir
+            .path()
+            .join("22222222-2222-4222-8222-222222222222.jsonl");
+        let invalid_newest = temp_dir
+            .path()
+            .join("33333333-3333-4333-8333-333333333333.jsonl");
+
+        std::fs::write(&valid_old, valid_content).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&valid_new, valid_content).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&invalid_newest, invalid_content).unwrap();
+
+        let sessions = load_claude_session_index(temp_dir.path(), Some(2));
+        assert_eq!(sessions.len(), 2);
+        assert!(
+            sessions
+                .iter()
+                .all(|session| session.session_id != "33333333-3333-4333-8333-333333333333")
+        );
+    }
+
+    #[test]
+    fn test_collect_existing_sessions_with_limit_skips_missing_folders() {
+        let temp_dir = TempDir::new().unwrap();
+        let existing_a = temp_dir.path().join("a");
+        let existing_b = temp_dir.path().join("b");
+        std::fs::create_dir_all(&existing_a).unwrap();
+        std::fs::create_dir_all(&existing_b).unwrap();
+
+        let make_session = |session_id: &str, folder_path: String| SessionInfo {
+            session_id: session_id.to_string(),
+            folder_path: folder_path.clone(),
+            folder_name: get_folder_name(&folder_path),
+            first_prompt: "prompt".to_string(),
+            message_count: 0,
+            created: "2026-01-01T00:00:00Z".to_string(),
+            modified: "2026-01-01T00:00:00Z".to_string(),
+            backend: Some("codex".to_string()),
+        };
+
+        let sessions = vec![
+            make_session("missing", "/tmp/does-not-exist-caipi-test".to_string()),
+            make_session("existing-a", existing_a.to_string_lossy().to_string()),
+            make_session("existing-b", existing_b.to_string_lossy().to_string()),
+        ];
+
+        let collected = collect_existing_sessions_with_limit(sessions, 2);
+        assert_eq!(collected.len(), 2);
+        assert_eq!(collected[0].0.session_id, "existing-a");
+        assert_eq!(collected[1].0.session_id, "existing-b");
+    }
+
+    #[test]
     fn test_codex_session_id_from_path_extracts_full_uuid() {
         let path = Path::new(
             "/tmp/rollout-2025-11-03T21-20-16-019a4b60-a492-7f12-9abe-73797723f5b1.jsonl",
@@ -1547,6 +1808,34 @@ mod tests {
         assert!(result.is_some());
         let (_, target) = result.unwrap();
         assert_eq!(target, "npm install");
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_web_run_search_maps_to_web_search() {
+        let payload = serde_json::json!({
+            "type": "function_call",
+            "name": "web.run",
+            "arguments": "{\"search_query\":[{\"q\":\"rust async runtime\"}]}"
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "web_search");
+        assert_eq!(target, "rust async runtime");
+    }
+
+    #[test]
+    fn test_codex_tool_from_payload_web_run_open_maps_to_web_fetch() {
+        let payload = serde_json::json!({
+            "type": "function_call",
+            "name": "web.run",
+            "arguments": "{\"open\":[{\"ref_id\":\"turn0search0\"}]}"
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert!(result.is_some());
+        let (tool_type, target) = result.unwrap();
+        assert_eq!(tool_type, "web_fetch");
+        assert_eq!(target, "turn0search0");
     }
 
     #[test]

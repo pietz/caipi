@@ -21,6 +21,9 @@ export interface CliStatus {
   path?: string;
 }
 
+const RECENT_SESSIONS_PREWARM_LIMIT = 50;
+const RECENT_SESSIONS_PREWARM_TTL_MS = 5 * 60_000;
+
 function getDefaultModel(backend: Backend): Model {
   const models = getBackendConfig(backend).models;
   if (backend === 'claude') {
@@ -85,6 +88,9 @@ function getPersistedThinkingLevel(backend: Backend, model: Model): string {
 }
 
 class AppState {
+  private recentSessionsWarmupInFlight: Partial<Record<Backend, Promise<void>>> = {};
+  private recentSessionsWarmedAt: Partial<Record<Backend, number>> = {};
+
   // Navigation
   screen = $state<Screen>('loading');
   loading = $state(true);
@@ -200,6 +206,41 @@ class AppState {
       this.thinkingLevel = getPersistedThinkingLevel(backend, this.model);
     }
     await api.setDefaultBackend(backend);
+    // Warm this backend's recent sessions in the background so folder picker opens faster.
+    void this.prewarmRecentSessions([backend]);
+  }
+
+  prewarmRecentSessions(backends: Backend[] = ['claude', 'codex'], force = false) {
+    for (const backend of backends) {
+      void this.prewarmRecentSessionsForBackend(backend, force);
+    }
+  }
+
+  private prewarmRecentSessionsForBackend(backend: Backend, force = false): Promise<void> {
+    const inFlight = this.recentSessionsWarmupInFlight[backend];
+    if (!force && inFlight) {
+      return inFlight;
+    }
+
+    const warmedAt = this.recentSessionsWarmedAt[backend] ?? 0;
+    if (!force && warmedAt && Date.now() - warmedAt < RECENT_SESSIONS_PREWARM_TTL_MS) {
+      return Promise.resolve();
+    }
+
+    const warmup = api
+      .getRecentSessions(RECENT_SESSIONS_PREWARM_LIMIT, backend)
+      .then(() => {
+        this.recentSessionsWarmedAt[backend] = Date.now();
+      })
+      .catch(() => {
+        // Best-effort only; runtime load path still fetches sessions normally.
+      })
+      .finally(() => {
+        delete this.recentSessionsWarmupInFlight[backend];
+      });
+
+    this.recentSessionsWarmupInFlight[backend] = warmup;
+    return warmup;
   }
 
   toggleLeftSidebar() {

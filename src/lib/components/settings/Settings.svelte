@@ -19,7 +19,16 @@
   let deactivating = $state(false);
   let cliPathInput = $state(app.cliPath ?? '');
   let savingCliPath = $state(false);
-  let backendStatuses = $state<Record<string, { installed: boolean; authenticated: boolean; version?: string }>>({});
+  type BackendInstallState = 'checking' | 'installed' | 'not_installed';
+  type BackendStatus = {
+    installState: BackendInstallState;
+    authenticated: boolean;
+    version?: string;
+  };
+  let backendStatuses = $state<Record<string, BackendStatus>>({
+    claude: { installState: 'checking', authenticated: false },
+    codex: { installState: 'checking', authenticated: false },
+  });
 
   // Strip extra suffixes from version string
   const cliVersion = $derived.by(() => {
@@ -43,10 +52,18 @@
       ]);
       appVersion = version;
       backendStatuses = Object.fromEntries(
-        statuses.map(s => [s.backend, { installed: s.installed, authenticated: s.authenticated, version: s.version }])
+        statuses.map(s => [s.backend, {
+          installState: s.installed ? 'installed' : 'not_installed',
+          authenticated: s.authenticated,
+          version: s.version,
+        }])
       );
     } catch (e) {
       console.error('Failed to get app version:', e);
+      backendStatuses = {
+        claude: { installState: 'not_installed', authenticated: false },
+        codex: { installState: 'not_installed', authenticated: false },
+      };
     }
   });
 
@@ -132,17 +149,26 @@
         <span class="text-xs text-muted-foreground">Default Backend</span>
         <div class="mt-1 flex gap-1 p-1 bg-muted rounded-lg">
           {#each (['claude', 'codex'] as Backend[]) as backend}
-            {@const isReady = !!backendStatuses[backend]?.installed && !!backendStatuses[backend]?.authenticated}
+            {@const status = backendStatuses[backend]}
+            {@const isChecking = status?.installState === 'checking'}
+            {@const isReady = status?.installState === 'installed' && !!status?.authenticated}
             <button
               class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {app.defaultBackend === backend ? 'bg-background shadow-sm' : 'hover:bg-background/50'} {isReady ? '' : 'opacity-50'}"
               disabled={!isReady}
               onclick={() => switchBackend(backend)}
             >
+              {#if isChecking}
+                <Loader2 size={12} class="animate-spin" />
+              {:else}
+                {#if backend === 'claude'}
+                  <ClaudeIcon size={12} />
+                {:else}
+                  <OpenAIIcon size={12} />
+                {/if}
+              {/if}
               {#if backend === 'claude'}
-                <ClaudeIcon size={12} />
                 Claude Code
               {:else}
-                <OpenAIIcon size={12} />
                 Codex CLI
               {/if}
             </button>

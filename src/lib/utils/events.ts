@@ -100,6 +100,18 @@ export function handleChatEvent(event: ChatEvent, options: EventHandlerOptions =
 }
 
 function shouldIgnoreEvent(event: ChatEvent): boolean {
+  // Usage indicator must always reflect the active main session/turn.
+  // Require explicit metadata for TokenUsage to avoid brief cross-session/child-turn flicker.
+  if (event.type === 'TokenUsage') {
+    if (app.sessionId && event.sessionId !== app.sessionId) {
+      return true;
+    }
+
+    if (chat.activeTurnId && event.turnId !== chat.activeTurnId) {
+      return true;
+    }
+  }
+
   if (event.sessionId && app.sessionId && event.sessionId !== app.sessionId) {
     return true;
   }
@@ -195,6 +207,28 @@ function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
         }
       } catch (err) {
         console.error('[TodoWrite] Error processing input:', err);
+      }
+    }
+
+    // Handle Codex update_plan - sync entire todo list to sidebar panel
+    if (tool?.toolType === 'update_plan' && tool.input) {
+      try {
+        const plan = tool.input.plan;
+        if (Array.isArray(plan)) {
+          const todos = plan.map((item: Record<string, unknown>, index: number) => {
+            const status = String(item.status ?? '').toLowerCase();
+            const step = String(item.step ?? `Plan item ${index + 1}`);
+            return {
+              id: String(item.id ?? `${index}:${step}`),
+              text: step,
+              done: status === 'completed',
+              active: status === 'in_progress',
+            };
+          });
+          chat.setTodos(todos);
+        }
+      } catch (err) {
+        console.error('[update_plan] Error processing input:', err);
       }
     }
 

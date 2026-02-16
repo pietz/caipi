@@ -70,11 +70,11 @@
     type="button"
     onclick={handleClick}
     ondblclick={handleDoubleClick}
-    class="flex items-center gap-1 py-1 px-2 rounded hover:bg-muted/50 transition-colors w-full text-left"
+    class="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 py-1 px-2 rounded hover:bg-muted/50 transition-colors w-full text-left"
     style="padding-left: {depth * 12 + 8}px;"
   >
     {#if isFolder}
-      <span class="text-muted-foreground">
+      <span class="text-muted-foreground w-3 flex-shrink-0">
         {#if expanded}
           <ChevronDown size={12} />
         {:else}
@@ -84,14 +84,16 @@
     {:else}
       <span class="w-3"></span>
     {/if}
-    <span class="text-muted-foreground">
+    <span class="text-muted-foreground flex-shrink-0">
       {#if isFolder}
         <Folder size={14} />
       {:else}
         <File size={14} />
       {/if}
     </span>
-    <span class="text-xs text-foreground/80">{item.name}</span>
+    <span class="text-xs text-foreground/80 min-w-0 truncate whitespace-nowrap overflow-hidden">
+      {item.name}
+    </span>
   </button>
 
   {#if isFolder && expanded}

@@ -23,8 +23,8 @@
   async function loadSessions() {
     try {
       loading = true;
-      // Backend handles: filtering non-existent folders, sorting, limiting to 100
-      projects = await api.getRecentSessions(100, app.defaultBackend);
+      // Backend handles: filtering non-existent folders, sorting, limiting to 50
+      projects = await api.getRecentSessions(50, app.defaultBackend);
       expandedFolders = new Set();
     } catch (e) {
       console.error('Failed to load sessions:', e);

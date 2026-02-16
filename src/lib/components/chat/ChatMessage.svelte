@@ -108,7 +108,19 @@
   :global(.message-content pre) {
     margin: 0.5em 0;
     border-radius: 6px;
-    overflow-x: auto;
+    /* Prefer wrapping over horizontal scrolling. */
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  :global(.message-content pre code) {
+    /* hljs defaults to `white-space: pre`, so override to allow long lines to wrap. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: block;
+    /* Some highlight.js themes set `overflow-x: auto` on code blocks. */
+    overflow-x: hidden;
   }
 
   :global(.message-content code:not(pre code)) {
