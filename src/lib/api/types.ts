@@ -6,16 +6,6 @@ export interface CliStatus {
   path?: string;
 }
 
-export interface CliInstallStatus {
-  installed: boolean;
-  version?: string;
-  path?: string;
-}
-
-export interface CliAuthStatus {
-  authenticated: boolean;
-}
-
 export interface BackendCliStatus {
   backend: string;
   installed: boolean;

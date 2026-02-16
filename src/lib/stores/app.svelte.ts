@@ -1,8 +1,10 @@
 // App state store using Svelte 5 runes
 import { api } from '$lib/api';
+import type { CliStatus } from '$lib/api/types';
 import { chat } from './chat.svelte';
 import { getBackendConfig, type Backend } from '$lib/config/backends';
 
+export type { CliStatus };
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 export type Model = string;
@@ -12,13 +14,6 @@ export interface LicenseInfo {
   licenseKey?: string;
   activatedAt?: number;
   email?: string;
-}
-
-export interface CliStatus {
-  installed: boolean;
-  version?: string;
-  authenticated: boolean;
-  path?: string;
 }
 
 const RECENT_SESSIONS_PREWARM_LIMIT = 50;

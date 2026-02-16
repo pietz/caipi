@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
-  import hljs from 'highlight.js';
   import { openUrl } from '@tauri-apps/plugin-opener';
+  import { renderMarkdown } from '$lib/utils/markdown';
   import type { Message } from '$lib/stores';
   import { HIDDEN_TOOL_TYPES } from './constants';
   import ToolCallStack from './ToolCallStack.svelte';
@@ -28,20 +26,10 @@
     }
   }
 
-  // Configure marked with custom renderer for code highlighting
-  const renderer = new marked.Renderer();
-  renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
-    const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-    const highlighted = hljs.highlight(text, { language }).value;
-    return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
-  };
-
-  marked.use({ renderer });
-
   const isUser = $derived(message.role === 'user');
   const isError = $derived(message.role === 'error');
   const htmlContent = $derived(
-    message.content ? DOMPurify.sanitize(marked.parse(message.content) as string) : ''
+    message.content ? renderMarkdown(message.content) : ''
   );
 </script>
 
@@ -74,120 +62,5 @@
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid rgba(239, 68, 68, 0.2);
-  }
-
-  /* Tighten markdown spacing */
-  :global(.message-content p) {
-    margin: 0.5em 0;
-  }
-
-  :global(.message-content p:first-child) {
-    margin-top: 0;
-  }
-
-  :global(.message-content p:last-child) {
-    margin-bottom: 0;
-  }
-
-  :global(.message-content ul) {
-    margin: 0.5em 0;
-    padding-left: 1.5em;
-    list-style-type: disc;
-  }
-
-  :global(.message-content ol) {
-    margin: 0.5em 0;
-    padding-left: 1.5em;
-    list-style-type: decimal;
-  }
-
-  :global(.message-content li) {
-    margin: 0.25em 0;
-  }
-
-  :global(.message-content pre) {
-    margin: 0.5em 0;
-    border-radius: 6px;
-    /* Prefer wrapping over horizontal scrolling. */
-    overflow-x: hidden;
-    overflow-y: visible;
-  }
-
-  :global(.message-content pre code) {
-    /* hljs defaults to `white-space: pre`, so override to allow long lines to wrap. */
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    display: block;
-    /* Some highlight.js themes set `overflow-x: auto` on code blocks. */
-    overflow-x: hidden;
-  }
-
-  :global(.message-content code:not(pre code)) {
-    background: hsl(var(--muted));
-    padding: 0.15em 0.4em;
-    border-radius: 4px;
-    font-size: 0.9em;
-  }
-
-  :global(.message-content blockquote) {
-    margin: 0.5em 0;
-    padding-left: 1em;
-    border-left: 3px solid hsl(var(--border));
-    color: var(--text-secondary);
-  }
-
-  :global(.message-content h1),
-  :global(.message-content h2),
-  :global(.message-content h3),
-  :global(.message-content h4) {
-    margin: 0.75em 0 0.5em 0;
-    font-weight: 600;
-  }
-
-  :global(.message-content h1:first-child),
-  :global(.message-content h2:first-child),
-  :global(.message-content h3:first-child),
-  :global(.message-content h4:first-child) {
-    margin-top: 0;
-  }
-
-  :global(.message-content a) {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  :global(.message-content a:hover) {
-    opacity: 0.8;
-  }
-
-  /* Table styles */
-  :global(.message-content table) {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 0.75em 0;
-    font-size: 0.875em;
-    overflow-x: auto;
-    display: block;
-  }
-
-  :global(.message-content thead) {
-    background: hsl(var(--muted));
-  }
-
-  :global(.message-content th),
-  :global(.message-content td) {
-    padding: 0.5em 0.75em;
-    border: 1px solid hsl(var(--muted-foreground) / 0.3);
-    text-align: left;
-  }
-
-  :global(.message-content th) {
-    font-weight: 600;
-  }
-
-  :global(.message-content tbody tr:nth-child(even)) {
-    background: hsl(var(--muted) / 0.5);
   }
 </style>

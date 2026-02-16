@@ -2,8 +2,7 @@
   import { api } from '$lib/api';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
+  import { renderMarkdown } from '$lib/utils/markdown';
   import { NavigationBar } from '$lib/components/navigation';
   import { CaipiIcon } from '$lib/components/icons';
   import { Button } from '$lib/components/ui';
@@ -198,7 +197,7 @@
   );
 
   // Group consecutive tools together
-  const groupedStreamItems = $derived((): GroupedItem[] => {
+  const groupedStreamItems = $derived.by((): GroupedItem[] => {
     const groups: GroupedItem[] = [];
     let currentToolGroup: ToolState[] = [];
 
@@ -269,12 +268,12 @@
               <!-- Stream Items (during streaming) -->
               {#if chat.isStreaming && sortedStreamItems.length > 0}
                 <div>
-                  {#each groupedStreamItems() as group, index (index)}
+                  {#each groupedStreamItems as group, index (index)}
                     {#if group.type === 'text'}
                       <div
                         class="message-content text-sm leading-relaxed text-foreground/90"
                       >
-                        {@html group.content ? DOMPurify.sanitize(marked.parse(group.content) as string) : ''}
+                        {@html group.content ? renderMarkdown(group.content) : ''}
                       </div>
                     {:else if group.type === 'tool-group'}
                       <ToolCallStack

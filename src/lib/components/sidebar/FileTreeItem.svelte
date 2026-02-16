@@ -52,12 +52,9 @@
   }
 
   async function handleDoubleClick() {
-    console.log('Double click on:', item.path, 'isFolder:', isFolder);
     if (!isFolder) {
       try {
-        console.log('Calling openPath with:', item.path);
         await openPath(item.path);
-        console.log('openPath succeeded');
       } catch (e) {
         console.error('Failed to open file:', e);
       }

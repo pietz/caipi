@@ -159,3 +159,119 @@
     transform: translateX(0);
   }
 }
+
+/* Message content markdown styles */
+/* Used by ChatMessage and ChatContainer for streaming text */
+.message-content p {
+  margin: 0.5em 0;
+}
+
+.message-content p:first-child {
+  margin-top: 0;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content ul {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+  list-style-type: disc;
+}
+
+.message-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+  list-style-type: decimal;
+}
+
+.message-content li {
+  margin: 0.25em 0;
+}
+
+.message-content pre {
+  margin: 0.5em 0;
+  border-radius: 6px;
+  /* Prefer wrapping over horizontal scrolling. */
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.message-content pre code {
+  /* hljs defaults to `white-space: pre`, so override to allow long lines to wrap. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: block;
+  /* Some highlight.js themes set `overflow-x: auto` on code blocks. */
+  overflow-x: hidden;
+}
+
+.message-content code:not(pre code) {
+  background: hsl(var(--muted));
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.message-content blockquote {
+  margin: 0.5em 0;
+  padding-left: 1em;
+  border-left: 3px solid hsl(var(--border));
+  color: var(--text-secondary);
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 0.75em 0 0.5em 0;
+  font-weight: 600;
+}
+
+.message-content h1:first-child,
+.message-content h2:first-child,
+.message-content h3:first-child,
+.message-content h4:first-child {
+  margin-top: 0;
+}
+
+.message-content a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.message-content a:hover {
+  opacity: 0.8;
+}
+
+/* Table styles */
+.message-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.875em;
+  overflow-x: auto;
+  display: block;
+}
+
+.message-content thead {
+  background: hsl(var(--muted));
+}
+
+.message-content th,
+.message-content td {
+  padding: 0.5em 0.75em;
+  border: 1px solid hsl(var(--muted-foreground) / 0.3);
+  text-align: left;
+}
+
+.message-content th {
+  font-weight: 600;
+}
+
+.message-content tbody tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.5);
+}
