@@ -1,9 +1,9 @@
+use serde::Serialize;
 use serde_json::Value;
-use std::fs;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+
+// ---------------------------------------------------------------------------
+// Helpers (retained from previous implementation)
+// ---------------------------------------------------------------------------
 
 pub fn event_type(value: &Value) -> Option<&str> {
     value.get("type").and_then(Value::as_str)
@@ -31,322 +31,519 @@ pub fn first_string<'a>(value: &'a Value, paths: &[&[&str]]) -> Option<&'a str> 
     None
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenUsageTotals {
-    pub input_tokens: u64,
-    pub cached_input_tokens: u64,
-    pub output_tokens: u64,
-    pub reasoning_output_tokens: u64,
-    pub total_tokens: u64,
-}
-
-impl TokenUsageTotals {
-    pub fn saturating_sub(self, previous: Self) -> Self {
-        Self {
-            input_tokens: self.input_tokens.saturating_sub(previous.input_tokens),
-            cached_input_tokens: self
-                .cached_input_tokens
-                .saturating_sub(previous.cached_input_tokens),
-            output_tokens: self.output_tokens.saturating_sub(previous.output_tokens),
-            reasoning_output_tokens: self
-                .reasoning_output_tokens
-                .saturating_sub(previous.reasoning_output_tokens),
-            total_tokens: self.total_tokens.saturating_sub(previous.total_tokens),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenCountSnapshot {
-    pub last_input_tokens: u64,
-    pub model_context_window: u64,
-    pub total_usage: TokenUsageTotals,
-}
-
-fn parse_token_usage_totals(value: &Value) -> Option<TokenUsageTotals> {
-    Some(TokenUsageTotals {
-        input_tokens: value.get("input_tokens")?.as_u64()?,
-        cached_input_tokens: value
-            .get("cached_input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        output_tokens: value
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        reasoning_output_tokens: value
-            .get("reasoning_output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        total_tokens: value.get("total_tokens")?.as_u64()?,
-    })
-}
-
-pub fn token_count_snapshot(value: &Value) -> Option<TokenCountSnapshot> {
-    if value.get("type").and_then(Value::as_str) != Some("event_msg") {
-        return None;
-    }
-
-    let payload = value.get("payload")?;
-    if payload.get("type").and_then(Value::as_str) != Some("token_count") {
-        return None;
-    }
-
-    let info = payload.get("info")?;
-    if info.is_null() {
-        return None;
-    }
-
-    let last_input_tokens = info
-        .get("last_token_usage")
-        .and_then(|v| v.get("input_tokens"))
-        .and_then(Value::as_u64)?;
-    let model_context_window = info.get("model_context_window").and_then(Value::as_u64)?;
-    let total_usage = parse_token_usage_totals(info.get("total_token_usage")?)?;
-
-    Some(TokenCountSnapshot {
-        last_input_tokens,
-        model_context_window,
-        total_usage,
-    })
-}
-
-fn walk_jsonl_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                files.push(path);
-            }
-        }
-    }
-    files
-}
-
-pub fn find_rollout_path_for_thread(thread_id: &str) -> Option<PathBuf> {
-    if thread_id.trim().is_empty() {
-        return None;
-    }
-
-    let home_dir = dirs::home_dir()?;
-    let sessions_root = home_dir.join(".codex").join("sessions");
-    if !sessions_root.exists() {
-        return None;
-    }
-
-    let mut newest_match: Option<(PathBuf, SystemTime)> = None;
-    for path in walk_jsonl_files(&sessions_root) {
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if !stem.contains(thread_id) {
-            continue;
-        }
-
-        let modified = path
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-
-        match &newest_match {
-            Some((_, best)) if &modified <= best => {}
-            _ => newest_match = Some((path, modified)),
-        }
-    }
-
-    newest_match.map(|(path, _)| path)
-}
-
-pub fn latest_token_count_snapshot(
-    path: &Path,
-) -> Option<(TokenCountSnapshot, Option<TokenCountSnapshot>)> {
-    let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
-    let mut snapshots: Vec<TokenCountSnapshot> = Vec::new();
-
-    for line in reader.lines().map_while(Result::ok) {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let Some(snapshot) = token_count_snapshot(&value) else {
-            continue;
-        };
-
-        let is_duplicate = snapshots
-            .last()
-            .map(|prev| prev.total_usage.total_tokens == snapshot.total_usage.total_tokens)
-            .unwrap_or(false);
-        if is_duplicate {
-            continue;
-        }
-
-        snapshots.push(snapshot);
-    }
-
-    let latest = *snapshots.last()?;
-    let previous = if snapshots.len() > 1 {
-        Some(snapshots[snapshots.len() - 2])
+pub fn clean_thinking_text(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.len() >= 4 && trimmed.starts_with("**") && trimmed.ends_with("**") {
+        trimmed[2..trimmed.len() - 2].trim().to_string()
     } else {
-        None
-    };
-
-    Some((latest, previous))
+        trimmed.to_string()
+    }
 }
 
-pub fn token_usage(value: &Value) -> Option<u64> {
-    let usage = value.get("usage")?;
-
-    // Best-effort fallback when session rollout token_count snapshots are unavailable.
-    if let Some(input) = usage.get("input_tokens").and_then(Value::as_u64) {
-        if input > 0 {
-            return Some(input);
+pub fn final_tool_status(tool_type: &str, item_status: &str, exit_code: Option<i64>) -> &'static str {
+    if item_status != "completed" {
+        return "error";
+    }
+    if tool_type == "command_execution" {
+        if exit_code == Some(0) {
+            "completed"
+        } else {
+            "error"
         }
+    } else {
+        "completed"
+    }
+}
+
+fn parse_item_arguments(item: &Value) -> Option<Value> {
+    let arguments = item.get("arguments")?;
+    if arguments.is_object() || arguments.is_array() {
+        return Some(arguments.clone());
+    }
+    arguments
+        .as_str()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+}
+
+fn first_array_entry<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value.get(key)?.as_array()?.first()
+}
+
+fn web_run_target_from_args(args: &Value) -> String {
+    if let Some(query) = args
+        .get("search_query")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
+        .and_then(Value::as_str)
+    {
+        return query.to_string();
     }
 
-    // Fallback: total_tokens (if the format changes)
-    if let Some(n) = usage.get("total_tokens").and_then(Value::as_u64) {
-        if n > 0 {
-            return Some(n);
-        }
+    if let Some(query) = args
+        .get("image_query")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
+        .and_then(Value::as_str)
+    {
+        return query.to_string();
     }
 
-    None
+    if let Some(reference) = first_array_entry(args, "open")
+        .and_then(|entry| entry.get("ref_id"))
+        .and_then(Value::as_str)
+    {
+        return reference.to_string();
+    }
+
+    if let Some(pattern) = first_array_entry(args, "find")
+        .and_then(|entry| entry.get("pattern"))
+        .and_then(Value::as_str)
+    {
+        return pattern.to_string();
+    }
+
+    if let Some(location) = first_array_entry(args, "weather")
+        .and_then(|entry| entry.get("location"))
+        .and_then(Value::as_str)
+    {
+        return location.to_string();
+    }
+
+    if let Some(ticker) = first_array_entry(args, "finance")
+        .and_then(|entry| entry.get("ticker"))
+        .and_then(Value::as_str)
+    {
+        return ticker.to_string();
+    }
+
+    if let Some(offset) = first_array_entry(args, "time")
+        .and_then(|entry| entry.get("utc_offset"))
+        .and_then(Value::as_str)
+    {
+        return offset.to_string();
+    }
+
+    if let Some(reference) = first_array_entry(args, "click")
+        .and_then(|entry| entry.get("ref_id"))
+        .and_then(Value::as_str)
+    {
+        return reference.to_string();
+    }
+
+    "web.run".to_string()
+}
+
+pub fn normalized_tool_from_item(item: &Value) -> (String, String, Option<Value>) {
+    let raw_tool_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .or_else(|| item.get("name").and_then(Value::as_str))
+        .unwrap_or("command_execution");
+
+    if raw_tool_type == "function_call" {
+        let function_name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("command_execution");
+        let arguments = parse_item_arguments(item);
+
+        let target_from_args = arguments.as_ref().and_then(|args| {
+            args.get("cmd")
+                .or_else(|| args.get("query"))
+                .or_else(|| args.get("command"))
+                .or_else(|| args.get("task"))
+                .or_else(|| args.get("prompt"))
+                .or_else(|| args.get("description"))
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        });
+
+        if function_name == "web.run" {
+            let has_search_queries = arguments
+                .as_ref()
+                .map(|args| {
+                    args.get("search_query")
+                        .or_else(|| args.get("image_query"))
+                        .is_some()
+                })
+                .unwrap_or(false);
+            let tool_type = if has_search_queries {
+                "web_search"
+            } else {
+                "web_fetch"
+            };
+            let target = arguments
+                .as_ref()
+                .map(web_run_target_from_args)
+                .unwrap_or_else(|| "web.run".to_string());
+            return (tool_type.to_string(), target, arguments);
+        }
+
+        let tool_type = match function_name {
+            "exec_command" => "command_execution",
+            other => other,
+        }
+        .to_string();
+        let target = target_from_args.unwrap_or_default();
+        return (tool_type, target, arguments);
+    }
+
+    if raw_tool_type == "web_search_call" {
+        let target = item
+            .get("action")
+            .and_then(|action| {
+                action
+                    .get("query")
+                    .or_else(|| action.get("url"))
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or("")
+            .to_string();
+        return ("web_search".to_string(), target, None);
+    }
+
+    let target = item
+        .get("command")
+        .or_else(|| item.get("query"))
+        .or_else(|| item.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    (raw_tool_type.to_string(), target, None)
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC message types for `codex app-server`
+// ---------------------------------------------------------------------------
+
+/// Classify an incoming JSONL line from the app-server stdout.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum IncomingMessage {
+    /// A response to one of our requests (has `id` + `result` or `error`).
+    Response {
+        id: u64,
+        result: Option<Value>,
+        error: Option<Value>,
+    },
+    /// A server-initiated notification (has `method`, no `id`).
+    Notification { method: String, params: Value },
+    /// A server-initiated request that expects a response (has `method` + `id`, no `result`).
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
+}
+
+impl IncomingMessage {
+    /// Parse a JSON value into an `IncomingMessage`.
+    pub fn parse(value: &Value) -> Option<Self> {
+        let has_id = value.get("id").is_some();
+        let has_method = value.get("method").is_some();
+        let has_result = value.get("result").is_some();
+        let has_error = value.get("error").is_some();
+
+        if has_id && (has_result || has_error) {
+            // Response to our request
+            let id = value.get("id")?.as_u64()?;
+            return Some(IncomingMessage::Response {
+                id,
+                result: value.get("result").cloned(),
+                error: value.get("error").cloned(),
+            });
+        }
+
+        if has_method && has_id && !has_result {
+            // Server asking us something (approval request)
+            return Some(IncomingMessage::Request {
+                id: value.get("id")?.clone(),
+                method: value.get("method")?.as_str()?.to_string(),
+                params: value.get("params").cloned().unwrap_or(Value::Null),
+            });
+        }
+
+        if has_method && !has_id {
+            // Server notification
+            return Some(IncomingMessage::Notification {
+                method: value.get("method")?.as_str()?.to_string(),
+                params: value.get("params").cloned().unwrap_or(Value::Null),
+            });
+        }
+
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Outgoing JSON-RPC types
+// ---------------------------------------------------------------------------
+
+/// A JSON-RPC request we send to the server (expects a response).
+#[derive(Debug, Serialize)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: &'static str,
+    pub method: String,
+    pub id: u64,
+    pub params: Value,
+}
+
+impl JsonRpcRequest {
+    pub fn new(method: impl Into<String>, id: u64, params: Value) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            method: method.into(),
+            id,
+            params,
+        }
+    }
+}
+
+/// A JSON-RPC notification we send to the server (no response expected).
+#[derive(Debug, Serialize)]
+pub struct JsonRpcNotification {
+    pub jsonrpc: &'static str,
+    pub method: String,
+    pub params: Value,
+}
+
+impl JsonRpcNotification {
+    pub fn new(method: impl Into<String>, params: Value) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            method: method.into(),
+            params,
+        }
+    }
+}
+
+/// A JSON-RPC response to a server request (e.g. approval decision).
+#[derive(Debug, Serialize)]
+pub struct JsonRpcResponse {
+    pub jsonrpc: &'static str,
+    pub id: Value,
+    pub result: Value,
+}
+
+impl JsonRpcResponse {
+    pub fn new(id: Value, result: Value) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            id,
+            result,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Approval helpers
+// ---------------------------------------------------------------------------
+
+/// Extract tool name and target from an approval request.
+///
+/// Returns `(tool_type, target)`.
+pub fn extract_approval_tool_info(method: &str, params: &Value) -> (String, String) {
+    match method {
+        "item/commandExecution/requestApproval" => {
+            let command = params
+                .get("commandCall")
+                .and_then(|c| c.get("command"))
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    params
+                        .get("parsedCmd")
+                        .and_then(Value::as_array)
+                        .and_then(|arr| arr.first())
+                        .and_then(Value::as_str)
+                })
+                .unwrap_or("shell command")
+                .to_string();
+            ("command_execution".to_string(), command)
+        }
+        "item/fileChange/requestApproval" => {
+            let file_path = params
+                .get("path")
+                .or_else(|| params.get("filePath"))
+                .and_then(Value::as_str)
+                .unwrap_or("file")
+                .to_string();
+            ("file_change".to_string(), file_path)
+        }
+        _ => {
+            let tool_type = method
+                .strip_suffix("/requestApproval")
+                .unwrap_or(method)
+                .rsplit('/')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
+            ("tool_use".to_string(), tool_type)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Token usage from turn/completed
+// ---------------------------------------------------------------------------
+
+pub fn token_usage_from_turn_completed(params: &Value) -> Option<(u64, Option<u64>, Option<u64>)> {
+    // Try params.usage first, then params directly
+    let usage = params.get("usage").unwrap_or(params);
+
+    let total = usage
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let input = usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+            let output = usage.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+            let sum = input + output;
+            if sum > 0 { Some(sum) } else { None }
+        })?;
+
+    let context_tokens = usage
+        .get("input_tokens")
+        .or_else(|| usage.get("context_tokens"))
+        .and_then(Value::as_u64);
+
+    let context_window = usage
+        .get("model_context_window")
+        .or_else(|| usage.get("context_window"))
+        .and_then(Value::as_u64);
+
+    Some((total, context_tokens, context_window))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{latest_token_count_snapshot, token_count_snapshot, token_usage, TokenUsageTotals};
+    use super::*;
     use serde_json::json;
-    use std::io::Write;
 
     #[test]
-    fn token_count_snapshot_parses_valid_event_msg() {
-        let value = json!({
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "model_context_window": 258400,
-                    "last_token_usage": {
-                        "input_tokens": 10659
-                    },
-                    "total_token_usage": {
-                        "input_tokens": 22486,
-                        "cached_input_tokens": 11648,
-                        "output_tokens": 612,
-                        "reasoning_output_tokens": 248,
-                        "total_tokens": 23098
-                    }
-                }
-            }
-        });
-
-        let snapshot = token_count_snapshot(&value).expect("snapshot");
-        assert_eq!(snapshot.last_input_tokens, 10_659);
-        assert_eq!(snapshot.model_context_window, 258_400);
+    fn clean_thinking_text_strips_wrapping_bold_markers() {
         assert_eq!(
-            snapshot.total_usage,
-            TokenUsageTotals {
-                input_tokens: 22_486,
-                cached_input_tokens: 11_648,
-                output_tokens: 612,
-                reasoning_output_tokens: 248,
-                total_tokens: 23_098,
-            }
+            clean_thinking_text("**Planning command execution updates**"),
+            "Planning command execution updates"
         );
     }
 
     #[test]
-    fn latest_token_count_snapshot_dedupes_by_total_tokens() {
-        let mut temp = tempfile::NamedTempFile::new().expect("temp file");
-        let first = json!({
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "model_context_window": 258400,
-                    "last_token_usage": {"input_tokens": 100},
-                    "total_token_usage": {
-                        "input_tokens": 1000,
-                        "cached_input_tokens": 200,
-                        "output_tokens": 50,
-                        "reasoning_output_tokens": 0,
-                        "total_tokens": 1050
-                    }
-                }
-            }
-        });
-        let duplicate = json!({
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "model_context_window": 258400,
-                    "last_token_usage": {"input_tokens": 101},
-                    "total_token_usage": {
-                        "input_tokens": 1000,
-                        "cached_input_tokens": 200,
-                        "output_tokens": 50,
-                        "reasoning_output_tokens": 0,
-                        "total_tokens": 1050
-                    }
-                }
-            }
-        });
-        let second = json!({
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "model_context_window": 258400,
-                    "last_token_usage": {"input_tokens": 300},
-                    "total_token_usage": {
-                        "input_tokens": 1400,
-                        "cached_input_tokens": 200,
-                        "output_tokens": 80,
-                        "reasoning_output_tokens": 0,
-                        "total_tokens": 1480
-                    }
-                }
-            }
-        });
-
-        writeln!(temp, "{}", first).expect("write");
-        writeln!(temp, "{}", duplicate).expect("write");
-        writeln!(temp, "{}", second).expect("write");
-
-        let (latest, previous) = latest_token_count_snapshot(temp.path()).expect("latest snapshot");
-        assert_eq!(latest.last_input_tokens, 300);
-        assert_eq!(latest.total_usage.total_tokens, 1480);
-        assert_eq!(
-            previous
-                .expect("previous snapshot")
-                .total_usage
-                .total_tokens,
-            1050
-        );
+    fn clean_thinking_text_keeps_normal_text() {
+        assert_eq!(clean_thinking_text("Thinking..."), "Thinking...");
     }
 
     #[test]
-    fn token_usage_fallback_uses_input_tokens() {
+    fn final_tool_status_for_command_requires_zero_exit_code() {
+        assert_eq!(final_tool_status("command_execution", "completed", Some(0)), "completed");
+        assert_eq!(final_tool_status("command_execution", "completed", Some(1)), "error");
+        assert_eq!(final_tool_status("command_execution", "completed", None), "error");
+    }
+
+    #[test]
+    fn final_tool_status_for_non_command_uses_item_status() {
+        assert_eq!(final_tool_status("web_search", "completed", None), "completed");
+        assert_eq!(final_tool_status("web_search", "failed", None), "error");
+    }
+
+    #[test]
+    fn normalized_tool_from_item_maps_web_run_search_to_web_search() {
+        let item = json!({
+            "type": "function_call",
+            "name": "web.run",
+            "arguments": "{\"search_query\":[{\"q\":\"latest rust release\"}]}"
+        });
+        let (tool_type, target, input) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "web_search");
+        assert_eq!(target, "latest rust release");
+        assert!(input.is_some());
+    }
+
+    #[test]
+    fn normalized_tool_from_item_maps_web_run_open_to_web_fetch() {
+        let item = json!({
+            "type": "function_call",
+            "name": "web.run",
+            "arguments": "{\"open\":[{\"ref_id\":\"turn0search0\"}]}"
+        });
+        let (tool_type, target, input) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "web_fetch");
+        assert_eq!(target, "turn0search0");
+        assert!(input.is_some());
+    }
+
+    #[test]
+    fn parse_incoming_response() {
+        let value = json!({"id": 1, "result": {"threadId": "abc"}, "jsonrpc": "2.0"});
+        match IncomingMessage::parse(&value) {
+            Some(IncomingMessage::Response { id, result, error }) => {
+                assert_eq!(id, 1);
+                assert!(result.is_some());
+                assert!(error.is_none());
+            }
+            other => panic!("Expected Response, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_incoming_notification() {
+        let value = json!({"method": "turn/started", "params": {"turnId": "t1"}, "jsonrpc": "2.0"});
+        match IncomingMessage::parse(&value) {
+            Some(IncomingMessage::Notification { method, params }) => {
+                assert_eq!(method, "turn/started");
+                assert_eq!(params.get("turnId").and_then(Value::as_str), Some("t1"));
+            }
+            other => panic!("Expected Notification, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_incoming_request() {
         let value = json!({
+            "id": "req_1",
+            "method": "item/commandExecution/requestApproval",
+            "params": {"parsedCmd": ["ls", "-la"]},
+            "jsonrpc": "2.0"
+        });
+        match IncomingMessage::parse(&value) {
+            Some(IncomingMessage::Request { id, method, params }) => {
+                assert_eq!(id, json!("req_1"));
+                assert_eq!(method, "item/commandExecution/requestApproval");
+                assert!(params.get("parsedCmd").is_some());
+            }
+            other => panic!("Expected Request, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn extract_command_approval_info() {
+        let params = json!({"parsedCmd": ["git", "push"]});
+        let (tool_type, target) =
+            extract_approval_tool_info("item/commandExecution/requestApproval", &params);
+        assert_eq!(tool_type, "command_execution");
+        assert_eq!(target, "git");
+    }
+
+    #[test]
+    fn extract_file_approval_info() {
+        let params = json!({"path": "/src/main.rs"});
+        let (tool_type, target) =
+            extract_approval_tool_info("item/fileChange/requestApproval", &params);
+        assert_eq!(tool_type, "file_change");
+        assert_eq!(target, "/src/main.rs");
+    }
+
+    #[test]
+    fn token_usage_from_completed_event() {
+        let params = json!({
             "usage": {
-                "input_tokens": 1234,
-                "cached_input_tokens": 1200,
-                "output_tokens": 12
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "total_tokens": 1200,
+                "model_context_window": 128000
             }
         });
-        assert_eq!(token_usage(&value), Some(1234));
+        let (total, ctx, window) = token_usage_from_turn_completed(&params).unwrap();
+        assert_eq!(total, 1200);
+        assert_eq!(ctx, Some(1000));
+        assert_eq!(window, Some(128000));
     }
 }

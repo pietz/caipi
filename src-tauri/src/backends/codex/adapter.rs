@@ -1,16 +1,17 @@
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::AppHandle;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tauri::{AppHandle, Manager};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use uuid::Uuid;
 
 use crate::backends::emit_chat_event;
+use crate::backends::runtime::PermissionChannels;
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
@@ -23,216 +24,15 @@ use crate::commands::setup::{
 };
 
 use super::cli_protocol::{
-    event_type, find_rollout_path_for_thread, first_string, latest_token_count_snapshot,
-    token_usage,
+    clean_thinking_text, event_type, extract_approval_tool_info, first_string,
+    normalized_tool_from_item, token_usage_from_turn_completed, final_tool_status,
+    IncomingMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
 };
 
-fn codex_permission_args_for_mode(mode: &str) -> Vec<String> {
-    match mode {
-        // Match "Allow All" semantics for Codex.
-        "bypassPermissions" => vec!["--dangerously-bypass-approvals-and-sandbox".to_string()],
-        // "Edit": allow workspace writes but avoid approval prompts in non-interactive exec mode.
-        "acceptEdits" => vec![
-            "--sandbox".to_string(),
-            "workspace-write".to_string(),
-            "-c".to_string(),
-            "approval_policy=\"never\"".to_string(),
-        ],
-        // "Default" (and unknown): keep Codex constrained to read-only with no prompts.
-        _ => vec![
-            "--sandbox".to_string(),
-            "read-only".to_string(),
-            "-c".to_string(),
-            "approval_policy=\"never\"".to_string(),
-        ],
-    }
-}
+// ---------------------------------------------------------------------------
+// Backend (stateless factory)
+// ---------------------------------------------------------------------------
 
-fn clean_thinking_text(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.len() >= 4 && trimmed.starts_with("**") && trimmed.ends_with("**") {
-        trimmed[2..trimmed.len() - 2].trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn final_tool_status(tool_type: &str, item_status: &str, exit_code: Option<i64>) -> &'static str {
-    if item_status != "completed" {
-        return "error";
-    }
-
-    // For shell commands, require an explicit successful exit code.
-    // This avoids showing "completed" when execution was blocked/denied by sandbox.
-    if tool_type == "command_execution" {
-        if exit_code == Some(0) {
-            "completed"
-        } else {
-            "error"
-        }
-    } else {
-        "completed"
-    }
-}
-
-fn parse_item_arguments(item: &Value) -> Option<Value> {
-    let arguments = item.get("arguments")?;
-    if arguments.is_object() || arguments.is_array() {
-        return Some(arguments.clone());
-    }
-    arguments
-        .as_str()
-        .and_then(|s| serde_json::from_str::<Value>(s).ok())
-}
-
-fn first_array_entry<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value.get(key)?.as_array()?.first()
-}
-
-fn web_run_target_from_args(args: &Value) -> String {
-    if let Some(query) = args
-        .get("search_query")
-        .and_then(Value::as_array)
-        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
-        .and_then(Value::as_str)
-    {
-        return query.to_string();
-    }
-
-    if let Some(query) = args
-        .get("image_query")
-        .and_then(Value::as_array)
-        .and_then(|entries| entries.iter().find_map(|entry| entry.get("q")))
-        .and_then(Value::as_str)
-    {
-        return query.to_string();
-    }
-
-    if let Some(reference) = first_array_entry(args, "open")
-        .and_then(|entry| entry.get("ref_id"))
-        .and_then(Value::as_str)
-    {
-        return reference.to_string();
-    }
-
-    if let Some(pattern) = first_array_entry(args, "find")
-        .and_then(|entry| entry.get("pattern"))
-        .and_then(Value::as_str)
-    {
-        return pattern.to_string();
-    }
-
-    if let Some(location) = first_array_entry(args, "weather")
-        .and_then(|entry| entry.get("location"))
-        .and_then(Value::as_str)
-    {
-        return location.to_string();
-    }
-
-    if let Some(ticker) = first_array_entry(args, "finance")
-        .and_then(|entry| entry.get("ticker"))
-        .and_then(Value::as_str)
-    {
-        return ticker.to_string();
-    }
-
-    if let Some(offset) = first_array_entry(args, "time")
-        .and_then(|entry| entry.get("utc_offset"))
-        .and_then(Value::as_str)
-    {
-        return offset.to_string();
-    }
-
-    if let Some(reference) = first_array_entry(args, "click")
-        .and_then(|entry| entry.get("ref_id"))
-        .and_then(Value::as_str)
-    {
-        return reference.to_string();
-    }
-
-    "web.run".to_string()
-}
-
-fn normalized_tool_from_item(item: &Value) -> (String, String, Option<Value>) {
-    let raw_tool_type = item
-        .get("type")
-        .and_then(Value::as_str)
-        .or_else(|| item.get("name").and_then(Value::as_str))
-        .unwrap_or("command_execution");
-
-    if raw_tool_type == "function_call" {
-        let function_name = item
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("command_execution");
-        let arguments = parse_item_arguments(item);
-
-        let target_from_args = arguments.as_ref().and_then(|args| {
-            args.get("cmd")
-                .or_else(|| args.get("query"))
-                .or_else(|| args.get("command"))
-                .or_else(|| args.get("task"))
-                .or_else(|| args.get("prompt"))
-                .or_else(|| args.get("description"))
-                .and_then(Value::as_str)
-                .map(|s| s.to_string())
-        });
-
-        if function_name == "web.run" {
-            let has_search_queries = arguments
-                .as_ref()
-                .map(|args| {
-                    args.get("search_query")
-                        .or_else(|| args.get("image_query"))
-                        .is_some()
-                })
-                .unwrap_or(false);
-            let tool_type = if has_search_queries {
-                "web_search"
-            } else {
-                "web_fetch"
-            };
-            let target = arguments
-                .as_ref()
-                .map(web_run_target_from_args)
-                .unwrap_or_else(|| "web.run".to_string());
-            return (tool_type.to_string(), target, arguments);
-        }
-
-        let tool_type = match function_name {
-            "exec_command" => "command_execution",
-            other => other,
-        }
-        .to_string();
-        let target = target_from_args.unwrap_or_default();
-        return (tool_type, target, arguments);
-    }
-
-    if raw_tool_type == "web_search_call" {
-        let target = item
-            .get("action")
-            .and_then(|action| {
-                action
-                    .get("query")
-                    .or_else(|| action.get("url"))
-                    .and_then(Value::as_str)
-            })
-            .unwrap_or("")
-            .to_string();
-        return ("web_search".to_string(), target, None);
-    }
-
-    let target = item
-        .get("command")
-        .or_else(|| item.get("query"))
-        .or_else(|| item.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    (raw_tool_type.to_string(), target, None)
-}
-
-/// Codex CLI backend implementation.
 pub struct CodexBackend;
 
 impl CodexBackend {
@@ -255,7 +55,7 @@ impl Backend for CodexBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            permission_model: PermissionModel::SessionLevel,
+            permission_model: PermissionModel::PerOperation,
             supports_streaming: true,
             supports_abort: true,
             supports_resume: true,
@@ -305,38 +105,50 @@ impl Backend for CodexBackend {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+
 pub struct CodexSession {
+    // Identity
     id: String,
     folder_path: String,
+    cli_path: Option<String>,
+    app_handle: AppHandle,
+
+    // User-controlled settings (per-turn, no process restart needed)
     permission_mode: Arc<RwLock<String>>,
     model: Arc<RwLock<String>>,
     thinking_level: Arc<RwLock<String>>,
-    cli_path: Option<String>,
-    app_handle: AppHandle,
+
+    // Long-lived process
+    process: Arc<Mutex<Option<Child>>>,
+    stdin_writer: Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+
+    // JSON-RPC request/response matching
+    next_request_id: AtomicU64,
+    pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
+
+    // Interactive approvals
+    permission_channels: PermissionChannels,
+
+    // Codex state
     thread_id: Arc<RwLock<Option<String>>>,
+    codex_turn_id: Arc<RwLock<Option<String>>>,
+    initialized: Arc<AtomicBool>,
+
+    // Resume
+    resume_session_id: Option<String>,
+
+    // Turn management
     messages: Arc<RwLock<Vec<Message>>>,
-    active_process: Arc<Mutex<Option<Child>>>,
     in_flight: Arc<AtomicBool>,
     current_turn_id: Arc<RwLock<Option<String>>>,
-    aborted_turn_id: Arc<RwLock<Option<String>>>,
+    abort_flag: Arc<AtomicBool>,
+    abort_notify: Arc<Notify>,
 }
 
 impl CodexSession {
-    async fn release_turn_state(
-        turn_id: &str,
-        active_process: &Arc<Mutex<Option<Child>>>,
-        in_flight: &Arc<AtomicBool>,
-        current_turn_id: &Arc<RwLock<Option<String>>>,
-    ) {
-        *active_process.lock().await = None;
-
-        if current_turn_id.read().await.as_deref() == Some(turn_id) {
-            *current_turn_id.write().await = None;
-        }
-
-        in_flight.store(false, Ordering::SeqCst);
-    }
-
     async fn new(config: SessionConfig, app_handle: AppHandle) -> Result<Self, BackendError> {
         let folder_path = config.folder_path.clone();
         let resume_session_id = config.resume_session_id.clone();
@@ -346,9 +158,14 @@ impl CodexSession {
             Vec::new()
         };
 
+        let permission_channels: PermissionChannels =
+            app_handle.state::<PermissionChannels>().inner().clone();
+
         Ok(Self {
             id: Uuid::new_v4().to_string(),
             folder_path,
+            cli_path: config.cli_path,
+            app_handle,
             permission_mode: Arc::new(RwLock::new(
                 config
                     .permission_mode
@@ -358,394 +175,719 @@ impl CodexSession {
                 config.model.unwrap_or_else(|| "gpt-5.3-codex".to_string()),
             )),
             thinking_level: Arc::new(RwLock::new("medium".to_string())),
-            cli_path: config.cli_path,
-            app_handle,
-            thread_id: Arc::new(RwLock::new(resume_session_id)),
+            process: Arc::new(Mutex::new(None)),
+            stdin_writer: Arc::new(Mutex::new(None)),
+            next_request_id: AtomicU64::new(1),
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            permission_channels,
+            thread_id: Arc::new(RwLock::new(None)),
+            codex_turn_id: Arc::new(RwLock::new(None)),
+            initialized: Arc::new(AtomicBool::new(false)),
+            resume_session_id,
             messages: Arc::new(RwLock::new(initial_messages)),
-            active_process: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(AtomicBool::new(false)),
             current_turn_id: Arc::new(RwLock::new(None)),
-            aborted_turn_id: Arc::new(RwLock::new(None)),
+            abort_flag: Arc::new(AtomicBool::new(false)),
+            abort_notify: Arc::new(Notify::new()),
         })
     }
 
-    async fn execute_message(
-        session_id: String,
-        turn_id: String,
-        folder_path: String,
-        cli_path: Option<String>,
-        message: String,
-        model: Arc<RwLock<String>>,
-        thinking_level: Arc<RwLock<String>>,
-        permission_mode: Arc<RwLock<String>>,
-        thread_id: Arc<RwLock<Option<String>>>,
-        messages: Arc<RwLock<Vec<Message>>>,
-        app_handle: AppHandle,
-        active_process: Arc<Mutex<Option<Child>>>,
-        in_flight: Arc<AtomicBool>,
-        current_turn_id: Arc<RwLock<Option<String>>>,
-        aborted_turn_id: Arc<RwLock<Option<String>>>,
-    ) {
-        let mut command = Command::new(cli_path.unwrap_or_else(|| "codex".to_string()));
-        let mode = permission_mode.read().await.clone();
-        let current_model = model.read().await.clone();
-        let current_thinking = thinking_level.read().await.clone();
+    // -----------------------------------------------------------------------
+    // JSON-RPC helpers
+    // -----------------------------------------------------------------------
 
+    fn next_id(&self) -> u64 {
+        self.next_request_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Write a JSON line to the app-server stdin.
+    async fn write_line(&self, value: &impl serde::Serialize) -> Result<(), BackendError> {
+        let mut guard = self.stdin_writer.lock().await;
+        let writer = guard.as_mut().ok_or_else(|| BackendError {
+            message: "Codex app-server stdin not available".to_string(),
+            recoverable: false,
+        })?;
+        let mut line = serde_json::to_string(value).map_err(|e| BackendError {
+            message: format!("Failed to serialize JSON-RPC message: {e}"),
+            recoverable: false,
+        })?;
+        line.push('\n');
+        writer.write_all(line.as_bytes()).await.map_err(|e| BackendError {
+            message: format!("Failed to write to codex stdin: {e}"),
+            recoverable: false,
+        })?;
+        writer.flush().await.map_err(|e| BackendError {
+            message: format!("Failed to flush codex stdin: {e}"),
+            recoverable: false,
+        })?;
+        Ok(())
+    }
+
+    /// Send a JSON-RPC request and wait for its response.
+    async fn send_request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, BackendError> {
+        let id = self.next_id();
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert(id, tx);
+        }
+
+        let req = JsonRpcRequest::new(method, id, params);
+        if let Err(e) = self.write_line(&req).await {
+            let mut pending = self.pending_requests.lock().await;
+            pending.remove(&id);
+            return Err(e);
+        }
+
+        let value = rx.await.map_err(|_| BackendError {
+            message: format!("No response received for {method} (id={id})"),
+            recoverable: false,
+        })?;
+
+        // The response router wraps server errors as { "error": ... }.
+        if let Some(err) = value.get("error") {
+            let msg = err
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| err.as_str().unwrap_or("unknown error"));
+            return Err(BackendError {
+                message: format!("{method} failed: {msg}"),
+                recoverable: false,
+            });
+        }
+
+        Ok(value)
+    }
+
+    /// Send a JSON-RPC notification (no response expected).
+    async fn send_notification(&self, method: &str, params: Value) -> Result<(), BackendError> {
+        let notif = JsonRpcNotification::new(method, params);
+        self.write_line(&notif).await
+    }
+
+    // -----------------------------------------------------------------------
+    // Process lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Spawn the long-lived `codex app-server` process.
+    async fn spawn_app_server(&self) -> Result<(), BackendError> {
+        let cli = self
+            .cli_path
+            .as_deref()
+            .unwrap_or("codex");
+
+        let mut command = Command::new(cli);
         command
-            .arg("exec")
-            // Map UI permission presets to explicit Codex sandbox/approval settings.
-            // We run with stdin=null, so we must avoid interactive approval flows.
-            .args(codex_permission_args_for_mode(&mode))
-            .arg("--json")
-            .arg("--skip-git-repo-check")
-            .arg("-m")
-            .arg(current_model)
-            .current_dir(&folder_path)
+            .arg("app-server")
+            .current_dir(&self.folder_path)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
+            .stderr(Stdio::piped());
 
-        // Pass reasoning effort if set
-        if !current_thinking.is_empty() {
-            command
-                .arg("-c")
-                .arg(format!("model_reasoning_effort=\"{}\"", current_thinking));
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let resume_id = thread_id.read().await.clone();
-        let resume_attempted = resume_id.is_some();
-        if let Some(existing_thread_id) = resume_id {
-            command.arg("resume").arg(existing_thread_id);
-        }
+        let mut child = command.spawn().map_err(|e| BackendError {
+            message: format!("Failed to spawn codex app-server: {e}"),
+            recoverable: false,
+        })?;
 
-        command.arg("--").arg(message.clone());
+        let stdin = child.stdin.take().ok_or_else(|| BackendError {
+            message: "Failed to capture codex app-server stdin".to_string(),
+            recoverable: false,
+        })?;
 
-        let mut child = match command.spawn() {
-            Ok(c) => c,
-            Err(err) => {
-                let error_event = ChatEvent::Error {
-                    message: format!("Failed to spawn codex CLI: {err}"),
-                };
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &error_event,
-                );
-                Self::release_turn_state(
-                    turn_id.as_str(),
-                    &active_process,
-                    &in_flight,
-                    &current_turn_id,
-                )
-                .await;
-                return;
+        let stdout = child.stdout.take().ok_or_else(|| BackendError {
+            message: "Failed to capture codex app-server stdout".to_string(),
+            recoverable: false,
+        })?;
+
+        let stderr = child.stderr.take().ok_or_else(|| BackendError {
+            message: "Failed to capture codex app-server stderr".to_string(),
+            recoverable: false,
+        })?;
+
+        *self.process.lock().await = Some(child);
+        *self.stdin_writer.lock().await = Some(stdin);
+
+        // Spawn stdout reader task
+        self.spawn_stdout_reader(stdout);
+
+        // Spawn stderr drain task
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Some(line) = lines.next_line().await.unwrap_or(None) {
+                if !line.trim().is_empty() {
+                    #[cfg(debug_assertions)]
+                    eprintln!("[codex stderr] {}", line.trim());
+                }
             }
-        };
+        });
 
-        let stdout = match child.stdout.take() {
-            Some(stdout) => stdout,
-            None => {
-                let _ = child.start_kill();
-                let error_event = ChatEvent::Error {
-                    message: "Failed to capture codex stdout".to_string(),
-                };
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &error_event,
-                );
-                Self::release_turn_state(
-                    turn_id.as_str(),
-                    &active_process,
-                    &in_flight,
-                    &current_turn_id,
-                )
-                .await;
-                return;
-            }
-        };
-
-        let stderr = match child.stderr.take() {
-            Some(stderr) => stderr,
-            None => {
-                let _ = child.start_kill();
-                let error_event = ChatEvent::Error {
-                    message: "Failed to capture codex stderr".to_string(),
-                };
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &error_event,
-                );
-                Self::release_turn_state(
-                    turn_id.as_str(),
-                    &active_process,
-                    &in_flight,
-                    &current_turn_id,
-                )
-                .await;
-                return;
-            }
-        };
-
-        *active_process.lock().await = Some(child);
-        let session_init = ChatEvent::SessionInit {
-            auth_type: "codex".to_string(),
-        };
-        emit_chat_event(
-            &app_handle,
-            Some(session_id.as_str()),
-            Some(turn_id.as_str()),
-            &session_init,
-        );
-
-        let app_for_stdout = app_handle.clone();
-        let session_for_stdout = session_id.clone();
-        let turn_for_stdout = turn_id.clone();
-        let thread_for_stdout = thread_id.clone();
-        let messages_for_stdout = messages.clone();
-        let stdout_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            let mut finished = false;
-            let mut saw_thread_started = false;
-            let mut active_tools: HashMap<String, String> = HashMap::new();
-            let mut assistant_parts: Vec<String> = Vec::new();
-            let mut rollout_path = None;
-
+        // Spawn process monitor
+        let process = self.process.clone();
+        let stdin_writer = self.stdin_writer.clone();
+        let abort_flag = self.abort_flag.clone();
+        let in_flight = self.in_flight.clone();
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let initialized = self.initialized.clone();
+        tokio::spawn(async move {
             loop {
-                let Some(line) = lines.next_line().await.unwrap_or(None) else {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let mut guard = process.lock().await;
+                let Some(child) = guard.as_mut() else {
                     break;
                 };
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        *guard = None;
+                        drop(guard);
+                        *stdin_writer.lock().await = None;
+                        initialized.store(false, Ordering::SeqCst);
 
+                        if !abort_flag.load(Ordering::SeqCst) {
+                            let turn_id = current_turn_id.read().await.clone();
+                            let error_event = ChatEvent::Error {
+                                message: format!("Codex app-server exited with status {status}"),
+                            };
+                            emit_chat_event(
+                                &app_handle,
+                                Some(&session_id),
+                                turn_id.as_deref(),
+                                &error_event,
+                            );
+                            in_flight.store(false, Ordering::SeqCst);
+                        }
+                        break;
+                    }
+                    Ok(None) => {} // still running
+                    Err(_) => {
+                        *guard = None;
+                        drop(guard);
+                        *stdin_writer.lock().await = None;
+                        initialized.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Perform handshake
+        self.handshake().await?;
+
+        Ok(())
+    }
+
+    /// Perform the initialize/initialized handshake.
+    async fn handshake(&self) -> Result<(), BackendError> {
+        self.send_request(
+            "initialize",
+            json!({
+                "clientInfo": {
+                    "name": "caipi",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            }),
+        )
+        .await?;
+
+        // Send initialized notification
+        self.send_notification("initialized", json!({})).await?;
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// Ensure we have a thread (start new or resume existing).
+    async fn ensure_thread(&self) -> Result<String, BackendError> {
+        if let Some(tid) = self.thread_id.read().await.clone() {
+            return Ok(tid);
+        }
+
+        // If resuming, try thread/resume first
+        if let Some(resume_id) = &self.resume_session_id {
+            let result = self
+                .send_request("thread/resume", json!({ "id": resume_id }))
+                .await?;
+            if let Some(tid) = result
+                .get("threadId")
+                .or_else(|| result.get("id"))
+                .and_then(Value::as_str)
+            {
+                let tid = tid.to_string();
+                *self.thread_id.write().await = Some(tid.clone());
+                return Ok(tid);
+            }
+            // If resume failed, fall through to create new thread
+        }
+
+        let result = self.send_request("thread/start", json!({})).await?;
+        let tid = result
+            .get("threadId")
+            .or_else(|| result.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        *self.thread_id.write().await = Some(tid.clone());
+
+        Ok(tid)
+    }
+
+    /// Ensure the app-server is running and initialized.
+    async fn ensure_app_server(&self) -> Result<(), BackendError> {
+        if self.process.lock().await.is_some() && self.initialized.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.spawn_app_server().await
+    }
+
+    // -----------------------------------------------------------------------
+    // Permission mode → turn policies
+    // -----------------------------------------------------------------------
+
+    fn approval_policy(mode: &str) -> &'static str {
+        match mode {
+            "bypassPermissions" => "never",
+            _ => "unlessTrusted",
+        }
+    }
+
+    fn sandbox_policy(mode: &str) -> Value {
+        match mode {
+            "bypassPermissions" => json!({ "type": "dangerFullAccess" }),
+            "acceptEdits" => json!({ "type": "workspaceWrite" }),
+            _ => json!({ "type": "readOnly" }),
+        }
+    }
+
+    fn effort_from_thinking(level: &str) -> &str {
+        match level {
+            "high" => "high",
+            "low" => "low",
+            _ => "medium",
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stdout reader
+    // -----------------------------------------------------------------------
+
+    fn spawn_stdout_reader(&self, stdout: tokio::process::ChildStdout) {
+        let pending_requests = self.pending_requests.clone();
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let thread_id = self.thread_id.clone();
+        let codex_turn_id = self.codex_turn_id.clone();
+        let in_flight = self.in_flight.clone();
+        let abort_flag = self.abort_flag.clone();
+        let abort_notify = self.abort_notify.clone();
+        let permission_mode = self.permission_mode.clone();
+        let permission_channels = self.permission_channels.clone();
+        let stdin_writer = self.stdin_writer.clone();
+        let messages = self.messages.clone();
+
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            let mut active_tools: HashMap<String, String> = HashMap::new();
+            let mut assistant_parts: Vec<String> = Vec::new();
+
+            while let Some(line) = lines.next_line().await.unwrap_or(None) {
                 if line.trim().is_empty() {
                     continue;
                 }
 
-                let parsed = match serde_json::from_str::<Value>(&line) {
+                let parsed: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
-                    Err(_) => {
-                        let text_event = ChatEvent::Text { content: line };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &text_event,
-                        );
-                        continue;
-                    }
+                    Err(_) => continue,
                 };
 
-                let kind = event_type(&parsed).unwrap_or_default();
-                let current_item_kind =
-                    first_string(&parsed, &[&["item", "type"], &["item_type"], &["kind"]])
-                        .unwrap_or("");
+                let turn_id_snapshot = current_turn_id.read().await.clone();
+                let turn_id_ref = turn_id_snapshot.as_deref();
 
-                if kind == "thread.started" {
-                    if let Some(id) =
-                        first_string(&parsed, &[&["thread_id"], &["thread", "id"], &["id"]])
-                    {
-                        saw_thread_started = true;
-                        *thread_for_stdout.write().await = Some(id.to_string());
-                        rollout_path = find_rollout_path_for_thread(id);
+                match IncomingMessage::parse(&parsed) {
+                    Some(IncomingMessage::Response { id, result, error }) => {
+                        // Route response to pending request.
+                        // If the server returned an error, wrap it so callers
+                        // can distinguish success from failure.
+                        let value = if let Some(err) = error {
+                            json!({ "error": err })
+                        } else {
+                            result.unwrap_or(Value::Null)
+                        };
+                        let sender = {
+                            let mut pending = pending_requests.lock().await;
+                            pending.remove(&id)
+                        };
+                        if let Some(tx) = sender {
+                            let _ = tx.send(value);
+                        }
                     }
-                }
 
-                if kind == "item.started" {
-                    let item_kind = if current_item_kind.is_empty() {
-                        "tool"
-                    } else {
-                        current_item_kind
-                    };
-                    let item_id = first_string(&parsed, &[&["item", "id"], &["item_id"], &["id"]])
-                        .unwrap_or("item")
-                        .to_string();
-
-                    if item_kind.contains("reason") {
-                        let thinking_content = clean_thinking_text(
-                            first_string(&parsed, &[&["item", "text"]]).unwrap_or("Thinking"),
-                        );
-                        let thinking_start = ChatEvent::ThinkingStart {
-                            thinking_id: item_id,
-                            content: thinking_content.to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &thinking_start,
-                        );
-                    } else if item_kind == "agent_message" {
-                        // Text messages are handled on item.completed, skip here
-                    } else {
-                        let item = parsed.get("item").unwrap_or(&Value::Null);
-                        let (tool_type, target, input) = normalized_tool_from_item(item);
-                        active_tools.insert(item_id.clone(), tool_type.clone());
-                        let tool_start = ChatEvent::ToolStart {
-                            tool_use_id: item_id.clone(),
-                            tool_type,
-                            target,
-                            status: "pending".to_string(),
-                            input,
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_start,
-                        );
-                        let tool_running = ChatEvent::ToolStatusUpdate {
-                            tool_use_id: item_id.clone(),
-                            status: "running".to_string(),
-                            permission_request_id: None,
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_running,
-                        );
-                    }
-                }
-
-                if kind == "item.completed" {
-                    let item_id = first_string(&parsed, &[&["item", "id"], &["item_id"], &["id"]])
-                        .unwrap_or("item")
-                        .to_string();
-                    let item_kind = if current_item_kind.is_empty() {
-                        "tool"
-                    } else {
-                        current_item_kind
-                    };
-
-                    if item_kind.contains("reason") {
-                        let thinking_content = clean_thinking_text(
-                            first_string(&parsed, &[&["item", "text"]]).unwrap_or("Thinking"),
-                        );
-                        let thinking_start = ChatEvent::ThinkingStart {
-                            thinking_id: item_id.clone(),
-                            content: thinking_content.to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &thinking_start,
-                        );
-                        let thinking_end = ChatEvent::ThinkingEnd {
-                            thinking_id: item_id,
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &thinking_end,
-                        );
-                    } else if item_kind == "web_search_call" && !active_tools.contains_key(&item_id)
-                    {
-                        // web_search_call may arrive only as item.completed, emit start+end
-                        let tool_type = "web_search".to_string();
-                        let target = first_string(
-                            &parsed,
-                            &[&["item", "action", "query"], &["item", "query"]],
+                    Some(IncomingMessage::Notification { method, params }) => {
+                        Self::handle_notification(
+                            &method,
+                            &params,
+                            &app_handle,
+                            &session_id,
+                            turn_id_ref,
+                            &thread_id,
+                            &codex_turn_id,
+                            &in_flight,
+                            &messages,
+                            &mut active_tools,
+                            &mut assistant_parts,
                         )
-                        .unwrap_or("")
-                        .to_string();
-                        let tool_start = ChatEvent::ToolStart {
-                            tool_use_id: item_id.clone(),
-                            tool_type,
-                            target,
-                            status: "pending".to_string(),
-                            input: None,
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_start,
-                        );
-                        let tool_end = ChatEvent::ToolEnd {
-                            id: item_id.clone(),
-                            status: "completed".to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_end,
-                        );
-                    } else if item_kind == "file_change" && !active_tools.contains_key(&item_id) {
-                        // file_change only arrives as item.completed, emit start+end
-                        let tool_type = "file_change".to_string();
-                        let target = parsed
-                            .get("item")
-                            .and_then(|v| v.get("changes"))
-                            .and_then(Value::as_array)
-                            .and_then(|arr| arr.first())
-                            .and_then(|c| c.get("path"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        let tool_start = ChatEvent::ToolStart {
-                            tool_use_id: item_id.clone(),
-                            tool_type,
-                            target,
-                            status: "pending".to_string(),
-                            input: None,
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_start,
-                        );
-                        let tool_end = ChatEvent::ToolEnd {
-                            id: item_id.clone(),
-                            status: "completed".to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_end,
-                        );
-                    } else if active_tools.contains_key(&item_id) {
-                        let tool_type = active_tools
-                            .remove(&item_id)
-                            .unwrap_or_else(|| item_kind.to_string());
-                        let completed_status =
-                            first_string(&parsed, &[&["item", "status"]]).unwrap_or("completed");
-                        let exit_code = parsed
-                            .get("item")
-                            .and_then(|v| v.get("exit_code"))
-                            .and_then(Value::as_i64);
-                        let final_status =
-                            final_tool_status(&tool_type, completed_status, exit_code);
-                        let tool_end = ChatEvent::ToolEnd {
-                            id: item_id.clone(),
-                            status: final_status.to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &tool_end,
-                        );
+                        .await;
+                    }
+
+                    Some(IncomingMessage::Request { id, method, params }) => {
+                        Self::handle_approval_request(
+                            id,
+                            &method,
+                            &params,
+                            &app_handle,
+                            &session_id,
+                            turn_id_ref,
+                            &permission_mode,
+                            &permission_channels,
+                            &stdin_writer,
+                            &abort_flag,
+                            &abort_notify,
+                            &mut active_tools,
+                        )
+                        .await;
+                    }
+
+                    None => {
+                        // Possibly a legacy-format event line — try to handle as
+                        // notification using the "type" field (backwards compat with
+                        // older Codex versions that may mix formats).
+                        if let Some(kind) = event_type(&parsed) {
+                            Self::handle_legacy_event(
+                                kind,
+                                &parsed,
+                                &app_handle,
+                                &session_id,
+                                turn_id_ref,
+                                &thread_id,
+                                &codex_turn_id,
+                                &in_flight,
+                                &messages,
+                                &mut active_tools,
+                                &mut assistant_parts,
+                            )
+                            .await;
+                        }
                     }
                 }
+            }
+        });
+    }
 
-                let should_emit_text = !(current_item_kind.contains("reason")
-                    || current_item_kind == "command_execution"
-                    || current_item_kind == "function_call"
-                    || current_item_kind == "web_search"
-                    || current_item_kind == "web_search_call"
-                    || current_item_kind == "file_change");
+    /// Handle a JSON-RPC notification from the app-server.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_notification(
+        method: &str,
+        params: &Value,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        thread_id: &Arc<RwLock<Option<String>>>,
+        codex_turn_id: &Arc<RwLock<Option<String>>>,
+        in_flight: &AtomicBool,
+        messages: &Arc<RwLock<Vec<Message>>>,
+        active_tools: &mut HashMap<String, String>,
+        assistant_parts: &mut Vec<String>,
+    ) {
+        match method {
+            "thread/started" => {
+                if let Some(tid) = params
+                    .get("threadId")
+                    .or_else(|| params.get("id"))
+                    .and_then(Value::as_str)
+                {
+                    *thread_id.write().await = Some(tid.to_string());
+                }
+            }
+
+            "turn/started" => {
+                if let Some(tid) = params
+                    .get("turnId")
+                    .or_else(|| params.get("id"))
+                    .and_then(Value::as_str)
+                {
+                    *codex_turn_id.write().await = Some(tid.to_string());
+                }
+                // Clear accumulation for new turn
+                assistant_parts.clear();
+                active_tools.clear();
+            }
+
+            "item/started" => {
+                Self::handle_item_started(params, app_handle, session_id, turn_id, active_tools);
+            }
+
+            "item/agentMessage/delta" | "item/delta" => {
+                if let Some(text) = params
+                    .get("delta")
+                    .or_else(|| params.get("text"))
+                    .and_then(Value::as_str)
+                {
+                    if !text.is_empty() {
+                        assistant_parts.push(text.to_string());
+                        let event = ChatEvent::Text {
+                            content: text.to_string(),
+                        };
+                        emit_chat_event(app_handle, Some(session_id), turn_id, &event);
+                    }
+                }
+            }
+
+            "item/completed" => {
+                Self::handle_item_completed(
+                    params,
+                    app_handle,
+                    session_id,
+                    turn_id,
+                    active_tools,
+                    assistant_parts,
+                );
+            }
+
+            "turn/completed" => {
+                // Emit token usage if available
+                if let Some((total, ctx, window)) = token_usage_from_turn_completed(params) {
+                    let usage_event = ChatEvent::TokenUsage {
+                        total_tokens: total,
+                        context_tokens: ctx,
+                        context_window: window,
+                    };
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &usage_event);
+                }
+
+                // Store assistant message
+                let text = assistant_parts.join("");
+                if !text.trim().is_empty() {
+                    let mut msgs = messages.write().await;
+                    msgs.push(Message {
+                        id: Uuid::new_v4().to_string(),
+                        role: "assistant".to_string(),
+                        content: text,
+                        timestamp: chrono::Utc::now().timestamp(),
+                    });
+                }
+                assistant_parts.clear();
+
+                // Clear codex turn id
+                *codex_turn_id.write().await = None;
+
+                // Emit completion
+                let complete_event = ChatEvent::Complete;
+                emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
+                in_flight.store(false, Ordering::SeqCst);
+            }
+
+            _ => {
+                // Unknown notification — ignore
+            }
+        }
+    }
+
+    fn handle_item_started(
+        params: &Value,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        active_tools: &mut HashMap<String, String>,
+    ) {
+        let item = params.get("item").unwrap_or(params);
+        let item_kind = first_string(item, &[&["type"], &["kind"]])
+            .or_else(|| first_string(params, &[&["item_type"], &["kind"]]))
+            .unwrap_or("tool");
+        let item_id = first_string(item, &[&["id"]])
+            .or_else(|| first_string(params, &[&["item_id"], &["id"]]))
+            .unwrap_or("item")
+            .to_string();
+
+        if item_kind.contains("reason") {
+            let thinking_content =
+                clean_thinking_text(first_string(item, &[&["text"]]).unwrap_or("Thinking"));
+            let event = ChatEvent::ThinkingStart {
+                thinking_id: item_id,
+                content: thinking_content,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
+        } else if item_kind == "agent_message" {
+            // Text messages handled via delta/completed
+        } else {
+            let (tool_type, target, input) = normalized_tool_from_item(item);
+            active_tools.insert(item_id.clone(), tool_type.clone());
+            let event = ChatEvent::ToolStart {
+                tool_use_id: item_id.clone(),
+                tool_type,
+                target,
+                status: "running".to_string(),
+                input,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_item_completed(
+        params: &Value,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        active_tools: &mut HashMap<String, String>,
+        assistant_parts: &mut Vec<String>,
+    ) {
+        let item = params.get("item").unwrap_or(params);
+        let item_kind = first_string(item, &[&["type"], &["kind"]])
+            .or_else(|| first_string(params, &[&["item_type"], &["kind"]]))
+            .unwrap_or("tool");
+        let item_id = first_string(item, &[&["id"]])
+            .or_else(|| first_string(params, &[&["item_id"], &["id"]]))
+            .unwrap_or("item")
+            .to_string();
+
+        if item_kind.contains("reason") {
+            let thinking_content =
+                clean_thinking_text(first_string(item, &[&["text"]]).unwrap_or("Thinking"));
+            // Emit start+end for reasoning blocks
+            let start = ChatEvent::ThinkingStart {
+                thinking_id: item_id.clone(),
+                content: thinking_content,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
+            let end = ChatEvent::ThinkingEnd {
+                thinking_id: item_id,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
+        } else if item_kind == "agent_message" {
+            // Emit full text if we haven't received deltas
+            if let Some(text) = first_string(item, &[&["text"], &["content", "text"]]) {
+                if !text.is_empty() {
+                    assistant_parts.push(text.to_string());
+                    let event = ChatEvent::Text {
+                        content: text.to_string(),
+                    };
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &event);
+                }
+            }
+        } else if item_kind == "web_search_call" && !active_tools.contains_key(&item_id) {
+            let target = first_string(item, &[&["action", "query"], &["query"]])
+                .unwrap_or("")
+                .to_string();
+            let start = ChatEvent::ToolStart {
+                tool_use_id: item_id.clone(),
+                tool_type: "web_search".to_string(),
+                target,
+                status: "pending".to_string(),
+                input: None,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
+            let end = ChatEvent::ToolEnd {
+                id: item_id,
+                status: "completed".to_string(),
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
+        } else if item_kind == "file_change" && !active_tools.contains_key(&item_id) {
+            let target = item
+                .get("changes")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(|c| c.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let start = ChatEvent::ToolStart {
+                tool_use_id: item_id.clone(),
+                tool_type: "file_change".to_string(),
+                target,
+                status: "pending".to_string(),
+                input: None,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
+            let end = ChatEvent::ToolEnd {
+                id: item_id,
+                status: "completed".to_string(),
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
+        } else if active_tools.contains_key(&item_id) {
+            let tool_type = active_tools
+                .remove(&item_id)
+                .unwrap_or_else(|| item_kind.to_string());
+            let completed_status = first_string(item, &[&["status"]]).unwrap_or("completed");
+            let exit_code = item.get("exit_code").and_then(Value::as_i64);
+            let status = final_tool_status(&tool_type, completed_status, exit_code);
+            let end = ChatEvent::ToolEnd {
+                id: item_id,
+                status: status.to_string(),
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
+        }
+    }
+
+    /// Handle legacy-format events (type-based rather than JSON-RPC method-based).
+    /// This provides backwards compatibility with older Codex versions.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_legacy_event(
+        kind: &str,
+        parsed: &Value,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        thread_id: &Arc<RwLock<Option<String>>>,
+        codex_turn_id: &Arc<RwLock<Option<String>>>,
+        in_flight: &AtomicBool,
+        messages: &Arc<RwLock<Vec<Message>>>,
+        active_tools: &mut HashMap<String, String>,
+        assistant_parts: &mut Vec<String>,
+    ) {
+        // Map legacy event types to notification methods
+        let (method, params) = match kind {
+            "thread.started" => ("thread/started", parsed.clone()),
+            "turn.started" => ("turn/started", parsed.clone()),
+            "item.started" => ("item/started", parsed.clone()),
+            "item.completed" => ("item/completed", parsed.clone()),
+            "turn.completed" => ("turn/completed", parsed.clone()),
+            "error" => {
+                if let Some(err) =
+                    first_string(parsed, &[&["message"], &["error"], &["error", "message"]])
+                {
+                    let event = ChatEvent::Error {
+                        message: err.to_string(),
+                    };
+                    emit_chat_event(app_handle, Some(session_id), turn_id, &event);
+                }
+                return;
+            }
+            _ => {
+                // Try to extract text from unknown events
+                let item_kind = first_string(parsed, &[&["item", "type"], &["item_type"], &["kind"]])
+                    .unwrap_or("");
+                let should_emit_text = !(item_kind.contains("reason")
+                    || item_kind == "command_execution"
+                    || item_kind == "function_call"
+                    || item_kind == "web_search"
+                    || item_kind == "web_search_call"
+                    || item_kind == "file_change");
 
                 if should_emit_text {
                     if let Some(text) = first_string(
-                        &parsed,
+                        parsed,
                         &[
                             &["delta"],
                             &["text"],
@@ -757,207 +899,157 @@ impl CodexSession {
                     ) {
                         if !text.is_empty() {
                             assistant_parts.push(text.to_string());
-                            let text_event = ChatEvent::Text {
+                            let event = ChatEvent::Text {
                                 content: text.to_string(),
                             };
-                            emit_chat_event(
-                                &app_for_stdout,
-                                Some(session_for_stdout.as_str()),
-                                Some(turn_for_stdout.as_str()),
-                                &text_event,
-                            );
+                            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
                         }
                     }
                 }
-
-                if kind == "turn.completed" {
-                    let mut emitted_usage = false;
-
-                    let rollout_for_turn = if let Some(path) = rollout_path.clone() {
-                        Some(path)
-                    } else {
-                        let thread = thread_for_stdout.read().await.clone();
-                        thread.as_deref().and_then(find_rollout_path_for_thread)
-                    };
-
-                    if let Some(rollout_file) = rollout_for_turn {
-                        if let Some((latest, previous)) = latest_token_count_snapshot(&rollout_file)
-                        {
-                            let delta = previous
-                                .map(|prev| latest.total_usage.saturating_sub(prev.total_usage))
-                                .unwrap_or(latest.total_usage);
-
-                            let token_usage = ChatEvent::TokenUsage {
-                                total_tokens: delta.total_tokens,
-                                context_tokens: Some(latest.last_input_tokens),
-                                context_window: Some(latest.model_context_window),
-                            };
-                            emit_chat_event(
-                                &app_for_stdout,
-                                Some(session_for_stdout.as_str()),
-                                Some(turn_for_stdout.as_str()),
-                                &token_usage,
-                            );
-                            emitted_usage = true;
-                        }
-                    }
-
-                    if !emitted_usage {
-                        if let Some(total) = token_usage(&parsed) {
-                            let token_usage = ChatEvent::TokenUsage {
-                                total_tokens: total,
-                                context_tokens: None,
-                                context_window: None,
-                            };
-                            emit_chat_event(
-                                &app_for_stdout,
-                                Some(session_for_stdout.as_str()),
-                                Some(turn_for_stdout.as_str()),
-                                &token_usage,
-                            );
-                        }
-                    }
-                    finished = true;
-                }
-
-                if kind == "error" {
-                    if let Some(err) =
-                        first_string(&parsed, &[&["message"], &["error"], &["error", "message"]])
-                    {
-                        let error_event = ChatEvent::Error {
-                            message: err.to_string(),
-                        };
-                        emit_chat_event(
-                            &app_for_stdout,
-                            Some(session_for_stdout.as_str()),
-                            Some(turn_for_stdout.as_str()),
-                            &error_event,
-                        );
-                    }
-                }
+                return;
             }
-
-            let assistant_message = if finished {
-                assistant_parts.join("")
-            } else {
-                String::new()
-            };
-            if !assistant_message.trim().is_empty() {
-                let mut messages = messages_for_stdout.write().await;
-                messages.push(Message {
-                    id: Uuid::new_v4().to_string(),
-                    role: "assistant".to_string(),
-                    content: assistant_message,
-                    timestamp: chrono::Utc::now().timestamp(),
-                });
-            }
-
-            (finished, saw_thread_started)
-        });
-
-        let stderr_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Some(line) = lines.next_line().await.unwrap_or(None) {
-                if !line.trim().is_empty() {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[codex stderr] {}", line.trim());
-                }
-            }
-        });
-
-        let status = loop {
-            let mut guard = active_process.lock().await;
-            let Some(child) = guard.as_mut() else {
-                break None;
-            };
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    *guard = None;
-                    break Some(status);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    let error_event = ChatEvent::Error {
-                        message: format!("Failed to poll codex process: {err}"),
-                    };
-                    emit_chat_event(
-                        &app_handle,
-                        Some(session_id.as_str()),
-                        Some(turn_id.as_str()),
-                        &error_event,
-                    );
-                    *guard = None;
-                    break None;
-                }
-            }
-            drop(guard);
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         };
 
-        let (_finished, saw_thread_started) = stdout_task.await.unwrap_or((false, false));
-        let _ = stderr_task.await;
-
-        if aborted_turn_id.read().await.as_deref() == Some(turn_id.as_str()) {
-            *aborted_turn_id.write().await = None;
-            Self::release_turn_state(
-                turn_id.as_str(),
-                &active_process,
-                &in_flight,
-                &current_turn_id,
-            )
-            .await;
-            return;
-        }
-
-        if resume_attempted && !saw_thread_started {
-            *thread_id.write().await = None;
-        }
-
-        match status {
-            Some(exit) if exit.success() => {
-                // Emit completion only after the process has fully exited.
-                // This prevents queued sends from racing with lingering process teardown.
-                let complete_event = ChatEvent::Complete;
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &complete_event,
-                );
-            }
-            Some(exit) => {
-                let error_event = ChatEvent::Error {
-                    message: format!("Codex exited with status {}", exit),
-                };
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &error_event,
-                );
-            }
-            None => {
-                let error_event = ChatEvent::Error {
-                    message: "Codex process ended unexpectedly".to_string(),
-                };
-                emit_chat_event(
-                    &app_handle,
-                    Some(session_id.as_str()),
-                    Some(turn_id.as_str()),
-                    &error_event,
-                );
-            }
-        }
-
-        Self::release_turn_state(
-            turn_id.as_str(),
-            &active_process,
-            &in_flight,
-            &current_turn_id,
+        Self::handle_notification(
+            method,
+            &params,
+            app_handle,
+            session_id,
+            turn_id,
+            thread_id,
+            codex_turn_id,
+            in_flight,
+            messages,
+            active_tools,
+            assistant_parts,
         )
         .await;
     }
+
+    /// Handle an incoming approval request from the server.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_approval_request(
+        request_id: Value,
+        method: &str,
+        params: &Value,
+        app_handle: &AppHandle,
+        session_id: &str,
+        turn_id: Option<&str>,
+        permission_mode: &Arc<RwLock<String>>,
+        permission_channels: &PermissionChannels,
+        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+        abort_flag: &Arc<AtomicBool>,
+        abort_notify: &Arc<Notify>,
+        active_tools: &mut HashMap<String, String>,
+    ) {
+        let (tool_type, target) = extract_approval_tool_info(method, params);
+        let tool_use_id = Uuid::new_v4().to_string();
+
+        // Emit ToolStart with pending status
+        active_tools.insert(tool_use_id.clone(), tool_type.clone());
+        let start_event = ChatEvent::ToolStart {
+            tool_use_id: tool_use_id.clone(),
+            tool_type: tool_type.clone(),
+            target: target.clone(),
+            status: "pending".to_string(),
+            input: None,
+        };
+        emit_chat_event(app_handle, Some(session_id), turn_id, &start_event);
+
+        let mode = permission_mode.read().await.clone();
+
+        // Decide whether to auto-accept or prompt user
+        let auto_accept = match mode.as_str() {
+            "bypassPermissions" => true,
+            "acceptEdits" if tool_type == "file_change" => true,
+            _ => false,
+        };
+
+        let allowed = if auto_accept {
+            // Auto-accept: update status to running
+            let running_event = ChatEvent::ToolStatusUpdate {
+                tool_use_id: tool_use_id.clone(),
+                status: "running".to_string(),
+                permission_request_id: None,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &running_event);
+            true
+        } else {
+            // Prompt user: emit awaiting_permission and wait
+            let permission_request_id = Uuid::new_v4().to_string();
+            let (tx, rx) = oneshot::channel();
+            {
+                let mut channels = permission_channels.lock().await;
+                channels.insert(permission_request_id.clone(), tx);
+            }
+
+            let awaiting_event = ChatEvent::ToolStatusUpdate {
+                tool_use_id: tool_use_id.clone(),
+                status: "awaiting_permission".to_string(),
+                permission_request_id: Some(permission_request_id.clone()),
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &awaiting_event);
+
+            // Wait for user decision, timeout, or abort
+            let decision = tokio::select! {
+                resp = rx => {
+                    resp.map(|r| r.allowed).unwrap_or(false)
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
+                    false
+                }
+                _ = abort_notify.notified() => {
+                    false
+                }
+            };
+
+            // Cleanup channel
+            {
+                let mut channels = permission_channels.lock().await;
+                channels.remove(&permission_request_id);
+            }
+
+            // Emit status update
+            let status = if decision { "running" } else { "denied" };
+            let status_event = ChatEvent::ToolStatusUpdate {
+                tool_use_id: tool_use_id.clone(),
+                status: status.to_string(),
+                permission_request_id: None,
+            };
+            emit_chat_event(app_handle, Some(session_id), turn_id, &status_event);
+
+            decision
+        };
+
+        // Send the approval response to the server
+        let decision_str = if allowed { "accept" } else { "decline" };
+        let response = JsonRpcResponse::new(
+            request_id,
+            json!({ "decision": decision_str }),
+        );
+
+        let mut line = match serde_json::to_string(&response) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        line.push('\n');
+
+        let mut guard = stdin_writer.lock().await;
+        if let Some(writer) = guard.as_mut() {
+            let _ = writer.write_all(line.as_bytes()).await;
+            let _ = writer.flush().await;
+        }
+
+        // If denied and abort was requested, remove from active tools
+        if !allowed && abort_flag.load(Ordering::SeqCst) {
+            active_tools.remove(&tool_use_id);
+        }
+    }
 }
+
+// ---------------------------------------------------------------------------
+// BackendSession implementation
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl BackendSession for CodexSession {
@@ -985,80 +1077,134 @@ impl BackendSession for CodexSession {
             .map(|id| id.to_string())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         *self.current_turn_id.write().await = Some(turn_id.clone());
+        self.abort_flag.store(false, Ordering::SeqCst);
 
-        let timestamp = chrono::Utc::now().timestamp();
+        // Store user message
         {
             let mut messages = self.messages.write().await;
             messages.push(Message {
                 id: Uuid::new_v4().to_string(),
                 role: "user".to_string(),
                 content: message.to_string(),
-                timestamp,
+                timestamp: chrono::Utc::now().timestamp(),
             });
         }
 
-        let session_id = self.id.clone();
-        let folder_path = self.folder_path.clone();
-        let cli_path = self.cli_path.clone();
-        let model = self.model.clone();
-        let thinking_level = self.thinking_level.clone();
-        let permission_mode = self.permission_mode.clone();
-        let thread_id = self.thread_id.clone();
-        let app_handle = self.app_handle.clone();
-        let active_process = self.active_process.clone();
-        let in_flight = self.in_flight.clone();
-        let current_turn_id = self.current_turn_id.clone();
-        let aborted_turn_id = self.aborted_turn_id.clone();
-        let messages = self.messages.clone();
-        let message = message.to_string();
+        // Ensure app-server is running
+        if let Err(e) = self.ensure_app_server().await {
+            self.in_flight.store(false, Ordering::SeqCst);
+            *self.current_turn_id.write().await = None;
+            return Err(e);
+        }
 
-        tokio::spawn(async move {
-            Self::execute_message(
-                session_id,
-                turn_id,
-                folder_path,
-                cli_path,
-                message,
-                model,
-                thinking_level,
-                permission_mode,
-                thread_id,
-                messages,
-                app_handle,
-                active_process,
-                in_flight,
-                current_turn_id,
-                aborted_turn_id,
-            )
-            .await;
+        // Ensure thread exists
+        let thread_id = match self.ensure_thread().await {
+            Ok(tid) => tid,
+            Err(e) => {
+                self.in_flight.store(false, Ordering::SeqCst);
+                *self.current_turn_id.write().await = None;
+                return Err(e);
+            }
+        };
+
+        // Emit session init
+        let session_init = ChatEvent::SessionInit {
+            auth_type: "codex".to_string(),
+        };
+        emit_chat_event(
+            &self.app_handle,
+            Some(&self.id),
+            Some(&turn_id),
+            &session_init,
+        );
+
+        // Build turn/start params
+        let current_model = self.model.read().await.clone();
+        let current_thinking = self.thinking_level.read().await.clone();
+        let mode = self.permission_mode.read().await.clone();
+
+        let params = json!({
+            "threadId": thread_id,
+            "input": [{ "type": "text", "text": message }],
+            "model": current_model,
+            "effort": Self::effort_from_thinking(&current_thinking),
+            "approvalPolicy": Self::approval_policy(&mode),
+            "sandboxPolicy": Self::sandbox_policy(&mode),
         });
+
+        // Register pending request *before* writing so a fast reply isn't dropped.
+        // We don't await the response — turn results stream via notifications.
+        let id = self.next_id();
+        let (tx, _rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert(id, tx);
+        }
+
+        let req = JsonRpcRequest::new("turn/start", id, params);
+        if let Err(e) = self.write_line(&req).await {
+            self.pending_requests.lock().await.remove(&id);
+            self.in_flight.store(false, Ordering::SeqCst);
+            *self.current_turn_id.write().await = None;
+            return Err(e);
+        }
 
         Ok(())
     }
 
     async fn abort(&self) -> Result<(), BackendError> {
         let active_turn = self.current_turn_id.read().await.clone();
-        if let Some(turn_id) = active_turn.as_ref() {
-            *self.aborted_turn_id.write().await = Some(turn_id.clone());
+
+        self.abort_flag.store(true, Ordering::SeqCst);
+        self.abort_notify.notify_waiters();
+
+        // Try graceful interrupt via turn/interrupt
+        let thread = self.thread_id.read().await.clone();
+        let codex_turn = self.codex_turn_id.read().await.clone();
+        if let (Some(tid), Some(ctid)) = (thread, codex_turn) {
+            let _ = self
+                .send_notification(
+                    "turn/interrupt",
+                    json!({ "threadId": tid, "turnId": ctid }),
+                )
+                .await;
         }
 
-        let mut guard = self.active_process.lock().await;
-        if let Some(child) = guard.as_mut() {
-            let _ = child.start_kill();
+        // Wait briefly for graceful completion
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Kill process if still running
+        {
+            let mut guard = self.process.lock().await;
+            if let Some(child) = guard.as_mut() {
+                let _ = child.kill().await;
+            }
+            *guard = None;
         }
-        *guard = None;
+        *self.stdin_writer.lock().await = None;
+        self.initialized.store(false, Ordering::SeqCst);
+
+        // Release state
         self.in_flight.store(false, Ordering::SeqCst);
         *self.current_turn_id.write().await = None;
+        *self.codex_turn_id.write().await = None;
+
+        // Clear pending requests
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.clear();
+        }
 
         let abort_complete = ChatEvent::AbortComplete {
             session_id: self.id.clone(),
         };
         emit_chat_event(
             &self.app_handle,
-            Some(self.id.as_str()),
+            Some(&self.id),
             active_turn.as_deref(),
             &abort_complete,
         );
+
         Ok(())
     }
 
@@ -1097,57 +1243,9 @@ impl BackendSession for CodexSession {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_thinking_text, codex_permission_args_for_mode, final_tool_status,
-        normalized_tool_from_item,
+        clean_thinking_text, final_tool_status, normalized_tool_from_item, CodexSession,
     };
     use serde_json::json;
-
-    #[test]
-    fn codex_permission_args_default_mode() {
-        assert_eq!(
-            codex_permission_args_for_mode("default"),
-            vec![
-                "--sandbox".to_string(),
-                "read-only".to_string(),
-                "-c".to_string(),
-                "approval_policy=\"never\"".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn codex_permission_args_accept_edits_mode() {
-        assert_eq!(
-            codex_permission_args_for_mode("acceptEdits"),
-            vec![
-                "--sandbox".to_string(),
-                "workspace-write".to_string(),
-                "-c".to_string(),
-                "approval_policy=\"never\"".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn codex_permission_args_bypass_mode() {
-        assert_eq!(
-            codex_permission_args_for_mode("bypassPermissions"),
-            vec!["--dangerously-bypass-approvals-and-sandbox".to_string()]
-        );
-    }
-
-    #[test]
-    fn codex_permission_args_unknown_mode_falls_back_to_default() {
-        assert_eq!(
-            codex_permission_args_for_mode("someFutureMode"),
-            vec![
-                "--sandbox".to_string(),
-                "read-only".to_string(),
-                "-c".to_string(),
-                "approval_policy=\"never\"".to_string(),
-            ]
-        );
-    }
 
     #[test]
     fn clean_thinking_text_strips_wrapping_bold_markers() {
@@ -1164,26 +1262,14 @@ mod tests {
 
     #[test]
     fn final_tool_status_for_command_requires_zero_exit_code() {
-        assert_eq!(
-            final_tool_status("command_execution", "completed", Some(0)),
-            "completed"
-        );
-        assert_eq!(
-            final_tool_status("command_execution", "completed", Some(1)),
-            "error"
-        );
-        assert_eq!(
-            final_tool_status("command_execution", "completed", None),
-            "error"
-        );
+        assert_eq!(final_tool_status("command_execution", "completed", Some(0)), "completed");
+        assert_eq!(final_tool_status("command_execution", "completed", Some(1)), "error");
+        assert_eq!(final_tool_status("command_execution", "completed", None), "error");
     }
 
     #[test]
     fn final_tool_status_for_non_command_uses_item_status() {
-        assert_eq!(
-            final_tool_status("web_search", "completed", None),
-            "completed"
-        );
+        assert_eq!(final_tool_status("web_search", "completed", None), "completed");
         assert_eq!(final_tool_status("web_search", "failed", None), "error");
     }
 
@@ -1194,7 +1280,6 @@ mod tests {
             "name": "web.run",
             "arguments": "{\"search_query\":[{\"q\":\"latest rust release\"}]}"
         });
-
         let (tool_type, target, input) = normalized_tool_from_item(&item);
         assert_eq!(tool_type, "web_search");
         assert_eq!(target, "latest rust release");
@@ -1208,10 +1293,36 @@ mod tests {
             "name": "web.run",
             "arguments": "{\"open\":[{\"ref_id\":\"turn0search0\"}]}"
         });
-
         let (tool_type, target, input) = normalized_tool_from_item(&item);
         assert_eq!(tool_type, "web_fetch");
         assert_eq!(target, "turn0search0");
         assert!(input.is_some());
+    }
+
+    #[test]
+    fn approval_policy_mapping() {
+        assert_eq!(CodexSession::approval_policy("default"), "unlessTrusted");
+        assert_eq!(CodexSession::approval_policy("acceptEdits"), "unlessTrusted");
+        assert_eq!(CodexSession::approval_policy("bypassPermissions"), "never");
+    }
+
+    #[test]
+    fn sandbox_policy_mapping() {
+        let default = CodexSession::sandbox_policy("default");
+        assert_eq!(default.get("type").and_then(|v| v.as_str()), Some("readOnly"));
+
+        let edit = CodexSession::sandbox_policy("acceptEdits");
+        assert_eq!(edit.get("type").and_then(|v| v.as_str()), Some("workspaceWrite"));
+
+        let bypass = CodexSession::sandbox_policy("bypassPermissions");
+        assert_eq!(bypass.get("type").and_then(|v| v.as_str()), Some("dangerFullAccess"));
+    }
+
+    #[test]
+    fn effort_mapping() {
+        assert_eq!(CodexSession::effort_from_thinking("high"), "high");
+        assert_eq!(CodexSession::effort_from_thinking("low"), "low");
+        assert_eq!(CodexSession::effort_from_thinking("medium"), "medium");
+        assert_eq!(CodexSession::effort_from_thinking(""), "medium");
     }
 }
