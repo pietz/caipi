@@ -1,4 +1,5 @@
 // Files state store using Svelte 5 runes
+import { SvelteSet } from 'svelte/reactivity';
 
 export interface FileEntry {
   name: string;
@@ -10,7 +11,7 @@ export interface FileEntry {
 class FilesState {
   rootPath = $state<string | null>(null);
   tree = $state<FileEntry[]>([]);
-  expanded = $state<Set<string>>(new Set());
+  expanded = $state(new SvelteSet<string>());
   selected = $state<string | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
@@ -38,7 +39,7 @@ class FilesState {
   }
 
   toggleExpanded(path: string) {
-    const newExpanded = new Set(this.expanded);
+    const newExpanded = new SvelteSet(this.expanded);
     if (newExpanded.has(path)) {
       newExpanded.delete(path);
     } else {
@@ -48,7 +49,7 @@ class FilesState {
   }
 
   setExpanded(path: string, expanded: boolean) {
-    const newSet = new Set(this.expanded);
+    const newSet = new SvelteSet(this.expanded);
     if (expanded) {
       newSet.add(path);
     } else {
@@ -75,7 +76,7 @@ class FilesState {
   reset() {
     this.rootPath = null;
     this.tree = [];
-    this.expanded = new Set();
+    this.expanded = new SvelteSet();
     this.selected = null;
     this.loading = false;
     this.error = null;

@@ -37,7 +37,7 @@
     // Optimistic update - backend will confirm via StateChanged event
     app.cyclePermissionMode();
     if (app.sessionId) {
-      api.setPermissionMode(app.sessionId, app.permissionMode);
+      api.setPermissionMode(app.sessionId, app.permissionMode).catch(console.error);
     }
   }
 
@@ -45,14 +45,14 @@
     // Optimistic update - backend will confirm via StateChanged event
     app.cycleModel();
     if (app.sessionId) {
-      api.setModel(app.sessionId, app.model);
+      api.setModel(app.sessionId, app.model).catch(console.error);
     }
   }
 
   function handleThinkingClick() {
     app.cycleThinking();
     if (app.sessionId) {
-      api.setThinkingLevel(app.sessionId, app.thinkingLevel);
+      api.setThinkingLevel(app.sessionId, app.thinkingLevel).catch(console.error);
     }
   }
 

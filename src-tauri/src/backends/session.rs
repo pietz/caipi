@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 
 use super::types::{BackendError, BackendKind};
-use crate::commands::chat::Message;
 
 /// Trait for a backend session.
 ///
@@ -47,7 +46,4 @@ pub trait BackendSession: Send + Sync {
 
     /// Sets thinking level (e.g., "off"/"on" for Claude, "low"/"medium"/"high" for Codex).
     async fn set_thinking_level(&self, level: String) -> Result<(), BackendError>;
-
-    /// Gets the messages in this session.
-    async fn get_messages(&self) -> Vec<Message>;
 }

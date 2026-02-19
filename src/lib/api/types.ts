@@ -23,7 +23,7 @@ export interface StartupInfo {
   defaultFolder?: string;
   cliPath?: string;
   defaultBackend: string;
-  backendCliPaths?: Record<string, string>;
+  backendCliPaths: Record<string, string>;
 }
 
 // Folders

@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, Mutex, Notify, RwLock};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::backends::emit_chat_event;
@@ -146,6 +147,10 @@ pub struct CodexSession {
     current_turn_id: Arc<RwLock<Option<String>>>,
     abort_flag: Arc<AtomicBool>,
     abort_notify: Arc<Notify>,
+    // Background task handles for the active process.
+    stdout_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    stderr_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    monitor_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl CodexSession {
@@ -189,6 +194,9 @@ impl CodexSession {
             current_turn_id: Arc::new(RwLock::new(None)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             abort_notify: Arc::new(Notify::new()),
+            stdout_task: Arc::new(Mutex::new(None)),
+            stderr_task: Arc::new(Mutex::new(None)),
+            monitor_task: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -269,12 +277,58 @@ impl CodexSession {
         self.write_line(&notif).await
     }
 
+    async fn abort_task_slot(slot: &Arc<Mutex<Option<JoinHandle<()>>>>) {
+        let handle = {
+            let mut guard = slot.lock().await;
+            guard.take()
+        };
+        if let Some(handle) = handle {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    async fn abort_background_tasks(&self) {
+        Self::abort_task_slot(&self.stdout_task).await;
+        Self::abort_task_slot(&self.stderr_task).await;
+        Self::abort_task_slot(&self.monitor_task).await;
+    }
+
+    async fn stop_process(&self) {
+        self.abort_background_tasks().await;
+
+        // Kill process if still running
+        {
+            let mut guard = self.process.lock().await;
+            if let Some(child) = guard.as_mut() {
+                let _ = child.kill().await;
+            }
+            *guard = None;
+        }
+        *self.stdin_writer.lock().await = None;
+        self.initialized.store(false, Ordering::SeqCst);
+
+        // Release state
+        self.in_flight.store(false, Ordering::SeqCst);
+        *self.current_turn_id.write().await = None;
+        *self.codex_turn_id.write().await = None;
+
+        // Clear pending requests
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.clear();
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Process lifecycle
     // -----------------------------------------------------------------------
 
     /// Spawn the long-lived `codex app-server` process.
     async fn spawn_app_server(&self) -> Result<(), BackendError> {
+        // Defensive: ensure stale reader/monitor tasks are gone before spawning again.
+        self.abort_background_tasks().await;
+
         let cli = self
             .cli_path
             .as_deref()
@@ -319,18 +373,19 @@ impl CodexSession {
         *self.stdin_writer.lock().await = Some(stdin);
 
         // Spawn stdout reader task
-        self.spawn_stdout_reader(stdout);
+        let stdout_handle = self.spawn_stdout_reader(stdout);
+        *self.stdout_task.lock().await = Some(stdout_handle);
 
         // Spawn stderr drain task
-        tokio::spawn(async move {
+        let stderr_handle = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Some(line) = lines.next_line().await.unwrap_or(None) {
                 if !line.trim().is_empty() {
-                    #[cfg(debug_assertions)]
                     eprintln!("[codex stderr] {}", line.trim());
                 }
             }
         });
+        *self.stderr_task.lock().await = Some(stderr_handle);
 
         // Spawn process monitor
         let process = self.process.clone();
@@ -341,7 +396,7 @@ impl CodexSession {
         let session_id = self.id.clone();
         let current_turn_id = self.current_turn_id.clone();
         let initialized = self.initialized.clone();
-        tokio::spawn(async move {
+        let monitor_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 let mut guard = process.lock().await;
@@ -370,7 +425,9 @@ impl CodexSession {
                         }
                         break;
                     }
-                    Ok(None) => {} // still running
+                    Ok(None) => {
+                        drop(guard);
+                    }
                     Err(_) => {
                         *guard = None;
                         drop(guard);
@@ -381,6 +438,7 @@ impl CodexSession {
                 }
             }
         });
+        *self.monitor_task.lock().await = Some(monitor_handle);
 
         // Perform handshake
         self.handshake().await?;
@@ -482,7 +540,7 @@ impl CodexSession {
     // Stdout reader
     // -----------------------------------------------------------------------
 
-    fn spawn_stdout_reader(&self, stdout: tokio::process::ChildStdout) {
+    fn spawn_stdout_reader(&self, stdout: tokio::process::ChildStdout) -> JoinHandle<()> {
         let pending_requests = self.pending_requests.clone();
         let app_handle = self.app_handle.clone();
         let session_id = self.id.clone();
@@ -592,7 +650,7 @@ impl CodexSession {
                     }
                 }
             }
-        });
+        })
     }
 
     /// Handle a JSON-RPC notification from the app-server.
@@ -1132,18 +1190,9 @@ impl BackendSession for CodexSession {
             "sandboxPolicy": Self::sandbox_policy(&mode),
         });
 
-        // Register pending request *before* writing so a fast reply isn't dropped.
-        // We don't await the response — turn results stream via notifications.
         let id = self.next_id();
-        let (tx, _rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_requests.lock().await;
-            pending.insert(id, tx);
-        }
-
         let req = JsonRpcRequest::new("turn/start", id, params);
         if let Err(e) = self.write_line(&req).await {
-            self.pending_requests.lock().await.remove(&id);
             self.in_flight.store(false, Ordering::SeqCst);
             *self.current_turn_id.write().await = None;
             return Err(e);
@@ -1173,27 +1222,7 @@ impl BackendSession for CodexSession {
         // Wait briefly for graceful completion
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Kill process if still running
-        {
-            let mut guard = self.process.lock().await;
-            if let Some(child) = guard.as_mut() {
-                let _ = child.kill().await;
-            }
-            *guard = None;
-        }
-        *self.stdin_writer.lock().await = None;
-        self.initialized.store(false, Ordering::SeqCst);
-
-        // Release state
-        self.in_flight.store(false, Ordering::SeqCst);
-        *self.current_turn_id.write().await = None;
-        *self.codex_turn_id.write().await = None;
-
-        // Clear pending requests
-        {
-            let mut pending = self.pending_requests.lock().await;
-            pending.clear();
-        }
+        self.stop_process().await;
 
         let abort_complete = ChatEvent::AbortComplete {
             session_id: self.id.clone(),
@@ -1209,7 +1238,10 @@ impl BackendSession for CodexSession {
     }
 
     async fn cleanup(&self) {
-        let _ = self.abort().await;
+        // Keep shutdown silent on app-close/session-destroy cleanup.
+        self.abort_flag.store(true, Ordering::SeqCst);
+        self.abort_notify.notify_waiters();
+        self.stop_process().await;
     }
 
     async fn get_permission_mode(&self) -> String {
@@ -1235,9 +1267,6 @@ impl BackendSession for CodexSession {
         Ok(())
     }
 
-    async fn get_messages(&self) -> Vec<Message> {
-        self.messages.read().await.clone()
-    }
 }
 
 #[cfg(test)]

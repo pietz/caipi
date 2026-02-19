@@ -119,8 +119,16 @@ fn load_data() -> Result<AppData, StorageError> {
     }
 
     let content = fs::read_to_string(path)?;
-    let data: AppData = serde_json::from_str(&content)?;
-    Ok(data)
+    match serde_json::from_str::<AppData>(&content) {
+        Ok(data) => Ok(data),
+        Err(err) => {
+            eprintln!(
+                "[storage] Failed to parse data.json ({}); falling back to defaults",
+                err
+            );
+            Ok(AppData::default())
+        }
+    }
 }
 
 fn save_data(data: &AppData) -> Result<(), StorageError> {
@@ -139,6 +147,7 @@ fn save_data(data: &AppData) -> Result<(), StorageError> {
 }
 
 pub fn get_recent_folders() -> Result<Vec<RecentFolder>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     Ok(data.recent_folders)
 }
@@ -161,6 +170,7 @@ pub fn save_recent_folder(folder: RecentFolder) -> Result<(), StorageError> {
 }
 
 pub fn get_onboarding_completed() -> Result<bool, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     Ok(data.onboarding_completed)
 }
@@ -174,6 +184,7 @@ pub fn set_onboarding_completed(completed: bool) -> Result<(), StorageError> {
 }
 
 pub fn get_cli_status_cache() -> Result<Option<CliStatusCache>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     Ok(data.cli_status_cache)
 }
@@ -194,15 +205,8 @@ pub fn set_cli_status_cache(status: CliStatus, backend: Option<String>) -> Resul
     Ok(())
 }
 
-pub fn clear_cli_status_cache() -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.cli_status_cache = None;
-    save_data(&data)?;
-    Ok(())
-}
-
 pub fn get_default_folder() -> Result<Option<String>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     Ok(data.default_folder)
 }
@@ -216,6 +220,7 @@ pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
 }
 
 pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
 
     match data.license {
@@ -233,7 +238,6 @@ pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
                 };
 
                 // Save the migrated license with checksum
-                let _guard = get_storage_lock().lock();
                 let mut app_data = load_data()?;
                 app_data.license = Some(migrated_license.clone());
                 save_data(&app_data)?;
@@ -292,13 +296,13 @@ fn ensure_claude_key_migrated(data: &mut AppData) -> Result<(), StorageError> {
 }
 
 pub fn get_cli_path() -> Result<Option<String>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     if let Some(path) = data.backend_cli_paths.get("claude") {
         return Ok(Some(path.clone()));
     }
     if let Some(path) = data.backend_cli_paths.get("claudecli") {
         let path = path.clone();
-        let _guard = get_storage_lock().lock();
         let mut data = load_data()?;
         ensure_claude_key_migrated(&mut data)?;
         return Ok(Some(path));
@@ -306,25 +310,8 @@ pub fn get_cli_path() -> Result<Option<String>, StorageError> {
     Ok(data.cli_path)
 }
 
-pub fn set_cli_path(path: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.cli_path = path.clone();
-    match path {
-        Some(path) => {
-            data.backend_cli_paths.insert("claude".to_string(), path);
-            data.backend_cli_paths.remove("claudecli");
-        }
-        None => {
-            data.backend_cli_paths.remove("claude");
-            data.backend_cli_paths.remove("claudecli");
-        }
-    }
-    save_data(&data)?;
-    Ok(())
-}
-
 pub fn get_default_backend() -> Result<Option<String>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     Ok(data.default_backend)
 }
@@ -338,9 +325,9 @@ pub fn set_default_backend(backend: Option<String>) -> Result<(), StorageError> 
 }
 
 pub fn get_backend_cli_paths() -> Result<HashMap<String, String>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     if data.backend_cli_paths.contains_key("claudecli") && !data.backend_cli_paths.contains_key("claude") {
-        let _guard = get_storage_lock().lock();
         let mut data = load_data()?;
         ensure_claude_key_migrated(&mut data)?;
         return Ok(data.backend_cli_paths);
@@ -349,6 +336,7 @@ pub fn get_backend_cli_paths() -> Result<HashMap<String, String>, StorageError> 
 }
 
 pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageError> {
+    let _guard = get_storage_lock().lock();
     let data = load_data()?;
     let key = if backend == "claudecli" { "claude" } else { backend };
     if let Some(path) = data.backend_cli_paths.get(key) {
@@ -357,7 +345,6 @@ pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageErro
     if key == "claude" {
         if let Some(path) = data.backend_cli_paths.get("claudecli") {
             let path = path.clone();
-            let _guard = get_storage_lock().lock();
             let mut data = load_data()?;
             ensure_claude_key_migrated(&mut data)?;
             return Ok(Some(path));
@@ -401,8 +388,10 @@ fn load_data_from(path: &std::path::Path) -> Result<AppData, StorageError> {
     }
 
     let content = fs::read_to_string(path)?;
-    let data: AppData = serde_json::from_str(&content)?;
-    Ok(data)
+    match serde_json::from_str::<AppData>(&content) {
+        Ok(data) => Ok(data),
+        Err(_) => Ok(AppData::default()),
+    }
 }
 
 #[cfg(test)]
@@ -486,9 +475,12 @@ mod tests {
 
         let result = load_data_from(&data_path);
 
-        // Should return error, not default
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), StorageError::Json(_)));
+        // Should self-heal by falling back to defaults.
+        let data = result.unwrap();
+        assert_eq!(data.recent_folders.len(), 0);
+        assert!(!data.onboarding_completed);
+        assert!(data.cli_status_cache.is_none());
+        assert!(data.default_folder.is_none());
     }
 
     #[test]

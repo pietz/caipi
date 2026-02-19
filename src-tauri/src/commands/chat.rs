@@ -257,19 +257,6 @@ pub async fn respond_permission(
 }
 
 #[tauri::command]
-pub async fn get_session_messages(
-    session_id: String,
-    app: AppHandle,
-) -> Result<Vec<Message>, String> {
-    let sessions: tauri::State<'_, SessionStore> = app.state();
-
-    // Get the session Arc, releasing the lock immediately
-    let session = get_session_from_store(&sessions, &session_id).await?;
-
-    Ok(session.get_messages().await)
-}
-
-#[tauri::command]
 pub async fn abort_session(session_id: String, app: AppHandle) -> Result<(), String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
 
@@ -345,7 +332,7 @@ pub async fn set_thinking_level(
 #[cfg(test)]
 mod tests {
     use super::{
-        get_session_from_store, remove_session_from_store, BackendSession, Message, SessionStore,
+        get_session_from_store, remove_session_from_store, BackendSession, SessionStore,
     };
     use crate::backends::{BackendError, BackendKind};
     use async_trait::async_trait;
@@ -409,10 +396,6 @@ mod tests {
 
         async fn set_thinking_level(&self, _level: String) -> Result<(), BackendError> {
             Ok(())
-        }
-
-        async fn get_messages(&self) -> Vec<Message> {
-            vec![]
         }
     }
 

@@ -7,6 +7,8 @@
   import { chat } from '$lib/stores/chat.svelte';
   import { resetEventState } from '$lib/utils/events';
   import type { Backend } from '$lib/config/backends';
+  import { SvelteSet } from 'svelte/reactivity';
+  import { onMount } from 'svelte';
 
   interface Props {
     showClose?: boolean;
@@ -15,7 +17,7 @@
   let { showClose = false }: Props = $props();
 
   let projects = $state<ProjectSessions[]>([]);
-  let expandedFolders = $state<Set<string>>(new Set());
+  let expandedFolders = $state(new SvelteSet<string>());
   let loading = $state(true);
   let validating = $state(false);
   let error = $state<string | null>(null);
@@ -25,7 +27,7 @@
       loading = true;
       // Backend handles: filtering non-existent folders, sorting, limiting to 50
       projects = await api.getRecentSessions(50, app.defaultBackend);
-      expandedFolders = new Set();
+      expandedFolders = new SvelteSet();
     } catch (e) {
       console.error('Failed to load sessions:', e);
       error = 'Failed to load sessions';
@@ -35,7 +37,7 @@
   }
 
   function toggleFolder(folderPath: string) {
-    const newSet = new Set(expandedFolders);
+    const newSet = new SvelteSet(expandedFolders);
     if (newSet.has(folderPath)) {
       newSet.delete(folderPath);
     } else {
@@ -155,7 +157,7 @@
   }
 
   // Load sessions on mount
-  $effect(() => {
+  onMount(() => {
     loadSessions();
   });
 </script>

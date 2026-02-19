@@ -657,7 +657,7 @@ impl ControlResponse {
             response_type: "control_response".to_string(),
             request_id,
             hook_specific_output: Some(HookSpecificOutput::PreToolUse(PreToolUseOutput {
-                permission_decision: Some(PermissionDecision::Allow),
+                permission_decision: Some(CliPermissionDecision::Allow),
                 permission_decision_reason: Some(reason.to_string()),
                 updated_input: None,
             })),
@@ -672,7 +672,7 @@ impl ControlResponse {
             response_type: "control_response".to_string(),
             request_id,
             hook_specific_output: Some(HookSpecificOutput::PreToolUse(PreToolUseOutput {
-                permission_decision: Some(PermissionDecision::Deny),
+                permission_decision: Some(CliPermissionDecision::Deny),
                 permission_decision_reason: Some(reason.to_string()),
                 updated_input: None,
             })),
@@ -697,7 +697,7 @@ pub enum HookSpecificOutput {
 pub struct PreToolUseOutput {
     /// Permission decision: allow or deny
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_decision: Option<PermissionDecision>,
+    pub permission_decision: Option<CliPermissionDecision>,
 
     /// Reason for the permission decision
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -716,10 +716,10 @@ pub struct PostToolUseOutput {
     pub updated_result: Option<Value>,
 }
 
-/// Permission decision for tool use.
+/// Permission decision for tool use (serialized over the CLI protocol).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PermissionDecision {
+pub enum CliPermissionDecision {
     /// Allow the tool to execute
     Allow,
     /// Deny the tool execution
@@ -990,11 +990,11 @@ mod tests {
     #[test]
     fn test_permission_decision_serialization() {
         assert_eq!(
-            serde_json::to_string(&PermissionDecision::Allow).unwrap(),
+            serde_json::to_string(&CliPermissionDecision::Allow).unwrap(),
             r#""allow""#
         );
         assert_eq!(
-            serde_json::to_string(&PermissionDecision::Deny).unwrap(),
+            serde_json::to_string(&CliPermissionDecision::Deny).unwrap(),
             r#""deny""#
         );
     }

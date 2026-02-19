@@ -1,5 +1,6 @@
 mod backends;
 pub mod claude;
+mod codex_tools;
 mod commands;
 mod storage;
 
@@ -9,6 +10,7 @@ use backends::PermissionChannels;
 use backends::{BackendKind, BackendRegistry, BackendSession};
 use commands::chat::SessionStore;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -38,6 +40,7 @@ pub fn run() {
     }
 
     let registry = Arc::new(registry);
+    let close_in_progress = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -49,47 +52,53 @@ pub fn run() {
         .manage(session_store)
         .manage(permission_channels)
         .manage(registry)
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let app_handle = window.app_handle().clone();
+        .on_window_event({
+            let close_in_progress = close_in_progress.clone();
+            move |window, event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
 
-                // Spawn cleanup task - we can't block here, but we give it a moment
-                tauri::async_runtime::spawn(async move {
-                    let sessions: tauri::State<'_, SessionStore> = app_handle.state();
-
-                    // Drain sessions from store while holding lock briefly
-                    let sessions_to_cleanup: Vec<(String, Arc<dyn BackendSession>)> = {
-                        let mut store = sessions.lock().await;
-                        store.drain().collect()
-                    };
-                    // Lock is now dropped
-
-                    // Cleanup all sessions without holding the lock
-                    for (id, session) in sessions_to_cleanup {
-                        eprintln!("[cleanup] Cleaning up session: {}", id);
-                        session.cleanup().await;
+                    // Cleanup already in progress – just keep blocking.
+                    if close_in_progress.swap(true, Ordering::SeqCst) {
+                        return;
                     }
 
-                    eprintln!("[cleanup] All sessions cleaned up");
-                });
+                    let window_to_close = window.clone();
+                    let app_handle = window.app_handle().clone();
+
+                    tauri::async_runtime::spawn(async move {
+                        let sessions: tauri::State<'_, SessionStore> = app_handle.state();
+
+                        // Drain sessions from store while holding lock briefly.
+                        let sessions_to_cleanup: Vec<(String, Arc<dyn BackendSession>)> = {
+                            let mut store = sessions.lock().await;
+                            store.drain().collect()
+                        };
+
+                        // Cleanup all sessions without holding the store lock.
+                        for (id, session) in sessions_to_cleanup {
+                            eprintln!("[cleanup] Cleaning up session: {}", id);
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_secs(3),
+                                session.cleanup(),
+                            )
+                            .await;
+                        }
+
+                        eprintln!("[cleanup] All sessions cleaned up");
+
+                        // Trigger close again; this time the event is allowed.
+                        let _ = window_to_close.close();
+                    });
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
             // Setup commands
-            commands::check_cli_status,
-            commands::check_cli_installed,
-            commands::check_cli_authenticated,
-            commands::check_backend_cli_installed,
-            commands::check_backend_cli_authenticated,
             commands::check_all_backends_status,
             commands::get_startup_info,
             commands::complete_onboarding,
-            commands::reset_onboarding,
-            commands::set_default_folder,
-            commands::get_default_backend,
             commands::set_default_backend,
-            commands::get_cli_path,
-            commands::set_cli_path,
             commands::get_backend_cli_path,
             commands::set_backend_cli_path,
             // Folder commands
@@ -108,7 +117,6 @@ pub fn run() {
             commands::destroy_session,
             commands::send_message,
             commands::respond_permission,
-            commands::get_session_messages,
             commands::abort_session,
             commands::set_permission_mode,
             commands::set_model,

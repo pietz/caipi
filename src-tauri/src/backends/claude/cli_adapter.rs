@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
@@ -149,6 +150,12 @@ pub struct CliSession {
     permission_channels: PermissionChannels,
     /// CLI session ID (captured from init event, used for --resume)
     cli_session_id: Arc<RwLock<Option<String>>>,
+    /// Background stderr drain task for the active process.
+    stderr_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Background stdout reader task for the active process.
+    stdout_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Background process lifecycle monitor task for the active process.
+    lifecycle_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl CliSession {
@@ -234,6 +241,8 @@ impl CliSession {
     }
 
     async fn cleanup_process(&self) {
+        self.abort_background_tasks().await;
+
         // Kill process if running
         let mut process_guard = self.process.lock().await;
         if let Some(ref mut child) = *process_guard {
@@ -242,6 +251,23 @@ impl CliSession {
         *process_guard = None;
         *self.stdin_writer.lock().await = None;
         *self.process_model.write().await = None;
+    }
+
+    async fn abort_task_slot(slot: &Arc<Mutex<Option<JoinHandle<()>>>>) {
+        let handle = {
+            let mut guard = slot.lock().await;
+            guard.take()
+        };
+        if let Some(handle) = handle {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    async fn abort_background_tasks(&self) {
+        Self::abort_task_slot(&self.stderr_task).await;
+        Self::abort_task_slot(&self.stdout_task).await;
+        Self::abort_task_slot(&self.lifecycle_task).await;
     }
 
     /// Create a new CLI session.
@@ -282,6 +308,9 @@ impl CliSession {
             messages: Arc::new(RwLock::new(initial_messages)),
             permission_channels,
             cli_session_id: Arc::new(RwLock::new(None)),
+            stderr_task: Arc::new(Mutex::new(None)),
+            stdout_task: Arc::new(Mutex::new(None)),
+            lifecycle_task: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -297,6 +326,9 @@ impl CliSession {
         message: &str,
         use_resume: bool,
     ) -> Result<(), BackendError> {
+        // Defensive: clear stale task handles before spawning another process.
+        self.abort_background_tasks().await;
+
         let cli_cmd = self.cli_path.as_deref().unwrap_or("claude");
         let model = self.model.read().await.clone();
         let permission_mode = self.permission_mode.read().await.clone();
@@ -366,7 +398,7 @@ impl CliSession {
         })?;
 
         // Spawn a task to drain stderr (prevents deadlock on large output)
-        tokio::spawn(async move {
+        let stderr_handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
             use tokio::io::AsyncBufReadExt;
@@ -381,6 +413,7 @@ impl CliSession {
                 line.clear();
             }
         });
+        *self.stderr_task.lock().await = Some(stderr_handle);
 
         let spawned_pid = child.id();
 
@@ -411,7 +444,7 @@ impl CliSession {
         let cli_session_id = self.cli_session_id.clone();
         let process = self.process.clone();
 
-        tokio::spawn(async move {
+        let stdout_handle = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
 
@@ -472,6 +505,7 @@ impl CliSession {
                 }
             }
         });
+        *self.stdout_task.lock().await = Some(stdout_handle);
 
         // Separate lifecycle monitor to detect dead processes and clear stale handles.
         let app_handle = self.app_handle.clone();
@@ -479,7 +513,7 @@ impl CliSession {
         let stdin_writer = self.stdin_writer.clone();
         let in_flight = self.in_flight.clone();
         let current_turn_id = self.current_turn_id.clone();
-        tokio::spawn(async move {
+        let lifecycle_handle = tokio::spawn(async move {
             if let Some(message) =
                 Self::monitor_process_lifecycle(
                     process,
@@ -501,6 +535,7 @@ impl CliSession {
                 );
             }
         });
+        *self.lifecycle_task.lock().await = Some(lifecycle_handle);
 
         Ok(())
     }
@@ -581,27 +616,42 @@ impl CliSession {
     async fn send_control_response(
         stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
         response: OutgoingControlResponse,
-    ) -> Result<(), String> {
+    ) -> Result<(), BackendError> {
         let mut stdin_guard = stdin_writer.lock().await;
         if let Some(ref mut stdin) = *stdin_guard {
             let json_line = serde_json::to_string(&response)
-                .map_err(|e| format!("Failed to serialize control response: {}", e))?;
+                .map_err(|e| BackendError {
+                    message: format!("Failed to serialize control response: {}", e),
+                    recoverable: false,
+                })?;
 
             stdin
                 .write_all(json_line.as_bytes())
                 .await
-                .map_err(|e| format!("Failed to write control response: {}", e))?;
+                .map_err(|e| BackendError {
+                    message: format!("Failed to write control response: {}", e),
+                    recoverable: false,
+                })?;
             stdin
                 .write_all(b"\n")
                 .await
-                .map_err(|e| format!("Failed to write newline: {}", e))?;
+                .map_err(|e| BackendError {
+                    message: format!("Failed to write newline: {}", e),
+                    recoverable: false,
+                })?;
             stdin
                 .flush()
                 .await
-                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
+                .map_err(|e| BackendError {
+                    message: format!("Failed to flush stdin: {}", e),
+                    recoverable: false,
+                })?;
             Ok(())
         } else {
-            Err("CLI stdin not available".to_string())
+            Err(BackendError {
+                message: "CLI stdin not available".to_string(),
+                recoverable: false,
+            })
         }
     }
 
@@ -1162,15 +1212,8 @@ impl BackendSession for CliSession {
         // Give CLI a moment to respond gracefully
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Kill the CLI process if still running
-        let mut process_guard = self.process.lock().await;
-        if let Some(ref mut child) = *process_guard {
-            let _ = child.kill().await;
-        }
-        *process_guard = None;
-
-        // Clear stdin writer
-        *self.stdin_writer.lock().await = None;
+        // Stop background tasks and process resources.
+        self.cleanup_process().await;
 
         self.in_flight.store(false, Ordering::SeqCst);
         *self.current_turn_id.write().await = None;
@@ -1219,10 +1262,6 @@ impl BackendSession for CliSession {
                 .to_string(),
             recoverable: true,
         })
-    }
-
-    async fn get_messages(&self) -> Vec<Message> {
-        self.messages.read().await.clone()
     }
 }
 

@@ -444,11 +444,6 @@ pub async fn check_cli_installed_internal() -> CliInstallStatus {
     check_backend_cli_installed_internal("claude").await
 }
 
-#[tauri::command]
-pub async fn check_cli_installed() -> Result<CliInstallStatus, String> {
-    Ok(check_cli_installed_internal().await)
-}
-
 /// Check if OAuth token exists in Claude Desktop's config
 fn check_oauth_token(home_dir: &Path) -> bool {
     let config_path = get_oauth_config_path(home_dir);
@@ -575,34 +570,6 @@ pub async fn check_backend_cli_authenticated_internal(backend: &str) -> CliAuthS
     check_cli_authenticated_internal().await
 }
 
-#[tauri::command]
-pub async fn check_cli_authenticated() -> Result<CliAuthStatus, String> {
-    Ok(check_cli_authenticated_internal().await)
-}
-
-#[tauri::command]
-pub async fn check_cli_status() -> Result<CliStatus, String> {
-    let install_status = check_cli_installed().await?;
-
-    if !install_status.installed {
-        return Ok(CliStatus {
-            installed: false,
-            version: None,
-            authenticated: false,
-            path: None,
-        });
-    }
-
-    let auth_status = check_cli_authenticated().await?;
-
-    Ok(CliStatus {
-        installed: install_status.installed,
-        version: install_status.version,
-        authenticated: auth_status.authenticated,
-        path: install_status.path,
-    })
-}
-
 async fn check_backend_cli_status_internal(backend: &str) -> CliStatus {
     let install = check_backend_cli_installed_internal(backend).await;
     if !install.installed {
@@ -621,16 +588,6 @@ async fn check_backend_cli_status_internal(backend: &str) -> CliStatus {
         authenticated: auth.authenticated,
         path: install.path,
     }
-}
-
-#[tauri::command]
-pub async fn check_backend_cli_installed(backend: String) -> Result<CliInstallStatus, String> {
-    Ok(check_backend_cli_installed_internal(&backend).await)
-}
-
-#[tauri::command]
-pub async fn check_backend_cli_authenticated(backend: String) -> Result<CliAuthStatus, String> {
-    Ok(check_backend_cli_authenticated_internal(&backend).await)
 }
 
 #[tauri::command]
@@ -753,43 +710,9 @@ pub async fn complete_onboarding(
 }
 
 #[tauri::command]
-pub async fn get_default_backend() -> Result<Option<String>, String> {
-    let backend = storage::get_default_backend().map_err(|e| e.to_string())?;
-    Ok(backend.and_then(|name| {
-        name.parse::<BackendKind>()
-            .ok()
-            .map(|kind| kind.to_string())
-    }))
-}
-
-#[tauri::command]
 pub async fn set_default_backend(backend: Option<String>) -> Result<(), String> {
     let backend = validate_backend_option(backend)?;
     storage::set_default_backend(backend).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn set_default_folder(path: Option<String>) -> Result<(), String> {
-    storage::set_default_folder(path).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn reset_onboarding() -> Result<(), String> {
-    storage::set_onboarding_completed(false).map_err(|e| e.to_string())?;
-    storage::clear_cli_status_cache().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn get_cli_path() -> Result<Option<String>, String> {
-    storage::get_cli_path().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn set_cli_path(path: Option<String>) -> Result<(), String> {
-    storage::set_cli_path(path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

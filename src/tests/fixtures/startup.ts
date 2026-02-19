@@ -11,6 +11,7 @@ export const defaultStartupInfo: StartupInfo = {
   onboardingCompleted: false,
   cliStatusFresh: true,
   defaultBackend: 'claude',
+  backendCliPaths: {},
 };
 
 export function makeStartupInfo(overrides: Partial<StartupInfo> = {}): StartupInfo {

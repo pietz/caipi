@@ -1,4 +1,5 @@
 // Chat state store using Svelte 5 runes
+import { SvelteMap } from 'svelte/reactivity';
 
 export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted' | 'history';
 
@@ -58,7 +59,7 @@ class ChatState {
   private streamItemCounter = $state(0);
 
   // Tools (keyed by tool_use_id)
-  tools = $state<Map<string, ToolState>>(new Map());
+  tools = $state(new SvelteMap<string, ToolState>());
 
   // UI state: tool stack expanded/collapsed by stable stack key.
   // We key stacks by the first tool id in the group so this survives the stream -> finalized remount.
@@ -108,7 +109,7 @@ class ChatState {
       // Ending stream - clear streaming state
       this.streamItems = [];
       this.streamItemCounter = 0;
-      this.tools = new Map();
+      this.tools = new SvelteMap();
       this.activeTurnId = null;
     }
   }
@@ -149,7 +150,7 @@ class ChatState {
     };
 
     // Add to tools map
-    const newTools = new Map(this.tools);
+    const newTools = new SvelteMap(this.tools);
     newTools.set(tool.id, toolState);
     this.tools = newTools;
 
@@ -170,7 +171,7 @@ class ChatState {
       return;
     }
 
-    const newTools = new Map(this.tools);
+    const newTools = new SvelteMap(this.tools);
     const updatedTool = { ...tool, status };
 
     // Handle permissionRequestId: set if provided, clear if explicitly null, keep if undefined
@@ -206,7 +207,7 @@ class ChatState {
 
   clearPendingPermissions() {
     // Update all awaiting_permission tools to denied
-    const newTools = new Map(this.tools);
+    const newTools = new SvelteMap(this.tools);
     for (const [id, tool] of newTools) {
       if (tool.status === 'awaiting_permission') {
         newTools.set(id, { ...tool, status: 'denied', permissionRequestId: undefined });
@@ -265,7 +266,7 @@ class ChatState {
     this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
-    this.tools = new Map();
+    this.tools = new SvelteMap();
   }
 
   // --- Queue methods ---
@@ -316,7 +317,7 @@ class ChatState {
     this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
-    this.tools = new Map();
+    this.tools = new SvelteMap();
     this.toolStackExpanded = {};
     this.messageQueue = [];
     this.todos = [];
