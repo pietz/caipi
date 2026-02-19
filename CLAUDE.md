@@ -35,23 +35,28 @@ gh workflow run Build -f platform=both     # Both platforms
 - Builds unsigned artifacts, never publishes
 - Use for: testing builds before release
 
-**Release** (automatic)
+**Release** (CI builds Windows only)
 - Triggers: push to main with version change in package.json
-- Builds macOS (signed + notarized) + Windows
-- Publishes to `pietz/caipi.ai` repo
+- Builds Windows only (macOS is built locally to save CI costs)
+- Does NOT publish — the local `scripts/release.sh` handles publishing
 
 ## Release Process
 
-When asked to release a new version, update the version in these 3 files:
-- `package.json`
-- `src-tauri/tauri.conf.json`
-- `src-tauri/Cargo.toml`
+When asked to release a new version:
 
-Commit and push. GitHub Actions will automatically detect the version change and build/publish the release.
+1. Update the version in these 3 files:
+   - `package.json`
+   - `src-tauri/tauri.conf.json`
+   - `src-tauri/Cargo.toml`
+2. Commit and push to main (triggers Windows CI build)
+3. Run `./scripts/release.sh` — this builds macOS locally (signed + notarized), waits for Windows CI to finish, and publishes the release with all artifacts
+
+**Required env vars** for the release script (set in shell or `.env` file):
+`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 **After release**, update the release notes:
 ```bash
-gh release edit v0.1.XX --repo pietz/caipi.ai --notes "## What's New
+gh release edit v0.X.X --repo pietz/caipi.ai --notes "## What's New
 
 - Change 1
 - Change 2"

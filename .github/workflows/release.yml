@@ -6,12 +6,6 @@ on:
     paths:
       - "package.json"
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: "Skip tests"
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   check:
@@ -56,20 +50,10 @@ jobs:
             echo "should_release=true" >> $GITHUB_OUTPUT
           fi
 
-  build:
+  build-windows:
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-14
-            target: aarch64-apple-darwin
-            os: macos
-          - platform: windows-2022
-            target: x86_64-pc-windows-msvc
-            os: windows
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +67,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -96,42 +80,8 @@ jobs:
       - name: Sync SvelteKit
         run: npx svelte-kit sync
 
-      - name: Run tests
-        if: inputs.skip_tests != true
-        run: npm run test:all
-
-      - name: Import Apple certificate
-        if: matrix.os == 'macos'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo "$APPLE_CERTIFICATE" | base64 --decode > $CERTIFICATE_PATH
-          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-      - name: Build Tauri app (macOS - signed + notarized)
-        if: matrix.os == 'macos'
-        run: npm run tauri build -- --target ${{ matrix.target }}
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
       - name: Build Tauri app (Windows)
-        if: matrix.os == 'windows'
-        run: npm run tauri build -- --target ${{ matrix.target }}
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -139,91 +89,14 @@ jobs:
       - name: Rename artifacts
         run: node scripts/release-rename.js
         env:
-          BUILD_TARGET: ${{ matrix.target }}
-
-      - name: Upload macOS artifacts
-        if: matrix.os == 'macos'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts-macos
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/caipi_aarch64.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/caipi.app.tar.gz
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/caipi.app.tar.gz.sig
-          retention-days: 30
-          if-no-files-found: error
+          BUILD_TARGET: x86_64-pc-windows-msvc
 
       - name: Upload Windows artifacts
-        if: matrix.os == 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: release-artifacts-windows
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/caipi_x64.exe
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/caipi_x64.exe.sig
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/caipi_x64.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/caipi_x64.exe.sig
           retention-days: 30
           if-no-files-found: error
-
-      - name: Cleanup keychain
-        if: always() && matrix.os == 'macos'
-        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
-
-  publish:
-    needs: [check, build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-artifacts-macos
-          path: artifacts-macos
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-artifacts-windows
-          path: artifacts-windows
-
-      - name: Generate latest.json
-        run: |
-          VERSION="${{ needs.check.outputs.version }}"
-          MAC_SIG=$(cat artifacts-macos/macos/caipi.app.tar.gz.sig)
-          WIN_SIG=$(cat artifacts-windows/caipi_x64.exe.sig)
-          cat > latest.json << EOF
-          {
-            "version": "$VERSION",
-            "notes": "",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "$MAC_SIG",
-                "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi.app.tar.gz"
-              },
-              "windows-x86_64": {
-                "signature": "$WIN_SIG",
-                "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi_x64.exe"
-              }
-            }
-          }
-          EOF
-          jq -e '.platforms["darwin-aarch64"].signature and .platforms["windows-x86_64"].signature' latest.json >/dev/null
-          cat latest.json
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.CAIPI_AI_PAT }}
-        run: |
-          VERSION="${{ needs.check.outputs.version }}"
-
-          gh release create "v$VERSION" \
-            artifacts-macos/dmg/caipi_aarch64.dmg \
-            artifacts-macos/macos/caipi.app.tar.gz \
-            artifacts-macos/macos/caipi.app.tar.gz.sig \
-            latest.json \
-            artifacts-windows/caipi_x64.exe \
-            artifacts-windows/caipi_x64.exe.sig \
-            --repo pietz/caipi.ai \
-            --title "v$VERSION" \
-            --notes "Release v$VERSION"
-
-          echo "Release created: https://github.com/pietz/caipi.ai/releases/tag/v$VERSION"
