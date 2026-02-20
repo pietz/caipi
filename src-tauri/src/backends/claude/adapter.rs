@@ -191,7 +191,7 @@ impl CliSession {
                 Ok(None) => {}
                 Err(err) => {
                     // If process state can't be checked, clear handles so we can recover cleanly.
-                    eprintln!("[cli_adapter] Failed to poll process status: {}", err);
+                    log::error!("Failed to poll Claude process status: {}", err);
                     *process_guard = None;
                     *stdin_writer.lock().await = None;
 
@@ -215,7 +215,7 @@ impl CliSession {
         *stdin_writer.lock().await = None;
 
         let status_str = Self::format_exit_status(&status);
-        eprintln!("[cli_adapter] Claude CLI process exited ({})", status_str);
+        log::warn!("Claude CLI process exited ({})", status_str);
 
         // Skip error UI for intentional abort path.
         if !abort_flag.load(Ordering::SeqCst) {
@@ -388,6 +388,8 @@ impl CliSession {
         *self.stdin_writer.lock().await = Some(stdin);
         *self.process.lock().await = Some(child);
 
+        log::info!("Claude CLI spawned: pid={:?}, model={}, mode={}", spawned_pid, model, permission_mode);
+
         // Send initialize request with hooks before user message
         if let Err(e) = self.send_initialize().await {
             self.cleanup_process().await;
@@ -429,7 +431,7 @@ impl CliSession {
                     Ok(Some(line)) => line,
                     Ok(None) => break, // EOF
                     Err(err) => {
-                        eprintln!("[cli_adapter] Error reading CLI stdout: {}", err);
+                        log::error!("Error reading Claude CLI stdout: {}", err);
                         break;
                     }
                 };
@@ -470,10 +472,7 @@ impl CliSession {
                     }
                     Err(e) => {
                         // Log parse errors but continue
-                        eprintln!(
-                            "[cli_adapter] Failed to parse event: {} - line: {}",
-                            e, line
-                        );
+                        log::warn!("Failed to parse Claude CLI event: {} - line: {}", e, line);
                     }
                 }
             }
@@ -630,6 +629,8 @@ impl BackendSession for CliSession {
         let current_model = self.model.read().await.clone();
         let process_model = self.process_model.read().await.clone();
         let model_changed = has_process && process_model.as_ref() != Some(&current_model);
+
+        log::debug!("Message routing: has_process={}, model_changed={}, has_cli_session={}", has_process, model_changed, self.cli_session_id.read().await.is_some());
 
         let result = if model_changed {
             // Model changed - kill old process and respawn with --resume to preserve conversation

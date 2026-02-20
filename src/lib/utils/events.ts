@@ -2,6 +2,7 @@
 import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
+import { debug, error as logError, info } from '$lib/utils/logger';
 
 const VALID_TOOL_STATUSES: ToolStatus[] = ['pending', 'awaiting_permission', 'running', 'completed', 'error', 'denied', 'aborted', 'history'];
 const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
@@ -58,6 +59,8 @@ export function handleChatEvent(event: ChatEvent, options: EventHandlerOptions =
   if (shouldIgnoreEvent(event)) {
     return;
   }
+
+  debug(`Event: type=${event.type} turn=${event.turnId ?? 'none'}`);
 
   switch (event.type) {
     case 'Text':
@@ -170,6 +173,7 @@ function handleToolStartEvent(event: Extract<ChatEvent, { type: 'ToolStart' }>) 
     lineBuffer = '';
   }
 
+  debug(`Tool START: id=${event.toolUseId} type=${event.toolType} target=${event.target}`);
   chat.addTool({
     id: event.toolUseId,
     toolType: event.toolType,
@@ -217,7 +221,7 @@ function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
           chat.setTodos(todos);
         }
       } catch (err) {
-        console.error('[TodoWrite] Error processing input:', err);
+        logError(`[TodoWrite] Error processing input: ${err}`);
       }
     }
 
@@ -239,7 +243,7 @@ function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
           chat.setTodos(todos);
         }
       } catch (err) {
-        console.error('[update_plan] Error processing input:', err);
+        logError(`[update_plan] Error processing input: ${err}`);
       }
     }
 
@@ -286,6 +290,7 @@ function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingSta
 }
 
 function handleCompleteEvent(onComplete?: () => void) {
+  info('Turn complete');
   // Flush any remaining buffered text
   if (lineBuffer) {
     chat.appendText(lineBuffer);
@@ -342,7 +347,7 @@ export async function respondToPermission(
   allowed: boolean
 ): Promise<void> {
   if (!tool.permissionRequestId) {
-    console.error('No permission request ID for tool:', tool.id);
+    logError(`No permission request ID for tool: ${tool.id}`);
     return;
   }
 
@@ -350,7 +355,7 @@ export async function respondToPermission(
     await api.respondPermission(sessionId, tool.permissionRequestId, allowed);
     // Status will be updated via ToolStatusUpdate event from backend
   } catch (e) {
-    console.error('Failed to respond to permission:', e);
+    logError(`Failed to respond to permission: ${e}`);
   }
 }
 

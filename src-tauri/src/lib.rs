@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::Manager;
+use tauri_plugin_log::{Target, TargetKind};
 use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,6 +42,17 @@ pub fn run() {
     let close_in_progress = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Debug)
+                .max_file_size(10_000_000)
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -75,7 +87,7 @@ pub fn run() {
 
                         // Cleanup all sessions without holding the store lock.
                         for (id, session) in sessions_to_cleanup {
-                            eprintln!("[cleanup] Cleaning up session: {}", id);
+                            log::info!("Cleaning up session: {}", id);
                             let _ = tokio::time::timeout(
                                 std::time::Duration::from_secs(3),
                                 session.cleanup(),
@@ -83,7 +95,7 @@ pub fn run() {
                             .await;
                         }
 
-                        eprintln!("[cleanup] All sessions cleaned up");
+                        log::info!("All sessions cleaned up");
 
                         // Trigger close again; this time the event is allowed.
                         let _ = window_to_close.close();

@@ -15,6 +15,7 @@
   import { app } from '$lib/stores/app.svelte';
   import { chat, type StreamItem, type ToolState } from '$lib/stores/chat.svelte';
   import { handleChatEvent, respondToPermission, resetEventState, setOnContentChange, type ChatEvent } from '$lib/utils/events';
+  import { debug, error as logError } from '$lib/utils/logger';
 
   // Types for grouped stream items
   type GroupedTextItem = { type: 'text'; content: string };
@@ -30,6 +31,7 @@
     setOnContentChange(scrollToBottom);
 
     // Listen for backend-neutral chat events
+    debug('Chat event listener registered');
     unlisten = await listen<ChatEvent>('chat:event', (event) => {
       handleChatEvent(event.payload, { onComplete: processQueuedMessages });
       scrollToBottom();
@@ -100,7 +102,7 @@
     try {
       await api.sendMessage(app.sessionId, message, turnId);
     } catch (e) {
-      console.error('Failed to send message:', e);
+      logError(`Failed to send message: session=${app.sessionId} error=${e}`);
       chat.finalize();
       chat.setActiveTurnId(null);
     }
@@ -129,7 +131,7 @@
     try {
       await api.sendMessage(app.sessionId, nextMessage, turnId);
     } catch (e) {
-      console.error('Failed to send queued message:', e);
+      logError(`Failed to send queued message: session=${app.sessionId} error=${e}`);
       chat.finalize();
       chat.setActiveTurnId(null);
     }
@@ -169,7 +171,7 @@
     try {
       await api.abortSession(app.sessionId);
     } catch (e) {
-      console.error('Failed to abort session:', e);
+      logError(`Failed to abort session: session=${app.sessionId} error=${e}`);
       chat.finalize();
       chat.setStreaming(false);
     }

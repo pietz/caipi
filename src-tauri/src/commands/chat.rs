@@ -174,7 +174,7 @@ pub async fn create_session(
 
     // Create session config
     let config = SessionConfig {
-        folder_path,
+        folder_path: folder_path.clone(),
         permission_mode,
         model,
         resume_session_id,
@@ -192,6 +192,8 @@ pub async fn create_session(
     let mut store = sessions.lock().await;
     store.insert(session_id.clone(), session);
 
+    log::info!("Session created: id={}, backend={}, folder={}", session_id, backend_name, folder_path);
+
     Ok(session_id)
 }
 
@@ -204,6 +206,7 @@ pub async fn destroy_session(session_id: String, app: AppHandle) -> Result<(), S
 
     // Clean up the session if it existed
     if let Some(session) = session {
+        log::info!("Destroying session: {}", session_id);
         session.cleanup().await;
     }
 
@@ -222,6 +225,8 @@ pub async fn send_message(
     // Get the session Arc, releasing the lock immediately
     let session = get_session_from_store(&sessions, &session_id).await?;
     // Lock is now released!
+
+    log::debug!("Sending message: session={}, len={}, turn={:?}", session_id, message.len(), turn_id);
 
     // Send message via the backend session
     match session.send_message(&message, turn_id.as_deref()).await {
@@ -258,6 +263,7 @@ pub async fn respond_permission(
     };
 
     if let Some(tx) = sender {
+        log::debug!("Permission response: request={}, allowed={}", request_id, allowed);
         let _ = tx.send(PermissionResponse { allowed });
         Ok(())
     } else {
@@ -275,6 +281,7 @@ pub async fn abort_session(session_id: String, app: AppHandle) -> Result<(), Str
     // Get the session Arc, releasing the lock immediately
     let session = get_session_from_store(&sessions, &session_id).await?;
 
+    log::info!("Aborting session: {}", session_id);
     session.abort().await.map_err(|e| e.to_string())
 }
 

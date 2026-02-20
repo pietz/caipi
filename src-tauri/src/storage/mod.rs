@@ -122,10 +122,7 @@ fn load_data() -> Result<AppData, StorageError> {
     match serde_json::from_str::<AppData>(&content) {
         Ok(data) => Ok(data),
         Err(err) => {
-            eprintln!(
-                "[storage] Failed to parse data.json ({}); falling back to defaults",
-                err
-            );
+            log::warn!("Failed to parse data.json ({}); falling back to defaults", err);
             Ok(AppData::default())
         }
     }

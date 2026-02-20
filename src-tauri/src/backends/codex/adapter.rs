@@ -249,9 +249,12 @@ impl CodexSession {
             return Err(e);
         }
 
-        let value = rx.await.map_err(|_| BackendError {
-            message: format!("No response received for {method} (id={id})"),
-            recoverable: false,
+        let value = rx.await.map_err(|_| {
+            log::error!("RPC timeout: method={}, id={}", method, id);
+            BackendError {
+                message: format!("No response received for {method} (id={id})"),
+                recoverable: false,
+            }
         })?;
 
         // The response router wraps server errors as { "error": ... }.
@@ -358,6 +361,8 @@ impl CodexSession {
         *self.process.lock().await = Some(child);
         *self.stdin_writer.lock().await = Some(stdin);
 
+        log::info!("Codex app-server spawned: folder={}", self.folder_path);
+
         // Spawn stdout reader task
         let stdout_handle = self.spawn_stdout_reader(stdout);
         *self.stdout_task.lock().await = Some(stdout_handle);
@@ -449,6 +454,7 @@ impl CodexSession {
         // Send initialized notification
         self.send_notification("initialized", json!({})).await?;
         self.initialized.store(true, Ordering::SeqCst);
+        log::info!("Codex handshake complete, session initialized");
 
         Ok(())
     }
@@ -556,7 +562,7 @@ impl CodexSession {
                 let parsed: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(e) => {
-                        eprintln!("[codex stdout] JSON parse error: {e}");
+                        log::warn!("Codex JSON parse error: {e}");
                         continue;
                     }
                 };

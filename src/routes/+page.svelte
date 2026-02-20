@@ -8,10 +8,13 @@
   import ChatContainer from '$lib/components/chat/ChatContainer.svelte';
   import { LicenseEntry } from '$lib/components/license';
   import { app } from '$lib/stores/app.svelte';
+  import { initLogger, info, error as logError } from '$lib/utils/logger';
 
   let unlistenLicenseInvalid: UnlistenFn | null = null;
 
   onMount(async () => {
+    await initLogger();
+
     // Listen for license:invalid event from background revalidation
     // If license is revoked on Lemon Squeezy, user will be kicked to license screen
     unlistenLicenseInvalid = await listen('license:invalid', () => {
@@ -84,10 +87,11 @@
           // Start session directly
           try {
             await app.startSession(startupInfo.defaultFolder);
+            info(`Boot complete: auto-started session, screen=${app.screen}`);
             app.setLoading(false);
             return;
           } catch (e) {
-            console.error('Failed to start session:', e);
+            logError(`Failed to start session: ${e}`);
             // Fall through to folder picker so user can try again
             app.setScreen('folder');
             app.setLoading(false);
@@ -100,7 +104,7 @@
       app.setScreen('onboarding');
       app.setLoading(false);
     } catch (e) {
-      console.error('Failed to get startup info:', e);
+      logError(`Failed to get startup info: ${e}`);
       // Fallback to license check on error (most secure default)
       app.setScreen('license');
       app.setLoading(false);

@@ -1,5 +1,6 @@
 // Chat state store using Svelte 5 runes
 import { SvelteMap } from 'svelte/reactivity';
+import { debug } from '$lib/utils/logger';
 
 export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted' | 'history';
 
@@ -102,6 +103,7 @@ class ChatState {
   // --- Streaming methods ---
 
   setStreaming(streaming: boolean) {
+    debug(`Streaming: ${streaming}, items=${this.streamItems.length}, tools=${this.tools.size}`);
     this.isStreaming = streaming;
     if (streaming) {
       // Starting stream
@@ -218,6 +220,7 @@ class ChatState {
 
   // Finalize the current stream - convert streamItems to messages preserving order
   finalize() {
+    debug(`Finalize: ${this.streamItems.length} stream items, ${this.tools.size} tools → messages`);
     const newMessages = [...this.messages];
 
     let currentText = '';

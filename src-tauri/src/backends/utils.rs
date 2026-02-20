@@ -36,7 +36,7 @@ pub fn spawn_stderr_drain(
         let mut lines = tokio::io::BufReader::new(stderr).lines();
         while let Some(line) = lines.next_line().await.unwrap_or(None) {
             if !line.trim().is_empty() {
-                eprintln!("[{label} stderr] {}", line.trim());
+                log::debug!("[{label} stderr] {}", line.trim());
             }
         }
     })

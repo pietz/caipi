@@ -162,6 +162,7 @@ impl CliSession {
         if event.subtype == "init" {
             // Capture CLI session ID for message correlation
             if let Some(sid) = event.session_id {
+                log::info!("CLI session initialized: id={}", sid);
                 *cli_session_id.write().await = Some(sid);
             }
 
@@ -337,7 +338,7 @@ impl CliSession {
                     let response =
                         OutgoingControlResponse::ack_posttool(request.request_id.clone());
                     if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                        eprintln!("[cli_adapter] Failed to send PostToolUse ack: {}", e);
+                        log::error!("Failed to send PostToolUse ack: {}", e);
                     }
                 }
             }
@@ -399,7 +400,7 @@ impl CliSession {
                 "Session aborted",
             );
             if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                eprintln!("[cli_adapter] Failed to send abort response: {}", e);
+                log::error!("Failed to send abort response: {}", e);
             }
             return;
         }
@@ -407,6 +408,7 @@ impl CliSession {
         // Determine permission
         let current_mode = permission_mode.read().await.clone();
         let decision = determine_permission(&current_mode, &tool_name, &tool_input, user_settings);
+        log::debug!("Permission: tool={}, decision={:?}", tool_name, decision);
 
         match decision {
             PermissionDecision::Allow(reason) => {
@@ -421,7 +423,7 @@ impl CliSession {
                 let response =
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason);
                 if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send allow response: {}", e);
+                    log::error!("Failed to send allow response: {}", e);
                 }
             }
             PermissionDecision::Deny(reason) => {
@@ -437,7 +439,7 @@ impl CliSession {
                 let response =
                     OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason);
                 if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send deny response: {}", e);
+                    log::error!("Failed to send deny response: {}", e);
                 }
             }
             PermissionDecision::PromptUser => {
@@ -486,7 +488,7 @@ impl CliSession {
                     OutgoingControlResponse::deny_pretool(request.request_id.clone(), reason)
                 };
                 if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send permission response: {}", e);
+                    log::error!("Failed to send permission response: {}", e);
                 }
             }
         }
@@ -513,6 +515,7 @@ impl CliSession {
 
         in_flight.store(false, Ordering::SeqCst);
         *current_turn_id.write().await = None;
+        log::debug!("Turn completed: subtype={}", event.subtype);
 
         // Do not emit token usage from result totals here: result usage is
         // cumulative session accounting and does not match context usage semantics.

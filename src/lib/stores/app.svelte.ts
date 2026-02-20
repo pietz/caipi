@@ -3,6 +3,7 @@ import { api } from '$lib/api';
 import type { CliStatus } from '$lib/api/types';
 import { chat } from './chat.svelte';
 import { getBackendConfig, type Backend } from '$lib/config/backends';
+import { info } from '$lib/utils/logger';
 
 export type { CliStatus };
 export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
@@ -149,6 +150,7 @@ class AppState {
 
   // Methods
   setScreen(screen: Screen) {
+    info(`Screen: ${this.screen} → ${screen}`);
     this.screen = screen;
   }
 
@@ -332,6 +334,7 @@ class AppState {
       backend
     );
     this.sessionBackend = backend;
+    info(`Session started: folder=${folder} backend=${backend} model=${this.model} id=${this.sessionId}`);
     // Sync persisted thinking level to the new session
     if (this.thinkingOptions.length > 0 && this.thinkingLevel) {
       await api.setThinkingLevel(this.sessionId, this.thinkingLevel);
@@ -361,6 +364,7 @@ class AppState {
       backend
     );
     this.sessionBackend = backend;
+    info(`Session resumed: folder=${folderPath} id=${this.sessionId} backend=${backend}`);
 
     // Sync persisted thinking level to the resumed session
     if (this.thinkingOptions.length > 0 && this.thinkingLevel) {

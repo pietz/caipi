@@ -130,6 +130,7 @@ impl CodexSession {
                 }
 
                 // Emit completion
+                log::debug!("Codex turn completed, message stored");
                 let complete_event = ChatEvent::Complete;
                 emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
                 in_flight.store(false, Ordering::SeqCst);
@@ -190,7 +191,7 @@ impl CodexSession {
         session_id: &str,
         turn_id: Option<&str>,
         active_tools: &mut HashMap<String, String>,
-        assistant_parts: &mut Vec<String>,
+        _assistant_parts: &mut Vec<String>,
     ) {
         let item = params.get("item").unwrap_or(params);
         let item_kind = first_string(item, &[&["type"], &["kind"]])
@@ -217,18 +218,7 @@ impl CodexSession {
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &end);
         } else if kind_lower.contains("message") {
-            // Emit full text if we haven't received deltas (agent messages only)
-            if kind_lower.contains("agent") {
-                if let Some(text) = first_string(item, &[&["text"], &["content", "text"]]) {
-                    if !text.is_empty() {
-                        assistant_parts.push(text.to_string());
-                        let event = ChatEvent::Text {
-                            content: text.to_string(),
-                        };
-                        emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-                    }
-                }
-            }
+            // Text already emitted via item/agentMessage/delta — nothing to do here
         } else if (item_kind == "webSearch" || item_kind == "web_search_call") && !active_tools.contains_key(&item_id) {
             let target = first_string(item, &[&["action", "query"], &["query"]])
                 .unwrap_or("")
@@ -400,6 +390,7 @@ impl CodexSession {
         emit_chat_event(app_handle, Some(session_id), turn_id, &start_event);
 
         let mode = permission_mode.read().await.clone();
+        log::debug!("Approval request: tool={}, target={}, mode={}", tool_type, target, mode);
 
         // Decide whether to auto-accept or prompt user
         let auto_accept = match mode.as_str() {
