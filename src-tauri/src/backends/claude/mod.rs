@@ -1,5 +1,11 @@
-//! Claude Code backend implementations.
+//! Claude Code backend implementation.
 
-mod cli_adapter;
+mod adapter;
+mod event_handler;
+pub mod cli_protocol;
+pub mod hooks;
+pub mod sessions;
+pub mod settings;
+pub mod tool_utils;
 
-pub use cli_adapter::ClaudeBackend;
+pub use adapter::ClaudeBackend;

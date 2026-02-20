@@ -101,8 +101,8 @@
       await api.sendMessage(app.sessionId, message, turnId);
     } catch (e) {
       console.error('Failed to send message:', e);
+      chat.finalize();
       chat.setActiveTurnId(null);
-      chat.setStreaming(false);
     }
   }
 
@@ -130,8 +130,8 @@
       await api.sendMessage(app.sessionId, nextMessage, turnId);
     } catch (e) {
       console.error('Failed to send queued message:', e);
+      chat.finalize();
       chat.setActiveTurnId(null);
-      chat.setStreaming(false);
     }
   }
 

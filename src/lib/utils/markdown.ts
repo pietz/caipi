@@ -9,7 +9,7 @@ renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
   return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
 };
 
-marked.use({ renderer });
+marked.use({ renderer, async: false });
 
 export function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(marked.parse(content) as string);

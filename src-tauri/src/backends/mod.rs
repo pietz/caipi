@@ -6,6 +6,7 @@
 mod runtime;
 mod session;
 mod types;
+pub(crate) mod utils;
 
 pub mod claude;
 pub mod codex;

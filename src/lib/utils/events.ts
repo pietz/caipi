@@ -3,6 +3,17 @@ import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 
+const VALID_TOOL_STATUSES: ToolStatus[] = ['pending', 'awaiting_permission', 'running', 'completed', 'error', 'denied', 'aborted', 'history'];
+const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
+
+function parseToolStatus(raw: string): ToolStatus {
+  return VALID_TOOL_STATUSES.includes(raw as ToolStatus) ? (raw as ToolStatus) : 'error';
+}
+
+function parsePermissionMode(raw: string): PermissionMode {
+  return VALID_PERMISSION_MODES.includes(raw as PermissionMode) ? (raw as PermissionMode) : 'default';
+}
+
 // Discriminated union matching Rust ChatEvent enum (serde tag = "type")
 type EventMeta = {
   sessionId?: string;
@@ -163,7 +174,7 @@ function handleToolStartEvent(event: Extract<ChatEvent, { type: 'ToolStart' }>) 
     id: event.toolUseId,
     toolType: event.toolType,
     target: event.target,
-    status: (event.status as ToolStatus) || 'pending',
+    status: parseToolStatus(event.status),
     input: event.input,
     timestamp: Math.floor(Date.now() / 1000),
   });
@@ -173,13 +184,13 @@ function handleToolStatusUpdateEvent(event: Extract<ChatEvent, { type: 'ToolStat
   // Pass null to clear permissionRequestId when not provided (backend sent None)
   chat.updateToolStatus(
     event.toolUseId,
-    event.status as ToolStatus,
+    parseToolStatus(event.status),
     { permissionRequestId: event.permissionRequestId ?? null }
   );
 }
 
 function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
-  chat.updateToolStatus(event.id, event.status as ToolStatus);
+  chat.updateToolStatus(event.id, parseToolStatus(event.status));
 
   // Track skill activation and handle special tools
   if (event.status === 'completed') {
@@ -302,8 +313,8 @@ function handleSessionInitEvent(event: Extract<ChatEvent, { type: 'SessionInit' 
 
 function handleStateChangedEvent(event: Extract<ChatEvent, { type: 'StateChanged' }>) {
   app.syncState(
-    event.permissionMode as PermissionMode,
-    event.model as Model
+    parsePermissionMode(event.permissionMode),
+    event.model
   );
 }
 

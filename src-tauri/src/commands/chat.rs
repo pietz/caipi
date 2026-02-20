@@ -40,6 +40,18 @@ pub struct Message {
     pub timestamp: i64,
 }
 
+impl Message {
+    /// Create a new message with a generated UUID and current timestamp.
+    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: role.into(),
+            content: content.into(),
+            timestamp: chrono::Utc::now().timestamp(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ChatEvent {

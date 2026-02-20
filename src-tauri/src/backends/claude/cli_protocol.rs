@@ -66,6 +66,11 @@ pub enum CliEvent {
 
     /// Acknowledgment of our control response.
     ControlResponse(ControlResponseAck),
+
+    /// Catch-all for unknown event types added in future CLI versions.
+    /// Prevents deserialization failures when the CLI adds new event types.
+    #[serde(other)]
+    Unknown,
 }
 
 // ============================================================================
@@ -155,6 +160,11 @@ pub enum ContentBlock {
 
     /// Tool result block (appears in user messages)
     ToolResult(ToolResultBlock),
+
+    /// Catch-all for unknown content block types added in future CLI versions.
+    /// Prevents a single unknown block from dropping the entire assistant message.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Text content block.

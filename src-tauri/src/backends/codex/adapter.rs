@@ -19,15 +19,13 @@ use crate::backends::types::{
     PermissionModel, SessionConfig,
 };
 use crate::commands::chat::{ChatEvent, Message};
-use crate::commands::sessions::load_codex_log_messages;
+use super::sessions::load_codex_log_messages;
 use crate::commands::setup::{
     check_backend_cli_authenticated_internal, check_backend_cli_installed_internal,
 };
 
 use super::cli_protocol::{
-    clean_thinking_text, event_type, extract_approval_tool_info, first_string,
-    normalized_tool_from_item, token_usage_from_turn_completed, final_tool_status,
-    IncomingMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    event_type, IncomingMessage, JsonRpcNotification, JsonRpcRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -277,21 +275,10 @@ impl CodexSession {
         self.write_line(&notif).await
     }
 
-    async fn abort_task_slot(slot: &Arc<Mutex<Option<JoinHandle<()>>>>) {
-        let handle = {
-            let mut guard = slot.lock().await;
-            guard.take()
-        };
-        if let Some(handle) = handle {
-            handle.abort();
-            let _ = handle.await;
-        }
-    }
-
     async fn abort_background_tasks(&self) {
-        Self::abort_task_slot(&self.stdout_task).await;
-        Self::abort_task_slot(&self.stderr_task).await;
-        Self::abort_task_slot(&self.monitor_task).await;
+        crate::backends::utils::abort_task_slot(&self.stdout_task).await;
+        crate::backends::utils::abort_task_slot(&self.stderr_task).await;
+        crate::backends::utils::abort_task_slot(&self.monitor_task).await;
     }
 
     async fn stop_process(&self) {
@@ -345,8 +332,7 @@ impl CodexSession {
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            command.creation_flags(CREATE_NO_WINDOW);
+            command.creation_flags(crate::backends::utils::CREATE_NO_WINDOW);
         }
 
         let mut child = command.spawn().map_err(|e| BackendError {
@@ -377,14 +363,7 @@ impl CodexSession {
         *self.stdout_task.lock().await = Some(stdout_handle);
 
         // Spawn stderr drain task
-        let stderr_handle = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Some(line) = lines.next_line().await.unwrap_or(None) {
-                if !line.trim().is_empty() {
-                    eprintln!("[codex stderr] {}", line.trim());
-                }
-            }
-        });
+        let stderr_handle = crate::backends::utils::spawn_stderr_drain(stderr, "codex");
         *self.stderr_task.lock().await = Some(stderr_handle);
 
         // Spawn process monitor
@@ -396,6 +375,7 @@ impl CodexSession {
         let session_id = self.id.clone();
         let current_turn_id = self.current_turn_id.clone();
         let initialized = self.initialized.clone();
+        let pending_requests = self.pending_requests.clone();
         let monitor_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -409,6 +389,9 @@ impl CodexSession {
                         drop(guard);
                         *stdin_writer.lock().await = None;
                         initialized.store(false, Ordering::SeqCst);
+                        // Clear pending requests so any awaiting send_request callers
+                        // get a RecvError instead of hanging forever
+                        pending_requests.lock().await.clear();
 
                         if !abort_flag.load(Ordering::SeqCst) {
                             let turn_id = current_turn_id.read().await.clone();
@@ -433,6 +416,7 @@ impl CodexSession {
                         drop(guard);
                         *stdin_writer.lock().await = None;
                         initialized.store(false, Ordering::SeqCst);
+                        pending_requests.lock().await.clear();
                         break;
                     }
                 }
@@ -441,7 +425,10 @@ impl CodexSession {
         *self.monitor_task.lock().await = Some(monitor_handle);
 
         // Perform handshake
-        self.handshake().await?;
+        if let Err(e) = self.handshake().await {
+            self.stop_process().await;
+            return Err(e);
+        }
 
         Ok(())
     }
@@ -475,11 +462,11 @@ impl CodexSession {
         // If resuming, try thread/resume first
         if let Some(resume_id) = &self.resume_session_id {
             let result = self
-                .send_request("thread/resume", json!({ "id": resume_id }))
+                .send_request("thread/resume", json!({ "threadId": resume_id }))
                 .await?;
             if let Some(tid) = result
-                .get("threadId")
-                .or_else(|| result.get("id"))
+                .pointer("/thread/id")
+                .or_else(|| result.get("threadId"))
                 .and_then(Value::as_str)
             {
                 let tid = tid.to_string();
@@ -493,6 +480,7 @@ impl CodexSession {
         let tid = result
             .get("threadId")
             .or_else(|| result.get("id"))
+            .or_else(|| result.pointer("/thread/id"))
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
@@ -510,13 +498,13 @@ impl CodexSession {
     }
 
     // -----------------------------------------------------------------------
-    // Permission mode → turn policies
+    // Permission mode -> turn policies
     // -----------------------------------------------------------------------
 
     fn approval_policy(mode: &str) -> &'static str {
         match mode {
             "bypassPermissions" => "never",
-            _ => "unlessTrusted",
+            _ => "on-request",
         }
     }
 
@@ -567,7 +555,10 @@ impl CodexSession {
 
                 let parsed: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
-                    Err(_) => continue,
+                    Err(e) => {
+                        eprintln!("[codex stdout] JSON parse error: {e}");
+                        continue;
+                    }
                 };
 
                 let turn_id_snapshot = current_turn_id.read().await.clone();
@@ -628,7 +619,7 @@ impl CodexSession {
                     }
 
                     None => {
-                        // Possibly a legacy-format event line — try to handle as
+                        // Possibly a legacy-format event line -- try to handle as
                         // notification using the "type" field (backwards compat with
                         // older Codex versions that may mix formats).
                         if let Some(kind) = event_type(&parsed) {
@@ -651,457 +642,6 @@ impl CodexSession {
                 }
             }
         })
-    }
-
-    /// Handle a JSON-RPC notification from the app-server.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_notification(
-        method: &str,
-        params: &Value,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        thread_id: &Arc<RwLock<Option<String>>>,
-        codex_turn_id: &Arc<RwLock<Option<String>>>,
-        in_flight: &AtomicBool,
-        messages: &Arc<RwLock<Vec<Message>>>,
-        active_tools: &mut HashMap<String, String>,
-        assistant_parts: &mut Vec<String>,
-    ) {
-        match method {
-            "thread/started" => {
-                if let Some(tid) = params
-                    .get("threadId")
-                    .or_else(|| params.get("id"))
-                    .and_then(Value::as_str)
-                {
-                    *thread_id.write().await = Some(tid.to_string());
-                }
-            }
-
-            "turn/started" => {
-                if let Some(tid) = params
-                    .get("turnId")
-                    .or_else(|| params.get("id"))
-                    .and_then(Value::as_str)
-                {
-                    *codex_turn_id.write().await = Some(tid.to_string());
-                }
-                // Clear accumulation for new turn
-                assistant_parts.clear();
-                active_tools.clear();
-            }
-
-            "item/started" => {
-                Self::handle_item_started(params, app_handle, session_id, turn_id, active_tools);
-            }
-
-            "item/agentMessage/delta" | "item/delta" => {
-                if let Some(text) = params
-                    .get("delta")
-                    .or_else(|| params.get("text"))
-                    .and_then(Value::as_str)
-                {
-                    if !text.is_empty() {
-                        assistant_parts.push(text.to_string());
-                        let event = ChatEvent::Text {
-                            content: text.to_string(),
-                        };
-                        emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-                    }
-                }
-            }
-
-            "item/completed" => {
-                Self::handle_item_completed(
-                    params,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    active_tools,
-                    assistant_parts,
-                );
-            }
-
-            "turn/completed" => {
-                // Emit token usage if available
-                if let Some((total, ctx, window)) = token_usage_from_turn_completed(params) {
-                    let usage_event = ChatEvent::TokenUsage {
-                        total_tokens: total,
-                        context_tokens: ctx,
-                        context_window: window,
-                    };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &usage_event);
-                }
-
-                // Store assistant message
-                let text = assistant_parts.join("");
-                if !text.trim().is_empty() {
-                    let mut msgs = messages.write().await;
-                    msgs.push(Message {
-                        id: Uuid::new_v4().to_string(),
-                        role: "assistant".to_string(),
-                        content: text,
-                        timestamp: chrono::Utc::now().timestamp(),
-                    });
-                }
-                assistant_parts.clear();
-
-                // Clear codex turn id
-                *codex_turn_id.write().await = None;
-
-                // Emit completion
-                let complete_event = ChatEvent::Complete;
-                emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
-                in_flight.store(false, Ordering::SeqCst);
-            }
-
-            _ => {
-                // Unknown notification — ignore
-            }
-        }
-    }
-
-    fn handle_item_started(
-        params: &Value,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        active_tools: &mut HashMap<String, String>,
-    ) {
-        let item = params.get("item").unwrap_or(params);
-        let item_kind = first_string(item, &[&["type"], &["kind"]])
-            .or_else(|| first_string(params, &[&["item_type"], &["kind"]]))
-            .unwrap_or("tool");
-        let item_id = first_string(item, &[&["id"]])
-            .or_else(|| first_string(params, &[&["item_id"], &["id"]]))
-            .unwrap_or("item")
-            .to_string();
-
-        if item_kind.contains("reason") {
-            let thinking_content =
-                clean_thinking_text(first_string(item, &[&["text"]]).unwrap_or("Thinking"));
-            let event = ChatEvent::ThinkingStart {
-                thinking_id: item_id,
-                content: thinking_content,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-        } else if item_kind == "agent_message" {
-            // Text messages handled via delta/completed
-        } else {
-            let (tool_type, target, input) = normalized_tool_from_item(item);
-            active_tools.insert(item_id.clone(), tool_type.clone());
-            let event = ChatEvent::ToolStart {
-                tool_use_id: item_id.clone(),
-                tool_type,
-                target,
-                status: "running".to_string(),
-                input,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn handle_item_completed(
-        params: &Value,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        active_tools: &mut HashMap<String, String>,
-        assistant_parts: &mut Vec<String>,
-    ) {
-        let item = params.get("item").unwrap_or(params);
-        let item_kind = first_string(item, &[&["type"], &["kind"]])
-            .or_else(|| first_string(params, &[&["item_type"], &["kind"]]))
-            .unwrap_or("tool");
-        let item_id = first_string(item, &[&["id"]])
-            .or_else(|| first_string(params, &[&["item_id"], &["id"]]))
-            .unwrap_or("item")
-            .to_string();
-
-        if item_kind.contains("reason") {
-            let thinking_content =
-                clean_thinking_text(first_string(item, &[&["text"]]).unwrap_or("Thinking"));
-            // Emit start+end for reasoning blocks
-            let start = ChatEvent::ThinkingStart {
-                thinking_id: item_id.clone(),
-                content: thinking_content,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
-            let end = ChatEvent::ThinkingEnd {
-                thinking_id: item_id,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
-        } else if item_kind == "agent_message" {
-            // Emit full text if we haven't received deltas
-            if let Some(text) = first_string(item, &[&["text"], &["content", "text"]]) {
-                if !text.is_empty() {
-                    assistant_parts.push(text.to_string());
-                    let event = ChatEvent::Text {
-                        content: text.to_string(),
-                    };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-                }
-            }
-        } else if item_kind == "web_search_call" && !active_tools.contains_key(&item_id) {
-            let target = first_string(item, &[&["action", "query"], &["query"]])
-                .unwrap_or("")
-                .to_string();
-            let start = ChatEvent::ToolStart {
-                tool_use_id: item_id.clone(),
-                tool_type: "web_search".to_string(),
-                target,
-                status: "pending".to_string(),
-                input: None,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
-            let end = ChatEvent::ToolEnd {
-                id: item_id,
-                status: "completed".to_string(),
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
-        } else if item_kind == "file_change" && !active_tools.contains_key(&item_id) {
-            let target = item
-                .get("changes")
-                .and_then(Value::as_array)
-                .and_then(|arr| arr.first())
-                .and_then(|c| c.get("path"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let start = ChatEvent::ToolStart {
-                tool_use_id: item_id.clone(),
-                tool_type: "file_change".to_string(),
-                target,
-                status: "pending".to_string(),
-                input: None,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &start);
-            let end = ChatEvent::ToolEnd {
-                id: item_id,
-                status: "completed".to_string(),
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
-        } else if active_tools.contains_key(&item_id) {
-            let tool_type = active_tools
-                .remove(&item_id)
-                .unwrap_or_else(|| item_kind.to_string());
-            let completed_status = first_string(item, &[&["status"]]).unwrap_or("completed");
-            let exit_code = item.get("exit_code").and_then(Value::as_i64);
-            let status = final_tool_status(&tool_type, completed_status, exit_code);
-            let end = ChatEvent::ToolEnd {
-                id: item_id,
-                status: status.to_string(),
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &end);
-        }
-    }
-
-    /// Handle legacy-format events (type-based rather than JSON-RPC method-based).
-    /// This provides backwards compatibility with older Codex versions.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_legacy_event(
-        kind: &str,
-        parsed: &Value,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        thread_id: &Arc<RwLock<Option<String>>>,
-        codex_turn_id: &Arc<RwLock<Option<String>>>,
-        in_flight: &AtomicBool,
-        messages: &Arc<RwLock<Vec<Message>>>,
-        active_tools: &mut HashMap<String, String>,
-        assistant_parts: &mut Vec<String>,
-    ) {
-        // Map legacy event types to notification methods
-        let (method, params) = match kind {
-            "thread.started" => ("thread/started", parsed.clone()),
-            "turn.started" => ("turn/started", parsed.clone()),
-            "item.started" => ("item/started", parsed.clone()),
-            "item.completed" => ("item/completed", parsed.clone()),
-            "turn.completed" => ("turn/completed", parsed.clone()),
-            "error" => {
-                if let Some(err) =
-                    first_string(parsed, &[&["message"], &["error"], &["error", "message"]])
-                {
-                    let event = ChatEvent::Error {
-                        message: err.to_string(),
-                    };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-                }
-                return;
-            }
-            _ => {
-                // Try to extract text from unknown events
-                let item_kind = first_string(parsed, &[&["item", "type"], &["item_type"], &["kind"]])
-                    .unwrap_or("");
-                let should_emit_text = !(item_kind.contains("reason")
-                    || item_kind == "command_execution"
-                    || item_kind == "function_call"
-                    || item_kind == "web_search"
-                    || item_kind == "web_search_call"
-                    || item_kind == "file_change");
-
-                if should_emit_text {
-                    if let Some(text) = first_string(
-                        parsed,
-                        &[
-                            &["delta"],
-                            &["text"],
-                            &["content"],
-                            &["item", "text"],
-                            &["item", "content", "text"],
-                            &["message", "content", "text"],
-                        ],
-                    ) {
-                        if !text.is_empty() {
-                            assistant_parts.push(text.to_string());
-                            let event = ChatEvent::Text {
-                                content: text.to_string(),
-                            };
-                            emit_chat_event(app_handle, Some(session_id), turn_id, &event);
-                        }
-                    }
-                }
-                return;
-            }
-        };
-
-        Self::handle_notification(
-            method,
-            &params,
-            app_handle,
-            session_id,
-            turn_id,
-            thread_id,
-            codex_turn_id,
-            in_flight,
-            messages,
-            active_tools,
-            assistant_parts,
-        )
-        .await;
-    }
-
-    /// Handle an incoming approval request from the server.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_approval_request(
-        request_id: Value,
-        method: &str,
-        params: &Value,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
-        active_tools: &mut HashMap<String, String>,
-    ) {
-        let (tool_type, target) = extract_approval_tool_info(method, params);
-        let tool_use_id = Uuid::new_v4().to_string();
-
-        // Emit ToolStart with pending status
-        active_tools.insert(tool_use_id.clone(), tool_type.clone());
-        let start_event = ChatEvent::ToolStart {
-            tool_use_id: tool_use_id.clone(),
-            tool_type: tool_type.clone(),
-            target: target.clone(),
-            status: "pending".to_string(),
-            input: None,
-        };
-        emit_chat_event(app_handle, Some(session_id), turn_id, &start_event);
-
-        let mode = permission_mode.read().await.clone();
-
-        // Decide whether to auto-accept or prompt user
-        let auto_accept = match mode.as_str() {
-            "bypassPermissions" => true,
-            "acceptEdits" if tool_type == "file_change" => true,
-            _ => false,
-        };
-
-        let allowed = if auto_accept {
-            // Auto-accept: update status to running
-            let running_event = ChatEvent::ToolStatusUpdate {
-                tool_use_id: tool_use_id.clone(),
-                status: "running".to_string(),
-                permission_request_id: None,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &running_event);
-            true
-        } else {
-            // Prompt user: emit awaiting_permission and wait
-            let permission_request_id = Uuid::new_v4().to_string();
-            let (tx, rx) = oneshot::channel();
-            {
-                let mut channels = permission_channels.lock().await;
-                channels.insert(permission_request_id.clone(), tx);
-            }
-
-            let awaiting_event = ChatEvent::ToolStatusUpdate {
-                tool_use_id: tool_use_id.clone(),
-                status: "awaiting_permission".to_string(),
-                permission_request_id: Some(permission_request_id.clone()),
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &awaiting_event);
-
-            // Wait for user decision, timeout, or abort
-            let decision = tokio::select! {
-                resp = rx => {
-                    resp.map(|r| r.allowed).unwrap_or(false)
-                }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
-                    false
-                }
-                _ = abort_notify.notified() => {
-                    false
-                }
-            };
-
-            // Cleanup channel
-            {
-                let mut channels = permission_channels.lock().await;
-                channels.remove(&permission_request_id);
-            }
-
-            // Emit status update
-            let status = if decision { "running" } else { "denied" };
-            let status_event = ChatEvent::ToolStatusUpdate {
-                tool_use_id: tool_use_id.clone(),
-                status: status.to_string(),
-                permission_request_id: None,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &status_event);
-
-            decision
-        };
-
-        // Send the approval response to the server
-        let decision_str = if allowed { "accept" } else { "decline" };
-        let response = JsonRpcResponse::new(
-            request_id,
-            json!({ "decision": decision_str }),
-        );
-
-        let mut line = match serde_json::to_string(&response) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
-        line.push('\n');
-
-        let mut guard = stdin_writer.lock().await;
-        if let Some(writer) = guard.as_mut() {
-            let _ = writer.write_all(line.as_bytes()).await;
-            let _ = writer.flush().await;
-        }
-
-        // If denied and abort was requested, remove from active tools
-        if !allowed && abort_flag.load(Ordering::SeqCst) {
-            active_tools.remove(&tool_use_id);
-        }
     }
 }
 
@@ -1140,12 +680,7 @@ impl BackendSession for CodexSession {
         // Store user message
         {
             let mut messages = self.messages.write().await;
-            messages.push(Message {
-                id: Uuid::new_v4().to_string(),
-                role: "user".to_string(),
-                content: message.to_string(),
-                timestamp: chrono::Utc::now().timestamp(),
-            });
+            messages.push(Message::new("user", message));
         }
 
         // Ensure app-server is running
@@ -1207,7 +742,8 @@ impl BackendSession for CodexSession {
         self.abort_flag.store(true, Ordering::SeqCst);
         self.abort_notify.notify_waiters();
 
-        // Try graceful interrupt via turn/interrupt
+        // Try graceful interrupt via turn/interrupt (fire-and-forget to avoid
+        // hanging if the server is unresponsive or already dead)
         let thread = self.thread_id.read().await.clone();
         let codex_turn = self.codex_turn_id.read().await.clone();
         if let (Some(tid), Some(ctid)) = (thread, codex_turn) {
@@ -1266,14 +802,14 @@ impl BackendSession for CodexSession {
         *self.thinking_level.write().await = level;
         Ok(())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        clean_thinking_text, final_tool_status, normalized_tool_from_item, CodexSession,
+    use super::super::cli_protocol::{
+        clean_thinking_text, final_tool_status, normalized_tool_from_item,
     };
+    use super::CodexSession;
     use serde_json::json;
 
     #[test]
@@ -1330,8 +866,8 @@ mod tests {
 
     #[test]
     fn approval_policy_mapping() {
-        assert_eq!(CodexSession::approval_policy("default"), "unlessTrusted");
-        assert_eq!(CodexSession::approval_policy("acceptEdits"), "unlessTrusted");
+        assert_eq!(CodexSession::approval_policy("default"), "on-request");
+        assert_eq!(CodexSession::approval_policy("acceptEdits"), "on-request");
         assert_eq!(CodexSession::approval_policy("bypassPermissions"), "never");
     }
 

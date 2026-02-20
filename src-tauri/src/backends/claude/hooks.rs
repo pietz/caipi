@@ -3,7 +3,7 @@
 //! Historically this module also contained SDK hook builders. The SDK-backed backend has been
 //! removed, so this file now only contains the permission decision logic used by the CLI backend.
 
-use crate::claude::settings::{self, ClaudeSettings};
+use super::settings::{self, ClaudeSettings};
 
 /// Result of evaluating whether a tool should be allowed to run.
 #[derive(Debug, Clone, PartialEq)]

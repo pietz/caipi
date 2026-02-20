@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-pub(crate) use crate::codex_tools::normalized_tool_from_item;
+pub(crate) use super::tool_utils::normalized_tool_from_item;
 
 // ---------------------------------------------------------------------------
 // Helpers (retained from previous implementation)
@@ -190,14 +190,12 @@ pub fn extract_approval_tool_info(method: &str, params: &Value) -> (String, Stri
     match method {
         "item/commandExecution/requestApproval" => {
             let command = params
-                .get("commandCall")
-                .and_then(|c| c.get("command"))
+                .get("command")
                 .and_then(Value::as_str)
                 .or_else(|| {
                     params
-                        .get("parsedCmd")
-                        .and_then(Value::as_array)
-                        .and_then(|arr| arr.first())
+                        .get("commandCall")
+                        .and_then(|c| c.get("command"))
                         .and_then(Value::as_str)
                 })
                 .unwrap_or("shell command")
@@ -227,31 +225,40 @@ pub fn extract_approval_tool_info(method: &str, params: &Value) -> (String, Stri
 }
 
 // ---------------------------------------------------------------------------
-// Token usage from turn/completed
+// Token usage extraction
 // ---------------------------------------------------------------------------
 
+/// Extract token usage from `thread/tokenUsage/updated` notification params
+/// or from `turn/completed` params (legacy).
 pub fn token_usage_from_turn_completed(params: &Value) -> Option<(u64, Option<u64>, Option<u64>)> {
-    // Try params.usage first, then params directly
-    let usage = params.get("usage").unwrap_or(params);
+    // thread/tokenUsage/updated: params.tokenUsage.total.totalTokens (camelCase)
+    // Also try params.usage and params directly as fallbacks.
+    let usage = params
+        .get("tokenUsage")
+        .and_then(|tu| tu.get("total"))
+        .or_else(|| params.get("usage"))
+        .unwrap_or(params);
 
     let total = usage
-        .get("total_tokens")
+        .get("totalTokens")
+        .or_else(|| usage.get("total_tokens"))
         .and_then(Value::as_u64)
         .or_else(|| {
-            let input = usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
-            let output = usage.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+            let input = usage.get("inputTokens").or_else(|| usage.get("input_tokens")).and_then(Value::as_u64).unwrap_or(0);
+            let output = usage.get("outputTokens").or_else(|| usage.get("output_tokens")).and_then(Value::as_u64).unwrap_or(0);
             let sum = input + output;
             if sum > 0 { Some(sum) } else { None }
         })?;
 
     let context_tokens = usage
-        .get("input_tokens")
-        .or_else(|| usage.get("context_tokens"))
+        .get("inputTokens")
+        .or_else(|| usage.get("input_tokens"))
         .and_then(Value::as_u64);
 
-    let context_window = usage
-        .get("model_context_window")
-        .or_else(|| usage.get("context_window"))
+    let context_window = params
+        .get("tokenUsage")
+        .and_then(|tu| tu.get("modelContextWindow"))
+        .or_else(|| usage.get("model_context_window"))
         .and_then(Value::as_u64);
 
     Some((total, context_tokens, context_window))
@@ -359,11 +366,11 @@ mod tests {
 
     #[test]
     fn extract_command_approval_info() {
-        let params = json!({"parsedCmd": ["git", "push"]});
+        let params = json!({"command": "git push"});
         let (tool_type, target) =
             extract_approval_tool_info("item/commandExecution/requestApproval", &params);
         assert_eq!(tool_type, "command_execution");
-        assert_eq!(target, "git");
+        assert_eq!(target, "git push");
     }
 
     #[test]

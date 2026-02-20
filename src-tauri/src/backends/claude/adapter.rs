@@ -2,6 +2,9 @@
 //!
 //! This module implements a direct CLI wrapper that spawns `claude` as a subprocess
 //! and communicates via JSON over stdin/stdout.
+//!
+//! Event handling logic (dispatching CLI events, permission hooks, etc.) lives in
+//! the sibling `event_handler` module.
 
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -18,24 +21,16 @@ use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
     AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
     PermissionModel, SessionConfig,
 };
 use crate::backends::{emit_chat_event, PermissionChannels};
-use crate::claude::cli_protocol::{
-    AssistantEvent, CliEvent, ContentBlock, IncomingControlRequest, OutgoingControlResponse,
-    ResultEvent, SystemEvent, UsageInfo,
-};
-use crate::claude::hooks::{determine_permission, PermissionDecision};
-use crate::claude::settings::{self, ClaudeSettings};
-use crate::claude::tool_utils::extract_tool_target;
+use super::cli_protocol::CliEvent;
+use super::settings::{self, ClaudeSettings};
 use crate::commands::chat::{ChatEvent, Message};
-use crate::commands::sessions::load_session_log_messages;
+use super::sessions::load_session_log_messages;
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
 /// Claude backend implementation (CLI-backed).
@@ -234,12 +229,6 @@ impl CliSession {
         None
     }
 
-    /// Compute context usage for UI from assistant usage.
-    /// This tracks effective input-side context load for the current call.
-    fn context_tokens_from_usage(usage: &UsageInfo) -> u64 {
-        usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-    }
-
     async fn cleanup_process(&self) {
         self.abort_background_tasks().await;
 
@@ -253,21 +242,10 @@ impl CliSession {
         *self.process_model.write().await = None;
     }
 
-    async fn abort_task_slot(slot: &Arc<Mutex<Option<JoinHandle<()>>>>) {
-        let handle = {
-            let mut guard = slot.lock().await;
-            guard.take()
-        };
-        if let Some(handle) = handle {
-            handle.abort();
-            let _ = handle.await;
-        }
-    }
-
     async fn abort_background_tasks(&self) {
-        Self::abort_task_slot(&self.stderr_task).await;
-        Self::abort_task_slot(&self.stdout_task).await;
-        Self::abort_task_slot(&self.lifecycle_task).await;
+        crate::backends::utils::abort_task_slot(&self.stderr_task).await;
+        crate::backends::utils::abort_task_slot(&self.stdout_task).await;
+        crate::backends::utils::abort_task_slot(&self.lifecycle_task).await;
     }
 
     /// Create a new CLI session.
@@ -365,6 +343,9 @@ impl CliSession {
             cmd.arg("--resume").arg(session_id);
         }
 
+        // Clear env vars that prevent nested Claude Code sessions
+        cmd.env_remove("CLAUDECODE");
+
         cmd.current_dir(&self.folder_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -372,7 +353,7 @@ impl CliSession {
 
         // On Windows, hide the console window
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(crate::backends::utils::CREATE_NO_WINDOW);
 
         let mut child = cmd.spawn().map_err(|e| BackendError {
             message: format!("Failed to spawn claude CLI: {}", e),
@@ -398,21 +379,7 @@ impl CliSession {
         })?;
 
         // Spawn a task to drain stderr (prevents deadlock on large output)
-        let stderr_handle = tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut line = String::new();
-            use tokio::io::AsyncBufReadExt;
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 {
-                    break;
-                }
-                // Log stderr for debugging, but don't let it block
-                if !line.trim().is_empty() {
-                    eprintln!("[claude stderr] {}", line.trim());
-                }
-                line.clear();
-            }
-        });
+        let stderr_handle = crate::backends::utils::spawn_stderr_drain(stderr, "claude");
         *self.stderr_task.lock().await = Some(stderr_handle);
 
         let spawned_pid = child.id();
@@ -422,10 +389,16 @@ impl CliSession {
         *self.process.lock().await = Some(child);
 
         // Send initialize request with hooks before user message
-        self.send_initialize().await?;
+        if let Err(e) = self.send_initialize().await {
+            self.cleanup_process().await;
+            return Err(e);
+        }
 
         // Send the user message
-        self.send_user_message(message).await?;
+        if let Err(e) = self.send_user_message(message).await {
+            self.cleanup_process().await;
+            return Err(e);
+        }
 
         // Spawn task to read stdout and process events
         let app_handle = self.app_handle.clone();
@@ -611,509 +584,6 @@ impl CliSession {
         });
         self.write_stdin_line(&user_message).await
     }
-
-    /// Send a control response to CLI stdin.
-    async fn send_control_response(
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        response: OutgoingControlResponse,
-    ) -> Result<(), BackendError> {
-        let mut stdin_guard = stdin_writer.lock().await;
-        if let Some(ref mut stdin) = *stdin_guard {
-            let json_line = serde_json::to_string(&response)
-                .map_err(|e| BackendError {
-                    message: format!("Failed to serialize control response: {}", e),
-                    recoverable: false,
-                })?;
-
-            stdin
-                .write_all(json_line.as_bytes())
-                .await
-                .map_err(|e| BackendError {
-                    message: format!("Failed to write control response: {}", e),
-                    recoverable: false,
-                })?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| BackendError {
-                    message: format!("Failed to write newline: {}", e),
-                    recoverable: false,
-                })?;
-            stdin
-                .flush()
-                .await
-                .map_err(|e| BackendError {
-                    message: format!("Failed to flush stdin: {}", e),
-                    recoverable: false,
-                })?;
-            Ok(())
-        } else {
-            Err(BackendError {
-                message: "CLI stdin not available".to_string(),
-                recoverable: false,
-            })
-        }
-    }
-
-    /// Handle a CLI event.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_event(
-        event: CliEvent,
-        app_handle: &AppHandle,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        user_settings: Option<&ClaudeSettings>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
-        session_id: &str,
-        active_tools: &mut HashMap<String, String>,
-        messages: &Arc<RwLock<Vec<Message>>>,
-        cli_session_id: &Arc<RwLock<Option<String>>>,
-        in_flight: &Arc<AtomicBool>,
-        current_turn_id: &Arc<RwLock<Option<String>>>,
-    ) {
-        match event {
-            CliEvent::System(system) => {
-                Self::handle_system_event(system, app_handle, session_id, turn_id, cli_session_id)
-                    .await;
-            }
-            CliEvent::Assistant(assistant) => {
-                Self::handle_assistant_event(
-                    assistant,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    active_tools,
-                    messages,
-                )
-                .await;
-            }
-            CliEvent::User(_user) => {
-                Self::handle_user_event(_user, app_handle, session_id, turn_id, active_tools).await;
-            }
-            CliEvent::Result(result) => {
-                Self::handle_result_event(
-                    result,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    in_flight,
-                    current_turn_id,
-                )
-                .await;
-            }
-            CliEvent::ControlRequest(request) => {
-                Self::handle_control_request(
-                    request,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    permission_mode,
-                    user_settings,
-                    permission_channels,
-                    stdin_writer,
-                    abort_flag,
-                    abort_notify,
-                    active_tools,
-                )
-                .await;
-            }
-            CliEvent::ControlResponse(_ack) => {
-                // Acknowledgment of our control response - nothing to do
-            }
-        }
-    }
-
-    /// Handle system events (init, health_check).
-    async fn handle_system_event(
-        event: SystemEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        cli_session_id: &Arc<RwLock<Option<String>>>,
-    ) {
-        if event.subtype == "init" {
-            // Capture CLI session ID for message correlation
-            if let Some(sid) = event.session_id {
-                *cli_session_id.write().await = Some(sid);
-            }
-
-            // Parse apiKeySource from init event data
-            let api_key_source = event
-                .data
-                .get("apiKeySource")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-
-            let auth_type = match api_key_source {
-                "none" => "Claude AI Subscription",
-                "environment" | "settings" => "Anthropic API Key",
-                _ => "Unknown",
-            }
-            .to_string();
-
-            let session_init = ChatEvent::SessionInit { auth_type };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &session_init);
-        }
-    }
-
-    /// Handle assistant events (messages with content blocks).
-    /// Note: ToolStart is now emitted from hook callbacks, not from tool_use blocks.
-    async fn handle_assistant_event(
-        event: AssistantEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        active_tools: &mut HashMap<String, String>,
-        messages: &Arc<RwLock<Vec<Message>>>,
-    ) {
-        if let Some(usage) = &event.message.usage {
-            let total_tokens = Self::context_tokens_from_usage(usage);
-            let token_usage = ChatEvent::TokenUsage {
-                total_tokens,
-                context_tokens: None,
-                context_window: None,
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &token_usage);
-        }
-
-        for block in event.message.content {
-            match block {
-                ContentBlock::Text(text_block) => {
-                    let text_event = ChatEvent::Text {
-                        content: text_block.text.clone(),
-                    };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &text_event);
-
-                    // Store message
-                    let mut msgs = messages.write().await;
-                    msgs.push(Message {
-                        id: Uuid::new_v4().to_string(),
-                        role: "assistant".to_string(),
-                        content: text_block.text,
-                        timestamp: chrono::Utc::now().timestamp(),
-                    });
-                }
-                ContentBlock::Thinking(thinking_block) => {
-                    let thinking_id = Uuid::new_v4().to_string();
-                    let thinking_start = ChatEvent::ThinkingStart {
-                        thinking_id: thinking_id.clone(),
-                        content: thinking_block.thinking,
-                    };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_start);
-                    let thinking_end = ChatEvent::ThinkingEnd { thinking_id };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_end);
-                }
-                ContentBlock::ToolUse(tool_use) => {
-                    // Track the tool for ToolEnd matching
-                    // ToolStart is emitted from the PreToolUse hook callback, not here
-                    active_tools.insert(tool_use.id.clone(), tool_use.name.clone());
-                }
-                ContentBlock::ToolResult(tool_result) => {
-                    // Tool completed. Guard on active_tools to avoid duplicate ToolEnd
-                    // emissions if both User and Assistant streams include tool_result.
-                    if active_tools.remove(&tool_result.tool_use_id).is_some() {
-                        let status = if tool_result.is_error {
-                            "error"
-                        } else {
-                            "completed"
-                        };
-                        let tool_end = ChatEvent::ToolEnd {
-                            id: tool_result.tool_use_id.clone(),
-                            status: status.to_string(),
-                        };
-                        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
-                    }
-                }
-                ContentBlock::InputJsonDelta(_) => {
-                    // Streaming delta - we can ignore for now since we get the complete input later
-                }
-            }
-        }
-        // Token usage is emitted from assistant usage (per call) to represent
-        // context usage, not cumulative session totals.
-    }
-
-    /// Handle user events (tool results).
-    async fn handle_user_event(
-        event: crate::claude::cli_protocol::UserEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        active_tools: &mut HashMap<String, String>,
-    ) {
-        if let Some(message) = event.extra.get("message") {
-            if let Some(content_array) = message.get("content").and_then(|c| c.as_array()) {
-                for item in content_array {
-                    if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                        if let Some(tool_use_id) =
-                            item.get("tool_use_id").and_then(|id| id.as_str())
-                        {
-                            // Emit once per tool ID. Assistant blocks may also contain tool_result
-                            // in some protocol variants.
-                            if active_tools.remove(tool_use_id).is_some() {
-                                let is_error = item
-                                    .get("is_error")
-                                    .and_then(|e| e.as_bool())
-                                    .unwrap_or(false);
-                                let status = if is_error { "error" } else { "completed" };
-                                let tool_end = ChatEvent::ToolEnd {
-                                    id: tool_use_id.to_string(),
-                                    status: status.to_string(),
-                                };
-                                emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Handle a control request from the CLI (hook callbacks).
-    /// This is where ToolStart is emitted and permissions are determined.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_control_request(
-        request: IncomingControlRequest,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        user_settings: Option<&ClaudeSettings>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
-        active_tools: &mut HashMap<String, String>,
-    ) {
-        // Handle different control request types
-        if request.request.subtype == "hook_callback" {
-            if let Some(input) = &request.request.input {
-                if input.hook_event_name == "PreToolUse" {
-                    Self::handle_pretool_hook(
-                        &request,
-                        input,
-                        app_handle,
-                        session_id,
-                        turn_id,
-                        permission_mode,
-                        user_settings,
-                        permission_channels,
-                        stdin_writer,
-                        abort_flag,
-                        abort_notify,
-                        active_tools,
-                    )
-                    .await;
-                } else if input.hook_event_name == "PostToolUse" {
-                    // Acknowledge PostToolUse.
-                    // Tool completion is emitted from ToolResult blocks so we preserve
-                    // the real final status (including errors) and avoid duplicate ToolEnd events.
-                    let response =
-                        OutgoingControlResponse::ack_posttool(request.request_id.clone());
-                    if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                        eprintln!("[cli_adapter] Failed to send PostToolUse ack: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Handle a PreToolUse hook callback - emit ToolStart and determine permission.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_pretool_hook(
-        request: &IncomingControlRequest,
-        input: &crate::claude::cli_protocol::HookCallbackInput,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        user_settings: Option<&ClaudeSettings>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
-        active_tools: &mut HashMap<String, String>,
-    ) {
-        let tool_name = input.tool_name.clone().unwrap_or_default();
-        let tool_input = input.tool_input.clone().unwrap_or(serde_json::json!({}));
-        let tool_use_id = request
-            .request
-            .tool_use_id
-            .clone()
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-        // Track this tool
-        active_tools.insert(tool_use_id.clone(), tool_name.clone());
-
-        // Extract target for display
-        let target = extract_tool_target(&tool_name, &tool_input);
-
-        // Emit ToolStart with pending status
-        let input_for_frontend = if tool_name.starts_with("Task") || tool_name.starts_with("Todo") {
-            Some(tool_input.clone())
-        } else {
-            None
-        };
-
-        let tool_start = ChatEvent::ToolStart {
-            tool_use_id: tool_use_id.clone(),
-            tool_type: tool_name.clone(),
-            target,
-            status: "pending".to_string(),
-            input: input_for_frontend,
-        };
-        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_start);
-
-        // Check abort first
-        if abort_flag.load(Ordering::SeqCst) {
-            // Remove from active_tools since tool won't run
-            active_tools.remove(&tool_use_id);
-            let response = OutgoingControlResponse::deny_pretool(
-                request.request_id.clone(),
-                "Session aborted",
-            );
-            if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                eprintln!("[cli_adapter] Failed to send abort response: {}", e);
-            }
-            return;
-        }
-
-        // Determine permission
-        let current_mode = permission_mode.read().await.clone();
-        let decision = determine_permission(&current_mode, &tool_name, &tool_input, user_settings);
-
-        match decision {
-            PermissionDecision::Allow(reason) => {
-                // Auto-approved - emit running status and send allow response
-                let running_status = ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_use_id.clone(),
-                    status: "running".to_string(),
-                    permission_request_id: None,
-                };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &running_status);
-
-                let response =
-                    OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason);
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send allow response: {}", e);
-                }
-            }
-            PermissionDecision::Deny(reason) => {
-                // Denied - remove from active_tools, emit denied status, send deny response
-                active_tools.remove(&tool_use_id);
-                let denied_status = ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_use_id.clone(),
-                    status: "denied".to_string(),
-                    permission_request_id: None,
-                };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &denied_status);
-
-                let response =
-                    OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason);
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send deny response: {}", e);
-                }
-            }
-            PermissionDecision::PromptUser => {
-                // Need to prompt user - set up permission channel and wait
-                let permission_request_id = Uuid::new_v4().to_string();
-                let (tx, rx) = tokio::sync::oneshot::channel();
-
-                // Store sender in permission channels
-                {
-                    let mut channels = permission_channels.lock().await;
-                    channels.insert(permission_request_id.clone(), tx);
-                }
-
-                // Emit awaiting_permission status
-                let awaiting_permission = ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_use_id.clone(),
-                    status: "awaiting_permission".to_string(),
-                    permission_request_id: Some(permission_request_id.clone()),
-                };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &awaiting_permission);
-
-                // Wait for user response with timeout and abort support
-                let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
-                tokio::pin!(timeout);
-                tokio::pin!(rx);
-
-                let (allowed, reason) = tokio::select! {
-                    response = &mut rx => {
-                        match response {
-                            Ok(r) if r.allowed => (true, "User approved".to_string()),
-                            Ok(_) => (false, "User denied".to_string()),
-                            Err(_) => (false, "Permission request cancelled".to_string()),
-                        }
-                    }
-                    _ = &mut timeout => {
-                        (false, "Permission request timed out".to_string())
-                    }
-                    _ = abort_notify.notified() => {
-                        (false, "Session aborted".to_string())
-                    }
-                };
-
-                // Cleanup channel
-                {
-                    let mut channels = permission_channels.lock().await;
-                    channels.remove(&permission_request_id);
-                }
-
-                // If denied, remove from active_tools since tool won't run
-                if !allowed {
-                    active_tools.remove(&tool_use_id);
-                }
-
-                // Emit final status and send control response
-                let status = if allowed { "running" } else { "denied" };
-                let final_status = ChatEvent::ToolStatusUpdate {
-                    tool_use_id: tool_use_id.clone(),
-                    status: status.to_string(),
-                    permission_request_id: None,
-                };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &final_status);
-
-                let response = if allowed {
-                    OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason)
-                } else {
-                    OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason)
-                };
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                    eprintln!("[cli_adapter] Failed to send permission response: {}", e);
-                }
-            }
-        }
-    }
-
-    /// Handle result events (completion).
-    async fn handle_result_event(
-        event: ResultEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        in_flight: &Arc<AtomicBool>,
-        current_turn_id: &Arc<RwLock<Option<String>>>,
-    ) {
-        if event.subtype == "success" {
-            let complete_event = ChatEvent::Complete;
-            emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
-        } else if event.subtype == "error" {
-            let error_event = ChatEvent::Error {
-                message: "CLI returned error".to_string(),
-            };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &error_event);
-        }
-
-        in_flight.store(false, Ordering::SeqCst);
-        *current_turn_id.write().await = None;
-
-        // Do not emit token usage from result totals here: result usage is
-        // cumulative session accounting and does not match context usage semantics.
-    }
 }
 
 #[async_trait]
@@ -1150,12 +620,7 @@ impl BackendSession for CliSession {
         // Store user message
         {
             let mut msgs = self.messages.write().await;
-            msgs.push(Message {
-                id: Uuid::new_v4().to_string(),
-                role: "user".to_string(),
-                content: message.to_string(),
-                timestamp: chrono::Utc::now().timestamp(),
-            });
+            msgs.push(Message::new("user", message));
         }
 
         // Check if we have an active process
@@ -1268,6 +733,7 @@ impl BackendSession for CliSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::cli_protocol::UsageInfo;
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
     use tokio::sync::{Mutex, RwLock};

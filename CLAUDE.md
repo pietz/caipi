@@ -80,6 +80,17 @@ gh release edit v0.X.X --repo pietz/caipi.ai --notes "## What's New
 - **Permission modes**: Default (prompts), Edit (auto-allow edits), Danger (bypass all)
 - **Models**: Opus 4.6, Sonnet 4.5, Haiku 4.5
 
+### Backend module structure
+
+Each backend (`claude/`, `codex/`) follows the same layout:
+- `adapter.rs` -- Session struct, process lifecycle (spawn/cleanup/abort), BackendSession trait impl, messaging protocol
+- `event_handler.rs` -- Event dispatching and handling (`impl Session` block in a separate file, all associated functions taking Arc clones of state)
+- `cli_protocol.rs` -- Wire types (serde structs for CLI JSON protocol)
+- `sessions.rs` -- Session log parsing and history loading
+- `hooks.rs` / `tool_utils.rs` -- Permission hooks, tool name/target extraction
+
+Shared utilities live in `backends/utils.rs` (`abort_task_slot`, `spawn_stderr_drain`, `wait_for_permission`).
+
 ## Svelte 5 Runes
 
 Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.

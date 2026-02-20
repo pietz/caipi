@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use caipi_lib::claude::cli_protocol::*;
+use caipi_lib::backends::claude::cli_protocol::*;
 use serde_json::Value;
 
 /// Unique counter to give each test its own temp directory (they share a PID).
@@ -441,6 +441,7 @@ impl CliHarness {
                     }
                 }
                 CliEvent::ControlResponse(_) => EventKind::ControlResponse,
+                CliEvent::Unknown => EventKind::System, // shouldn't appear in tests
             })
             .collect()
     }
@@ -642,6 +643,7 @@ impl CliHarness {
                                     ContentBlock::ToolResult(tr) => {
                                         format!("tool_result({})", tr.tool_use_id)
                                     }
+                                    ContentBlock::Unknown => "unknown".to_string(),
                                 })
                                 .collect();
                             format!("Assistant [{}]", blocks.join(", "))
@@ -660,6 +662,7 @@ impl CliHarness {
                             format!("ControlRequest({})", hook)
                         }
                         CliEvent::ControlResponse(_) => "ControlResponse(ack)".to_string(),
+                        CliEvent::Unknown => "Unknown".to_string(),
                     };
                     eprintln!("  [{:3}] OK  {}", i, desc);
                 }
@@ -1114,6 +1117,7 @@ fn test_text_before_result() {
                 ContentBlock::Thinking(_) => "thinking",
                 ContentBlock::InputJsonDelta(_) => "delta",
                 ContentBlock::ToolResult(_) => "tool_result",
+                ContentBlock::Unknown => "unknown",
             }).collect::<Vec<_>>()
         );
     }
