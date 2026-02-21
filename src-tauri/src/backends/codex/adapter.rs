@@ -15,10 +15,9 @@ use crate::backends::emit_chat_event;
 use crate::backends::runtime::PermissionChannels;
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
-    AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
-    PermissionModel, SessionConfig,
+    AuthStatus, Backend, BackendError, BackendKind, InstallStatus, SessionConfig,
 };
-use crate::commands::chat::{ChatEvent, Message};
+use crate::backends::types::{ChatEvent, Message};
 use super::sessions::load_codex_log_messages;
 use crate::commands::setup::{
     check_backend_cli_authenticated_internal, check_backend_cli_installed_internal,
@@ -50,33 +49,6 @@ impl Default for CodexBackend {
 impl Backend for CodexBackend {
     fn kind(&self) -> BackendKind {
         BackendKind::Codex
-    }
-
-    fn capabilities(&self) -> BackendCapabilities {
-        BackendCapabilities {
-            permission_model: PermissionModel::PerOperation,
-            supports_streaming: true,
-            supports_abort: true,
-            supports_resume: true,
-            supports_extended_thinking: true,
-            available_models: vec![
-                ModelInfo {
-                    id: "gpt-5.3-codex".to_string(),
-                    name: "GPT-5.3 Codex".to_string(),
-                    supports_thinking: true,
-                },
-                ModelInfo {
-                    id: "gpt-5.2".to_string(),
-                    name: "GPT-5.2".to_string(),
-                    supports_thinking: true,
-                },
-                ModelInfo {
-                    id: "gpt-5.1-codex-mini".to_string(),
-                    name: "GPT-5.1 Codex Mini".to_string(),
-                    supports_thinking: false,
-                },
-            ],
-        }
     }
 
     async fn check_installed(&self) -> Result<InstallStatus, BackendError> {

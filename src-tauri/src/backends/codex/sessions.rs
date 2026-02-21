@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::backends::codex::tool_utils::codex_tool_from_payload;
-use crate::commands::chat::Message as ChatMessage;
+use crate::backends::types::Message as ChatMessage;
 use crate::commands::sessions::{
     get_folder_name, history_to_chat_messages, mtime_to_secs, parse_rfc3339_timestamp,
     trailing_uuid_like, walk_jsonl_files, walk_jsonl_files_with_mtime, HistoryMessage, HistoryTool,

@@ -46,6 +46,14 @@ let lineBuffer = '';
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const FLUSH_DELAY_MS = 150;
 
+// Flush any buffered text to the chat store
+function flushLineBuffer() {
+  if (lineBuffer) {
+    chat.appendText(lineBuffer);
+    lineBuffer = '';
+  }
+}
+
 // Callback to notify when content changes (for scrolling)
 let onContentChange: (() => void) | null = null;
 
@@ -157,8 +165,7 @@ function handleTextEvent(event: Extract<ChatEvent, { type: 'Text' }>) {
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = setTimeout(() => {
       if (lineBuffer) {
-        chat.appendText(lineBuffer);
-        lineBuffer = '';
+        flushLineBuffer();
         onContentChange?.();
       }
       flushTimer = null;
@@ -168,10 +175,7 @@ function handleTextEvent(event: Extract<ChatEvent, { type: 'Text' }>) {
 
 function handleToolStartEvent(event: Extract<ChatEvent, { type: 'ToolStart' }>) {
   // Flush buffered text before tool to preserve ordering
-  if (lineBuffer) {
-    chat.appendText(lineBuffer);
-    lineBuffer = '';
-  }
+  flushLineBuffer();
 
   debug(`Tool START: id=${event.toolUseId} type=${event.toolType} target=${event.target}`);
   chat.addTool({
@@ -274,10 +278,7 @@ function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
 
 function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingStart' }>) {
   // Flush buffered text before thinking to preserve ordering
-  if (lineBuffer) {
-    chat.appendText(lineBuffer);
-    lineBuffer = '';
-  }
+  flushLineBuffer();
 
   chat.addTool({
     id: event.thinkingId,
@@ -292,20 +293,14 @@ function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingSta
 function handleCompleteEvent(onComplete?: () => void) {
   info('Turn complete');
   // Flush any remaining buffered text
-  if (lineBuffer) {
-    chat.appendText(lineBuffer);
-    lineBuffer = '';
-  }
+  flushLineBuffer();
   chat.finalize();
   onComplete?.();
 }
 
 function handleAbortCompleteEvent() {
   // Flush any remaining buffered text
-  if (lineBuffer) {
-    chat.appendText(lineBuffer);
-    lineBuffer = '';
-  }
+  flushLineBuffer();
   chat.finalize();
   chat.setStreaming(false);
   chat.clearMessageQueue();
@@ -330,10 +325,7 @@ function handleTokenUsageEvent(event: Extract<ChatEvent, { type: 'TokenUsage' }>
 
 function handleErrorEvent(event: Extract<ChatEvent, { type: 'Error' }>, onError?: (message: string) => void) {
   // Flush buffered text and finalize before clearing
-  if (lineBuffer) {
-    chat.appendText(lineBuffer);
-    lineBuffer = '';
-  }
+  flushLineBuffer();
   chat.finalize();
 
   chat.addErrorMessage(event.message);

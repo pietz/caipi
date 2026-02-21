@@ -246,14 +246,8 @@ fn get_oauth_config_path(home_dir: &Path) -> PathBuf {
     home_dir.join(".config/Claude/config.json")
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CliStatus {
-    pub installed: bool,
-    pub version: Option<String>,
-    pub authenticated: bool,
-    pub path: Option<String>,
-}
+// Re-export from storage where the type now lives
+pub use crate::storage::CliStatus;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

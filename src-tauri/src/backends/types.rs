@@ -5,8 +5,105 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::AppHandle;
+use tokio::sync::Mutex;
 
 use super::session::BackendSession;
+
+// ---------------------------------------------------------------------------
+// Domain types (moved from commands/chat.rs)
+// ---------------------------------------------------------------------------
+
+/// Global session store - uses Arc<dyn BackendSession> for multi-backend support.
+pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Message {
+    pub id: String,
+    pub role: String, // "user" or "assistant"
+    pub content: String,
+    pub timestamp: i64,
+}
+
+impl Message {
+    /// Create a new message with a generated UUID and current timestamp.
+    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: role.into(),
+            content: content.into(),
+            timestamp: chrono::Utc::now().timestamp(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum ChatEvent {
+    Text {
+        content: String,
+    },
+    /// Emitted from PreToolUse hook when a tool starts
+    ToolStart {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+        #[serde(rename = "toolType")]
+        tool_type: String,
+        target: String,
+        status: String, // "pending"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input: Option<serde_json::Value>,
+    },
+    /// Emitted when tool status changes (permission granted/denied, running, etc.)
+    ToolStatusUpdate {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+        status: String, // "awaiting_permission", "running", "denied"
+        #[serde(
+            rename = "permissionRequestId",
+            skip_serializing_if = "Option::is_none"
+        )]
+        permission_request_id: Option<String>,
+    },
+    /// Emitted from PostToolUse hook when a tool completes
+    ToolEnd {
+        id: String,
+        status: String, // "completed", "error"
+    },
+    SessionInit {
+        auth_type: String,
+    },
+    StateChanged {
+        #[serde(rename = "permissionMode")]
+        permission_mode: String,
+        model: String,
+    },
+    TokenUsage {
+        #[serde(rename = "totalTokens")]
+        total_tokens: u64,
+        #[serde(rename = "contextTokens", skip_serializing_if = "Option::is_none")]
+        context_tokens: Option<u64>,
+        #[serde(rename = "contextWindow", skip_serializing_if = "Option::is_none")]
+        context_window: Option<u64>,
+    },
+    Complete,
+    #[serde(rename = "AbortComplete")]
+    AbortComplete {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+    },
+    Error {
+        message: String,
+    },
+    ThinkingStart {
+        #[serde(rename = "thinkingId")]
+        thinking_id: String,
+        content: String,
+    },
+    ThinkingEnd {
+        #[serde(rename = "thinkingId")]
+        thinking_id: String,
+    },
+}
 
 /// Identifies the type of AI backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -90,50 +187,11 @@ pub struct SessionConfig {
     pub cli_path: Option<String>,
 }
 
-/// Information about an available model.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub supports_thinking: bool,
-}
-
-/// How the backend handles permissions.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionModel {
-    /// Per-operation permission prompts (like Claude Code)
-    PerOperation,
-    /// Session-level permissions
-    SessionLevel,
-    /// No permission system
-    None,
-}
-
-/// Capabilities of a backend.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BackendCapabilities {
-    pub permission_model: PermissionModel,
-    pub supports_streaming: bool,
-    pub supports_abort: bool,
-    pub supports_resume: bool,
-    pub supports_extended_thinking: bool,
-    pub available_models: Vec<ModelInfo>,
-}
-
 /// Trait for a backend implementation (e.g., Claude, Codex).
 #[async_trait]
 pub trait Backend: Send + Sync {
     /// Returns the kind of this backend.
     fn kind(&self) -> BackendKind;
-
-    /// Returns the capabilities of this backend.
-    #[allow(dead_code)]
-    fn capabilities(&self) -> BackendCapabilities;
 
     /// Checks if the CLI is installed.
     #[allow(dead_code)]

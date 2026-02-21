@@ -1,16 +1,10 @@
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
 use crate::storage;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct RecentFolder {
-    pub path: String,
-    pub name: String,
-    pub timestamp: i64,
-}
+// Re-export from storage where the type now lives
+pub use crate::storage::RecentFolder;
 
 #[tauri::command]
 pub async fn validate_folder(path: String) -> Result<bool, String> {

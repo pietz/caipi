@@ -33,16 +33,14 @@
   // Track which tool IDs have been revealed (by ID to prevent re-animation on remount)
   // Initialize with completed tools (they don't need animation)
   const COMPLETED_STATUSES = ['completed', 'error', 'denied', 'aborted', 'history'];
-  let revealedIds = $state<string[]>(
+  const initialRevealedIds = $derived(
     tools.filter(t => COMPLETED_STATUSES.includes(t.status)).map(t => t.id)
   );
+  let revealedIds = $state<string[]>([]);
 
   // Sync revealedIds when tools prop changes (e.g., new completed tools from history)
   $effect(() => {
-    const completedIds = tools
-      .filter(t => COMPLETED_STATUSES.includes(t.status))
-      .map(t => t.id);
-    for (const id of completedIds) {
+    for (const id of initialRevealedIds) {
       if (!revealedIds.includes(id)) {
         revealedIds = [...revealedIds, id];
       }

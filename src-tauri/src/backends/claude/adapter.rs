@@ -23,13 +23,12 @@ use std::os::windows::process::CommandExt;
 
 use crate::backends::session::BackendSession;
 use crate::backends::types::{
-    AuthStatus, Backend, BackendCapabilities, BackendError, BackendKind, InstallStatus, ModelInfo,
-    PermissionModel, SessionConfig,
+    AuthStatus, Backend, BackendError, BackendKind, InstallStatus, SessionConfig,
 };
 use crate::backends::{emit_chat_event, PermissionChannels};
 use super::cli_protocol::CliEvent;
 use super::settings::{self, ClaudeSettings};
-use crate::commands::chat::{ChatEvent, Message};
+use crate::backends::types::{ChatEvent, Message};
 use super::sessions::load_session_log_messages;
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
@@ -52,33 +51,6 @@ impl Default for ClaudeBackend {
 impl Backend for ClaudeBackend {
     fn kind(&self) -> BackendKind {
         BackendKind::Claude
-    }
-
-    fn capabilities(&self) -> BackendCapabilities {
-        BackendCapabilities {
-            permission_model: PermissionModel::PerOperation,
-            supports_streaming: true,
-            supports_abort: true,
-            supports_resume: true,
-            supports_extended_thinking: false,
-            available_models: vec![
-                ModelInfo {
-                    id: "opus".to_string(),
-                    name: "Claude Opus 4.6".to_string(),
-                    supports_thinking: true,
-                },
-                ModelInfo {
-                    id: "sonnet".to_string(),
-                    name: "Claude Sonnet 4.5".to_string(),
-                    supports_thinking: true,
-                },
-                ModelInfo {
-                    id: "haiku".to_string(),
-                    name: "Claude Haiku 4.5".to_string(),
-                    supports_thinking: false,
-                },
-            ],
-        }
     }
 
     async fn check_installed(&self) -> Result<InstallStatus, BackendError> {
@@ -767,18 +739,6 @@ mod tests {
     fn test_cli_backend_kind() {
         let backend = ClaudeBackend::new();
         assert_eq!(backend.kind(), BackendKind::Claude);
-    }
-
-    #[test]
-    fn test_cli_backend_capabilities() {
-        let backend = ClaudeBackend::new();
-        let caps = backend.capabilities();
-        assert!(caps.supports_streaming);
-        assert!(caps.supports_abort);
-        assert!(caps.supports_resume);
-        assert!(!caps.supports_extended_thinking);
-        assert_eq!(caps.permission_model, PermissionModel::PerOperation);
-        assert_eq!(caps.available_models.len(), 3);
     }
 
     #[test]

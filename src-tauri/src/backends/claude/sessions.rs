@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::backends::claude::tool_utils::extract_tool_target;
-use crate::commands::chat::Message as ChatMessage;
+use crate::backends::types::Message as ChatMessage;
 use crate::commands::sessions::{
     encode_folder_path, get_folder_name, history_to_chat_messages, is_uuid_filename,
     parse_rfc3339_timestamp, HistoryMessage, HistoryTool, SessionInfo,

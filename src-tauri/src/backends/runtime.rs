@@ -1,6 +1,6 @@
 //! Shared runtime primitives for backend integrations.
 
-use crate::commands::chat::ChatEvent;
+use crate::backends::types::ChatEvent;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;

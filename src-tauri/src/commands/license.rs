@@ -230,7 +230,10 @@ pub async fn clear_license() -> Result<(), String> {
     // If we have license data with an instance_id, deactivate it on Lemon Squeezy
     if let Some(data) = license_data {
         if let Some(instance_id) = data.instance_id {
-            let client = reqwest::Client::new();
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_default();
 
             // Attempt to deactivate - we don't fail if this doesn't work
             // (user might be offline, etc.)

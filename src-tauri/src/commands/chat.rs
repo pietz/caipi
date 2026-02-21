@@ -1,8 +1,5 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::Mutex;
 
 use crate::backends::{
     emit_chat_event, BackendRegistry, BackendSession, PermissionChannels, PermissionResponse,
@@ -10,8 +7,9 @@ use crate::backends::{
 };
 use crate::storage;
 
-// Global session store - now uses Arc<dyn BackendSession> for multi-backend support
-pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
+// Re-export domain types that were moved to backends::types so existing
+// imports from `commands::chat` continue to work.
+pub use crate::backends::types::{ChatEvent, Message, SessionStore};
 
 async fn get_session_from_store(
     sessions: &SessionStore,
@@ -30,95 +28,6 @@ async fn remove_session_from_store(
 ) -> Option<Arc<dyn BackendSession>> {
     let mut store = sessions.lock().await;
     store.remove(session_id)
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Message {
-    pub id: String,
-    pub role: String, // "user" or "assistant"
-    pub content: String,
-    pub timestamp: i64,
-}
-
-impl Message {
-    /// Create a new message with a generated UUID and current timestamp.
-    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            role: role.into(),
-            content: content.into(),
-            timestamp: chrono::Utc::now().timestamp(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "type")]
-pub enum ChatEvent {
-    Text {
-        content: String,
-    },
-    /// Emitted from PreToolUse hook when a tool starts
-    ToolStart {
-        #[serde(rename = "toolUseId")]
-        tool_use_id: String,
-        #[serde(rename = "toolType")]
-        tool_type: String,
-        target: String,
-        status: String, // "pending"
-        #[serde(skip_serializing_if = "Option::is_none")]
-        input: Option<serde_json::Value>,
-    },
-    /// Emitted when tool status changes (permission granted/denied, running, etc.)
-    ToolStatusUpdate {
-        #[serde(rename = "toolUseId")]
-        tool_use_id: String,
-        status: String, // "awaiting_permission", "running", "denied"
-        #[serde(
-            rename = "permissionRequestId",
-            skip_serializing_if = "Option::is_none"
-        )]
-        permission_request_id: Option<String>,
-    },
-    /// Emitted from PostToolUse hook when a tool completes
-    ToolEnd {
-        id: String,
-        status: String, // "completed", "error"
-    },
-    SessionInit {
-        auth_type: String,
-    },
-    StateChanged {
-        #[serde(rename = "permissionMode")]
-        permission_mode: String,
-        model: String,
-    },
-    TokenUsage {
-        #[serde(rename = "totalTokens")]
-        total_tokens: u64,
-        #[serde(rename = "contextTokens", skip_serializing_if = "Option::is_none")]
-        context_tokens: Option<u64>,
-        #[serde(rename = "contextWindow", skip_serializing_if = "Option::is_none")]
-        context_window: Option<u64>,
-    },
-    Complete,
-    #[serde(rename = "AbortComplete")]
-    AbortComplete {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-    },
-    Error {
-        message: String,
-    },
-    ThinkingStart {
-        #[serde(rename = "thinkingId")]
-        thinking_id: String,
-        content: String,
-    },
-    ThinkingEnd {
-        #[serde(rename = "thinkingId")]
-        thinking_id: String,
-    },
 }
 
 #[tauri::command]

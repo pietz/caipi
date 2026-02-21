@@ -81,9 +81,8 @@ fn matches_pattern(pattern: &str, tool_name: &str, tool_input: &serde_json::Valu
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                if pattern_arg.ends_with(":*") {
+                if let Some(prefix) = pattern_arg.strip_suffix(":*") {
                     // Prefix match: "ls:*" matches "ls -la", "ls /tmp", etc.
-                    let prefix = &pattern_arg[..pattern_arg.len() - 2];
                     command.starts_with(prefix)
                 } else {
                     // Exact match
@@ -96,8 +95,7 @@ fn matches_pattern(pattern: &str, tool_name: &str, tool_input: &serde_json::Valu
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                if pattern_arg.ends_with(":*") {
-                    let prefix = &pattern_arg[..pattern_arg.len() - 2];
+                if let Some(prefix) = pattern_arg.strip_suffix(":*") {
                     skill_name.starts_with(prefix)
                 } else {
                     skill_name == pattern_arg
@@ -115,8 +113,7 @@ fn matches_pattern(pattern: &str, tool_name: &str, tool_input: &serde_json::Valu
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                if pattern_arg.ends_with(":*") {
-                    let prefix = &pattern_arg[..pattern_arg.len() - 2];
+                if let Some(prefix) = pattern_arg.strip_suffix(":*") {
                     arg_value.starts_with(prefix)
                 } else {
                     arg_value == pattern_arg

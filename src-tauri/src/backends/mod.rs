@@ -5,7 +5,7 @@
 
 mod runtime;
 mod session;
-mod types;
+pub(crate) mod types;
 pub(crate) mod utils;
 
 pub mod claude;
@@ -13,4 +13,4 @@ pub mod codex;
 
 pub use runtime::{emit_chat_event, PermissionChannels, PermissionResponse};
 pub use session::BackendSession;
-pub use types::{BackendError, BackendKind, BackendRegistry, SessionConfig};
+pub use types::{BackendError, BackendKind, BackendRegistry, ChatEvent, Message, SessionConfig, SessionStore};

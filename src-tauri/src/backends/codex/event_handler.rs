@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::backends::emit_chat_event;
 use crate::backends::runtime::PermissionChannels;
-use crate::commands::chat::{ChatEvent, Message};
+use crate::backends::types::{ChatEvent, Message};
 
 use super::adapter::CodexSession;
 use super::cli_protocol::{

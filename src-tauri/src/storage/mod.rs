@@ -1,5 +1,3 @@
-use crate::commands::folder::RecentFolder;
-use crate::commands::setup::CliStatus;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,6 +9,27 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::NamedTempFile;
 use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// Domain types (moved here from commands/)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentFolder {
+    pub path: String,
+    pub name: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CliStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub authenticated: bool,
+    pub path: Option<String>,
+}
 
 static STORAGE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -143,113 +162,113 @@ fn save_data(data: &AppData) -> Result<(), StorageError> {
     Ok(())
 }
 
-pub fn get_recent_folders() -> Result<Vec<RecentFolder>, StorageError> {
+/// Acquire lock, load data, apply a mutating closure, then save.
+fn with_data<F, R>(f: F) -> Result<R, StorageError>
+where
+    F: FnOnce(&mut AppData) -> Result<R, StorageError>,
+{
+    let _guard = get_storage_lock().lock();
+    let mut data = load_data()?;
+    let result = f(&mut data)?;
+    save_data(&data)?;
+    Ok(result)
+}
+
+/// Acquire lock, load data, apply a read-only closure (no save).
+fn with_data_ro<F, R>(f: F) -> Result<R, StorageError>
+where
+    F: FnOnce(&AppData) -> Result<R, StorageError>,
+{
     let _guard = get_storage_lock().lock();
     let data = load_data()?;
-    Ok(data.recent_folders)
+    f(&data)
+}
+
+pub fn get_recent_folders() -> Result<Vec<RecentFolder>, StorageError> {
+    with_data_ro(|data| Ok(data.recent_folders.clone()))
 }
 
 pub fn save_recent_folder(folder: RecentFolder) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-
-    // Remove if already exists
-    data.recent_folders.retain(|f| f.path != folder.path);
-
-    // Add to front
-    data.recent_folders.insert(0, folder);
-
-    // Keep only last 5
-    data.recent_folders.truncate(5);
-
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        // Remove if already exists
+        data.recent_folders.retain(|f| f.path != folder.path);
+        // Add to front
+        data.recent_folders.insert(0, folder);
+        // Keep only last 5
+        data.recent_folders.truncate(5);
+        Ok(())
+    })
 }
 
 pub fn get_onboarding_completed() -> Result<bool, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    Ok(data.onboarding_completed)
+    with_data_ro(|data| Ok(data.onboarding_completed))
 }
 
 pub fn set_onboarding_completed(completed: bool) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.onboarding_completed = completed;
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        data.onboarding_completed = completed;
+        Ok(())
+    })
 }
 
 pub fn get_cli_status_cache() -> Result<Option<CliStatusCache>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    Ok(data.cli_status_cache)
+    with_data_ro(|data| Ok(data.cli_status_cache.clone()))
 }
 
 pub fn set_cli_status_cache(status: CliStatus, backend: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    data.cli_status_cache = Some(CliStatusCache {
-        status,
-        cached_at: now,
-        backend,
-    });
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        data.cli_status_cache = Some(CliStatusCache {
+            status,
+            cached_at: now,
+            backend,
+        });
+        Ok(())
+    })
 }
 
 pub fn get_default_folder() -> Result<Option<String>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    Ok(data.default_folder)
+    with_data_ro(|data| Ok(data.default_folder.clone()))
 }
 
 pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.default_folder = path;
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        data.default_folder = path;
+        Ok(())
+    })
 }
 
 pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-
-    match data.license {
-        Some(license_data) => {
-            if license_data.checksum.is_none() {
-                // BACKWARDS COMPATIBILITY (added v0.1.13, Jan 2026):
-                // License was stored before checksum protection was added.
-                // Migrate it by computing and saving the checksum, then return the data.
-                // This auto-migrates existing valid licenses on first load.
-                // This migration code can be removed after ~6 months when all users have updated.
-                let checksum = compute_license_checksum(&license_data.license_key);
-                let migrated_license = LicenseData {
-                    checksum: Some(checksum),
-                    ..license_data
-                };
-
-                // Save the migrated license with checksum
-                let mut app_data = load_data()?;
-                app_data.license = Some(migrated_license.clone());
-                save_data(&app_data)?;
-
-                Ok(Some(migrated_license))
-            } else if verify_license_checksum(&license_data) {
-                // Checksum present and valid
-                Ok(Some(license_data))
-            } else {
-                // Checksum present but invalid - tampering detected, reject
-                Ok(None)
+    with_data(|data| {
+        match &data.license {
+            Some(license_data) => {
+                if license_data.checksum.is_none() {
+                    // BACKWARDS COMPATIBILITY (added v0.1.13, Jan 2026):
+                    // License was stored before checksum protection was added.
+                    // Migrate it by computing and saving the checksum, then return the data.
+                    // This auto-migrates existing valid licenses on first load.
+                    // This migration code can be removed after ~6 months when all users have updated.
+                    let checksum = compute_license_checksum(&license_data.license_key);
+                    let migrated_license = LicenseData {
+                        checksum: Some(checksum),
+                        ..license_data.clone()
+                    };
+                    data.license = Some(migrated_license.clone());
+                    Ok(Some(migrated_license))
+                } else if verify_license_checksum(license_data) {
+                    // Checksum present and valid
+                    Ok(Some(license_data.clone()))
+                } else {
+                    // Checksum present but invalid - tampering detected, reject
+                    Ok(None)
+                }
             }
+            None => Ok(None),
         }
-        None => Ok(None),
-    }
+    })
 }
 
 pub fn set_license(
@@ -259,122 +278,107 @@ pub fn set_license(
     instance_id: Option<String>,
 ) -> Result<(), StorageError> {
     let checksum = compute_license_checksum(&license_key);
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.license = Some(LicenseData {
-        license_key,
-        activated_at,
-        email,
-        instance_id,
-        checksum: Some(checksum),
-    });
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        data.license = Some(LicenseData {
+            license_key,
+            activated_at,
+            email,
+            instance_id,
+            checksum: Some(checksum),
+        });
+        Ok(())
+    })
 }
 
 pub fn clear_license() -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.license = None;
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        data.license = None;
+        Ok(())
+    })
 }
 
 /// Migrates legacy "claudecli" key to "claude" if needed.
-fn ensure_claude_key_migrated(data: &mut AppData) -> Result<(), StorageError> {
-    if data.backend_cli_paths.get("claude").is_none() {
+/// Mutates `data` in place; caller is responsible for persisting.
+fn ensure_claude_key_migrated(data: &mut AppData) {
+    if !data.backend_cli_paths.contains_key("claude") {
         if let Some(old) = data.backend_cli_paths.remove("claudecli") {
             data.backend_cli_paths.insert("claude".to_string(), old.clone());
             data.cli_path = Some(old);
-            save_data(data)?;
         }
     }
-    Ok(())
 }
 
 pub fn get_cli_path() -> Result<Option<String>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    if let Some(path) = data.backend_cli_paths.get("claude") {
-        return Ok(Some(path.clone()));
-    }
-    if let Some(path) = data.backend_cli_paths.get("claudecli") {
-        let path = path.clone();
-        let mut data = load_data()?;
-        ensure_claude_key_migrated(&mut data)?;
-        return Ok(Some(path));
-    }
-    Ok(data.cli_path)
+    with_data(|data| {
+        if let Some(path) = data.backend_cli_paths.get("claude") {
+            return Ok(Some(path.clone()));
+        }
+        if data.backend_cli_paths.contains_key("claudecli") {
+            ensure_claude_key_migrated(data);
+            return Ok(data.backend_cli_paths.get("claude").cloned());
+        }
+        Ok(data.cli_path.clone())
+    })
 }
 
 pub fn get_default_backend() -> Result<Option<String>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    Ok(data.default_backend)
+    with_data_ro(|data| Ok(data.default_backend.clone()))
 }
 
 pub fn set_default_backend(backend: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
-    data.default_backend = backend;
-    save_data(&data)?;
-    Ok(())
+    with_data(|data| {
+        data.default_backend = backend;
+        Ok(())
+    })
 }
 
 pub fn get_backend_cli_paths() -> Result<HashMap<String, String>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
-    if data.backend_cli_paths.contains_key("claudecli") && !data.backend_cli_paths.contains_key("claude") {
-        let mut data = load_data()?;
-        ensure_claude_key_migrated(&mut data)?;
-        return Ok(data.backend_cli_paths);
-    }
-    Ok(data.backend_cli_paths)
+    with_data(|data| {
+        if data.backend_cli_paths.contains_key("claudecli") && !data.backend_cli_paths.contains_key("claude") {
+            ensure_claude_key_migrated(data);
+        }
+        Ok(data.backend_cli_paths.clone())
+    })
 }
 
 pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageError> {
-    let _guard = get_storage_lock().lock();
-    let data = load_data()?;
     let key = if backend == "claudecli" { "claude" } else { backend };
-    if let Some(path) = data.backend_cli_paths.get(key) {
-        return Ok(Some(path.clone()));
-    }
-    if key == "claude" {
-        if let Some(path) = data.backend_cli_paths.get("claudecli") {
-            let path = path.clone();
-            let mut data = load_data()?;
-            ensure_claude_key_migrated(&mut data)?;
-            return Ok(Some(path));
+    with_data(|data| {
+        if let Some(path) = data.backend_cli_paths.get(key) {
+            return Ok(Some(path.clone()));
         }
-    }
-    Ok(None)
+        if key == "claude" && data.backend_cli_paths.contains_key("claudecli") {
+            ensure_claude_key_migrated(data);
+            return Ok(data.backend_cli_paths.get("claude").cloned());
+        }
+        Ok(None)
+    })
 }
 
 pub fn set_backend_cli_path(backend: &str, path: Option<String>) -> Result<(), StorageError> {
-    let _guard = get_storage_lock().lock();
-    let mut data = load_data()?;
     let key = if backend == "claudecli" { "claude" } else { backend };
-    match path {
-        Some(path) => {
-            data.backend_cli_paths.insert(key.to_string(), path);
-            if key == "claude" {
-                data.backend_cli_paths.remove("claudecli");
+    with_data(|data| {
+        match path {
+            Some(path) => {
+                data.backend_cli_paths.insert(key.to_string(), path);
+                if key == "claude" {
+                    data.backend_cli_paths.remove("claudecli");
+                }
+            }
+            None => {
+                data.backend_cli_paths.remove(key);
+                if key == "claude" {
+                    data.backend_cli_paths.remove("claudecli");
+                }
             }
         }
-        None => {
-            data.backend_cli_paths.remove(key);
-            if key == "claude" {
-                data.backend_cli_paths.remove("claudecli");
-            }
+
+        if key == "claude" {
+            data.cli_path = data.backend_cli_paths.get("claude").cloned();
         }
-    }
 
-    if key == "claude" {
-        data.cli_path = data.backend_cli_paths.get("claude").cloned();
-    }
-
-    save_data(&data)?;
-    Ok(())
+        Ok(())
+    })
 }
 
 // Test helper functions that accept explicit paths
