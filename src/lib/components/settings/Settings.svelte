@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Sun, Moon, Monitor, LogOut, Loader2 } from 'lucide-svelte';
+  import { X, Sun, Moon, Monitor, Loader2 } from 'lucide-svelte';
   import { getVersion } from '@tauri-apps/api/app';
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui';
@@ -16,7 +16,6 @@
   let { onClose }: Props = $props();
 
   let appVersion = $state<string | null>(null);
-  let deactivating = $state(false);
   let cliPathInput = $state(app.cliPath ?? '');
   let savingCliPath = $state(false);
   type BackendInstallState = 'checking' | 'installed' | 'not_installed';
@@ -38,11 +37,6 @@
   });
 
   const currentPreference = $derived(theme.preference);
-
-  // License info
-  const licenseKey = $derived(app.license?.licenseKey ?? null);
-  const email = $derived(app.license?.email ?? null);
-
 
   onMount(async () => {
     try {
@@ -75,24 +69,6 @@
 
   function setTheme(preference: ThemePreference) {
     theme.setPreference(preference);
-  }
-
-  async function disconnectLicense() {
-    if (!confirm('Are you sure you want to disconnect your license? You will need to re-enter your license key.')) {
-      return;
-    }
-
-    deactivating = true;
-    try {
-      await api.clearLicense();
-      app.setLicense(null);
-      onClose();
-      app.setScreen('license');
-    } catch (e) {
-      console.error('Failed to disconnect license:', e);
-    } finally {
-      deactivating = false;
-    }
   }
 
   async function saveCliPath() {
@@ -243,35 +219,7 @@
           <span class="text-muted-foreground">CLI Version</span>
           <span class="text-foreground">{cliVersion ?? 'Not installed'}</span>
         </div>
-        {#if email}
-          <div class="flex justify-between">
-            <span class="text-muted-foreground">License Email</span>
-            <span class="text-foreground truncate max-w-[200px]" title={email}>{email}</span>
-          </div>
-        {/if}
-        {#if licenseKey}
-          <div class="flex justify-between items-center">
-            <span class="text-muted-foreground">License Key</span>
-            <code class="text-foreground text-[10px] bg-muted px-1.5 py-0.5 rounded">{licenseKey}</code>
-          </div>
-        {/if}
       </div>
-
-      <Button
-        variant="ghost"
-        size="sm"
-        class="w-full mt-4 h-7 text-xs text-muted-foreground hover:text-red-500"
-        onclick={disconnectLicense}
-        disabled={deactivating}
-      >
-        {#if deactivating}
-          <Loader2 size={12} class="animate-spin mr-1.5" />
-          Disconnecting...
-        {:else}
-          <LogOut size={12} class="mr-1.5" />
-          Disconnect License
-        {/if}
-      </Button>
     </div>
   </div>
 </div>

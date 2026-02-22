@@ -1,0 +1,200 @@
+<section class="py-24 md:py-28 px-4 md:px-8 relative overflow-hidden">
+  <!-- Background -->
+  <div class="absolute inset-0 pointer-events-none">
+    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-secondary/20 to-transparent"></div>
+  </div>
+
+  <div class="max-w-6xl mx-auto relative">
+    <div class="text-center mb-16 reveal">
+      <div class="section-label justify-center mb-4">The problem</div>
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight leading-tight">
+        AI today has limitations
+      </h2>
+    </div>
+
+    <!-- Section 1: Web Chat UI -->
+    <div class="grid md:grid-cols-2 gap-8 md:gap-12 items-center mb-24 md:mb-32">
+      <!-- Mock Web Chat UI -->
+      <div class="order-2 md:order-1 reveal">
+        <div class="bg-[#f9fafb] rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+          <!-- Header -->
+          <div class="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              </svg>
+            </div>
+            <span class="font-medium text-gray-800 text-sm">AI Assistant</span>
+            <div class="ml-auto flex gap-1">
+              <div class="w-3 h-3 rounded-full bg-gray-300"></div>
+              <div class="w-3 h-3 rounded-full bg-gray-300"></div>
+              <div class="w-3 h-3 rounded-full bg-gray-300"></div>
+            </div>
+          </div>
+
+          <!-- Chat Messages -->
+          <div class="p-4 space-y-4 bg-[#f9fafb]">
+            <!-- User message -->
+            <div class="flex justify-end">
+              <div class="bg-[#0066cc] text-white px-4 py-2.5 rounded-2xl rounded-br-md max-w-[80%] text-sm">
+                Can you help me organize my vacation photos by date?
+              </div>
+            </div>
+
+            <!-- AI Response -->
+            <div class="flex justify-start">
+              <div class="bg-white border border-gray-200 px-4 py-2.5 rounded-2xl rounded-bl-md max-w-[85%] text-sm text-gray-700">
+                <p>I'd be happy to help you organize your vacation photos! However, <span class="bg-yellow-100 text-yellow-800 px-1 rounded">I can't access files on your computer</span>.</p>
+                <p class="mt-2">Here's what you can do instead:</p>
+                <ol class="mt-2 ml-4 list-decimal text-gray-600 space-y-1">
+                  <li>Upload your photos here (max 10 at a time)</li>
+                  <li>I'll analyze them and suggest organization</li>
+                  <li>You'll need to manually rename and move them</li>
+                </ol>
+              </div>
+            </div>
+
+            <!-- User frustration -->
+            <div class="flex justify-end">
+              <div class="bg-[#0066cc] text-white px-4 py-2.5 rounded-2xl rounded-br-md max-w-[80%] text-sm">
+                But I have 847 photos...
+              </div>
+            </div>
+          </div>
+
+          <!-- Input area -->
+          <div class="bg-white border-t border-gray-200 p-3">
+            <div class="bg-gray-100 rounded-xl px-4 py-2.5 text-sm text-gray-400 flex items-center justify-between">
+              <span>Upload files or type a message...</span>
+              <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Text Content -->
+      <div class="order-1 md:order-2 reveal reveal-delay-1">
+        <div class="section-label mb-4">Web Chat AI</div>
+        <h3 class="text-2xl md:text-3xl font-bold text-foreground mb-4">
+          Powerful minds in a sandbox
+        </h3>
+        <p class="text-muted-foreground leading-relaxed mb-6">
+          ChatGPT, Claude.ai, Gemini — they're brilliant at conversation. But they're trapped in a browser tab, completely cut off from your actual work.
+        </p>
+        <ul class="space-y-3">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Can't access your files or folders</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Can't run commands or scripts</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Copy-paste everything manually</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Context lost between sessions</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Section 2: Terminal UI -->
+    <div class="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
+      <!-- Text Content -->
+      <div class="reveal">
+        <div class="section-label mb-4">Terminal AI</div>
+        <h3 class="text-2xl md:text-3xl font-bold text-foreground mb-4">
+          Full power, zero comfort
+        </h3>
+        <p class="text-muted-foreground leading-relaxed mb-6">
+          Terminal-based AI agents can do almost anything. But you're flying blind through walls of text, hoping nothing breaks while you scroll past hundreds of lines.
+        </p>
+        <ul class="space-y-3">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">No visual feedback on file changes</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Scroll through endless text output</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Intimidating for non-developers</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="text-sm text-muted-foreground">Hard to undo or review changes</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Mock Terminal UI -->
+      <div class="reveal reveal-delay-1">
+        <div class="bg-[#1a1a1a] rounded-xl border border-[#333] shadow-lg overflow-hidden font-mono text-xs">
+          <!-- Terminal Header -->
+          <div class="bg-[#2a2a2a] px-4 py-2 flex items-center gap-2 border-b border-[#333]">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-[#ff5f57]"></div>
+              <div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
+              <div class="w-3 h-3 rounded-full bg-[#28ca41]"></div>
+            </div>
+            <span class="text-[#888] text-xs ml-2">Terminal — claude-code</span>
+          </div>
+
+          <!-- Terminal Content -->
+          <div class="p-4 space-y-2 text-[#e0e0e0] leading-relaxed overflow-hidden">
+            <div><span class="text-[#6b9f6b]">❯</span> <span class="text-[#888]">claude</span> organize my vacation photos by date</div>
+            <div class="text-[#888]">⠋ Analyzing directory structure...</div>
+            <div class="text-[#888]">⠙ Reading EXIF data from 847 files...</div>
+            <div class="text-[#888]">⠹ Creating date-based folders...</div>
+            <div class="mt-2">
+              <span class="text-[#6b9f6b]">✓</span> Created <span class="text-[#7aa2f7]">2024-06-15/</span>
+            </div>
+            <div><span class="text-[#6b9f6b]">✓</span> Created <span class="text-[#7aa2f7]">2024-06-16/</span></div>
+            <div><span class="text-[#6b9f6b]">✓</span> Created <span class="text-[#7aa2f7]">2024-06-17/</span></div>
+            <div class="text-[#888]">... (23 more folders)</div>
+            <div class="mt-2">
+              <span class="text-[#6b9f6b]">✓</span> Moved <span class="text-white">IMG_4521.jpg</span> → <span class="text-[#7aa2f7]">2024-06-15/</span>
+            </div>
+            <div><span class="text-[#6b9f6b]">✓</span> Moved <span class="text-white">IMG_4522.jpg</span> → <span class="text-[#7aa2f7]">2024-06-15/</span></div>
+            <div><span class="text-[#6b9f6b]">✓</span> Moved <span class="text-white">IMG_4523.jpg</span> → <span class="text-[#7aa2f7]">2024-06-15/</span></div>
+            <div class="text-[#888]">... (844 more files)</div>
+            <div class="mt-2 text-[#888]">
+              Done! Organized 847 photos into 26 folders.
+            </div>
+            <div class="mt-2 text-[#888] border-t border-[#333] pt-2">
+              <span class="text-[#ff9e64]">Wait, did that delete my duplicates?</span>
+              <br/>
+              <span class="text-[#888]">Which files went where again?</span>
+              <br/>
+              <span class="text-[#888]">How do I undo this?</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

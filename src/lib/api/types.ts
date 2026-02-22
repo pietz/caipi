@@ -65,17 +65,3 @@ export interface HistoryMessage {
   timestamp: number;
   tools: HistoryTool[];
 }
-
-// License
-export interface LicenseStatus {
-  valid: boolean;
-  licenseKey?: string;
-  activatedAt?: number;
-  email?: string;
-}
-
-export interface LicenseValidationResult {
-  valid: boolean;
-  error?: string;
-  email?: string;
-}

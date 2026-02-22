@@ -20,7 +20,7 @@ jobs:
       - name: Check if release needed
         id: check
         env:
-          GH_TOKEN: ${{ secrets.CAIPI_AI_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Read version from source files
           PKG_VERSION=$(jq -r '.version' package.json)
@@ -40,7 +40,7 @@ jobs:
           echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
 
           # Check if this version already exists as a release
-          EXISTING=$(gh release view "v$PKG_VERSION" --repo pietz/caipi.ai --json tagName 2>/dev/null || echo "")
+          EXISTING=$(gh release view "v$PKG_VERSION" --json tagName 2>/dev/null || echo "")
 
           if [ -n "$EXISTING" ]; then
             echo "Release v$PKG_VERSION already exists, skipping"

@@ -1,6 +1,5 @@
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -57,17 +56,6 @@ pub struct CliStatusCache {
     pub backend: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LicenseData {
-    pub license_key: String,
-    pub activated_at: u64, // Unix timestamp in seconds
-    pub email: Option<String>,
-    #[serde(default)]
-    pub instance_id: Option<String>, // Lemon Squeezy instance ID for deactivation
-    #[serde(default)]
-    pub checksum: Option<String>, // SHA256 integrity checksum to detect tampering
-}
-
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AppData {
     pub recent_folders: Vec<RecentFolder>,
@@ -77,8 +65,6 @@ pub struct AppData {
     pub cli_status_cache: Option<CliStatusCache>,
     #[serde(default)]
     pub default_folder: Option<String>,
-    #[serde(default)]
-    pub license: Option<LicenseData>,
     #[serde(default)]
     pub cli_path: Option<String>,
     #[serde(default)]
@@ -106,28 +92,6 @@ fn get_app_dir() -> Result<PathBuf, StorageError> {
 
 fn get_data_path() -> Result<PathBuf, StorageError> {
     Ok(get_app_dir()?.join("data.json"))
-}
-
-// Embedded salt for license checksum - do not change or existing checksums will be invalidated
-const LICENSE_CHECKSUM_SALT: &str = "caipi-license-integrity-v1-8f3a2b1c";
-
-/// Compute SHA256 checksum for a license key with embedded salt
-pub fn compute_license_checksum(license_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(license_key.as_bytes());
-    hasher.update(LICENSE_CHECKSUM_SALT.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-/// Verify that a license's checksum matches its key
-pub fn verify_license_checksum(data: &LicenseData) -> bool {
-    match &data.checksum {
-        Some(stored_checksum) => {
-            let expected = compute_license_checksum(&data.license_key);
-            stored_checksum == &expected
-        }
-        None => false, // No checksum means not verified (old format)
-    }
 }
 
 fn load_data() -> Result<AppData, StorageError> {
@@ -237,62 +201,6 @@ pub fn get_default_folder() -> Result<Option<String>, StorageError> {
 pub fn set_default_folder(path: Option<String>) -> Result<(), StorageError> {
     with_data(|data| {
         data.default_folder = path;
-        Ok(())
-    })
-}
-
-pub fn get_license() -> Result<Option<LicenseData>, StorageError> {
-    with_data(|data| {
-        match &data.license {
-            Some(license_data) => {
-                if license_data.checksum.is_none() {
-                    // BACKWARDS COMPATIBILITY (added v0.1.13, Jan 2026):
-                    // License was stored before checksum protection was added.
-                    // Migrate it by computing and saving the checksum, then return the data.
-                    // This auto-migrates existing valid licenses on first load.
-                    // This migration code can be removed after ~6 months when all users have updated.
-                    let checksum = compute_license_checksum(&license_data.license_key);
-                    let migrated_license = LicenseData {
-                        checksum: Some(checksum),
-                        ..license_data.clone()
-                    };
-                    data.license = Some(migrated_license.clone());
-                    Ok(Some(migrated_license))
-                } else if verify_license_checksum(license_data) {
-                    // Checksum present and valid
-                    Ok(Some(license_data.clone()))
-                } else {
-                    // Checksum present but invalid - tampering detected, reject
-                    Ok(None)
-                }
-            }
-            None => Ok(None),
-        }
-    })
-}
-
-pub fn set_license(
-    license_key: String,
-    activated_at: u64,
-    email: Option<String>,
-    instance_id: Option<String>,
-) -> Result<(), StorageError> {
-    let checksum = compute_license_checksum(&license_key);
-    with_data(|data| {
-        data.license = Some(LicenseData {
-            license_key,
-            activated_at,
-            email,
-            instance_id,
-            checksum: Some(checksum),
-        });
-        Ok(())
-    })
-}
-
-pub fn clear_license() -> Result<(), StorageError> {
-    with_data(|data| {
-        data.license = None;
         Ok(())
     })
 }
@@ -410,40 +318,6 @@ fn save_data_to(path: &std::path::Path, data: &AppData) -> Result<(), StorageErr
     Ok(())
 }
 
-/// Test helper: simulates get_license() behavior with explicit path
-/// This allows testing the migration and verification logic without using global paths
-#[cfg(test)]
-fn get_license_from(path: &std::path::Path) -> Result<Option<LicenseData>, StorageError> {
-    let data = load_data_from(path)?;
-
-    match data.license {
-        Some(license_data) => {
-            if license_data.checksum.is_none() {
-                // Old format - migrate by computing checksum
-                let checksum = compute_license_checksum(&license_data.license_key);
-                let migrated_license = LicenseData {
-                    checksum: Some(checksum),
-                    ..license_data
-                };
-
-                // Save the migrated license
-                let mut app_data = load_data_from(path)?;
-                app_data.license = Some(migrated_license.clone());
-                save_data_to(path, &app_data)?;
-
-                Ok(Some(migrated_license))
-            } else if verify_license_checksum(&license_data) {
-                // Valid checksum
-                Ok(Some(license_data))
-            } else {
-                // Invalid checksum - tampering detected
-                Ok(None)
-            }
-        }
-        None => Ok(None),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,7 +387,6 @@ mod tests {
                 backend: Some("claude".to_string()),
             }),
             default_folder: Some("/default/path".to_string()),
-            license: None,
             cli_path: None,
             default_backend: Some("claude".to_string()),
             backend_cli_paths: HashMap::new(),
@@ -780,253 +653,4 @@ mod tests {
         assert!(loaded.onboarding_completed);
     }
 
-    #[test]
-    fn test_license_set_and_get_roundtrip() {
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-1234567890ABCDEF".to_string();
-        let checksum = compute_license_checksum(&license_key);
-
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key: license_key.clone(),
-            activated_at: 1700000000,
-            email: Some("user@example.com".to_string()),
-            instance_id: None,
-            checksum: Some(checksum),
-        });
-
-        save_data_to(&data_path, &data).unwrap();
-        let loaded_data = load_data_from(&data_path).unwrap();
-
-        assert!(loaded_data.license.is_some());
-        let license = loaded_data.license.unwrap();
-        assert_eq!(license.license_key, "CAIPI-1234567890ABCDEF");
-        assert_eq!(license.activated_at, 1700000000);
-        assert_eq!(license.email, Some("user@example.com".to_string()));
-        assert!(license.checksum.is_some());
-    }
-
-    #[test]
-    fn test_license_clear() {
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-TEST123456789".to_string();
-        let checksum = compute_license_checksum(&license_key);
-
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key,
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum),
-        });
-
-        save_data_to(&data_path, &data).unwrap();
-
-        let mut loaded_data = load_data_from(&data_path).unwrap();
-        assert!(loaded_data.license.is_some());
-
-        loaded_data.license = None;
-        save_data_to(&data_path, &loaded_data).unwrap();
-
-        let final_data = load_data_from(&data_path).unwrap();
-        assert!(final_data.license.is_none());
-    }
-
-    #[test]
-    fn test_license_without_email() {
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-NOEMAILTESTKEY".to_string();
-        let checksum = compute_license_checksum(&license_key);
-
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key,
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum),
-        });
-
-        save_data_to(&data_path, &data).unwrap();
-        let loaded_data = load_data_from(&data_path).unwrap();
-
-        assert!(loaded_data.license.is_some());
-        let license = loaded_data.license.unwrap();
-        assert!(license.email.is_none());
-    }
-
-    #[test]
-    fn test_checksum_verification() {
-        let license_key = "CAIPI-CHECKSUMTEST123";
-        let checksum = compute_license_checksum(license_key);
-
-        // Valid checksum should verify
-        let valid_license = LicenseData {
-            license_key: license_key.to_string(),
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum),
-        };
-        assert!(verify_license_checksum(&valid_license));
-
-        // Invalid checksum should fail
-        let invalid_license = LicenseData {
-            license_key: license_key.to_string(),
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some("invalid_checksum".to_string()),
-        };
-        assert!(!verify_license_checksum(&invalid_license));
-
-        // Missing checksum should fail
-        let no_checksum_license = LicenseData {
-            license_key: license_key.to_string(),
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: None,
-        };
-        assert!(!verify_license_checksum(&no_checksum_license));
-    }
-
-    #[test]
-    fn test_checksum_detects_tampered_key() {
-        let original_key = "CAIPI-ORIGINAL123456";
-        let checksum = compute_license_checksum(original_key);
-
-        // If someone changes the license_key but keeps the old checksum, it should fail
-        let tampered_license = LicenseData {
-            license_key: "CAIPI-TAMPERED999999".to_string(),
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum),
-        };
-        assert!(!verify_license_checksum(&tampered_license));
-    }
-
-    #[test]
-    fn test_get_license_migrates_old_format() {
-        // Simulates a license stored BEFORE checksum protection was added (v0.1.12 and earlier)
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-OLDFORMAT12345".to_string();
-
-        // Store license WITHOUT checksum (old format)
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key: license_key.clone(),
-            activated_at: 1700000000,
-            email: Some("old@example.com".to_string()),
-            instance_id: Some("old-instance".to_string()),
-            checksum: None, // No checksum - old format
-        });
-        save_data_to(&data_path, &data).unwrap();
-
-        // Call get_license - should auto-migrate
-        let result = get_license_from(&data_path).unwrap();
-
-        // Should return the license (not reject it)
-        assert!(result.is_some());
-        let license = result.unwrap();
-        assert_eq!(license.license_key, license_key);
-        assert_eq!(license.email, Some("old@example.com".to_string()));
-
-        // Should now have a checksum
-        assert!(license.checksum.is_some());
-        assert!(verify_license_checksum(&license));
-
-        // Verify the file was updated with the checksum
-        let reloaded = load_data_from(&data_path).unwrap();
-        assert!(reloaded.license.unwrap().checksum.is_some());
-    }
-
-    #[test]
-    fn test_get_license_accepts_valid_checksum() {
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-VALIDCHECKSUM1".to_string();
-        let checksum = compute_license_checksum(&license_key);
-
-        // Store license with valid checksum
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key: license_key.clone(),
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum),
-        });
-        save_data_to(&data_path, &data).unwrap();
-
-        // Should return the license
-        let result = get_license_from(&data_path).unwrap();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().license_key, license_key);
-    }
-
-    #[test]
-    fn test_get_license_rejects_tampered_key() {
-        // Simulates someone editing data.json to change the license_key
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let original_key = "CAIPI-ORIGINAL123456";
-        let checksum = compute_license_checksum(original_key);
-
-        // Store license with checksum for original key, but DIFFERENT license_key
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key: "CAIPI-TAMPERED999999".to_string(), // Tampered!
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some(checksum), // Checksum for ORIGINAL key
-        });
-        save_data_to(&data_path, &data).unwrap();
-
-        // Should reject - return None
-        let result = get_license_from(&data_path).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_get_license_rejects_corrupted_checksum() {
-        // Simulates corrupted or manually edited checksum
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        let license_key = "CAIPI-VALIDKEY123456".to_string();
-
-        // Store license with garbage checksum
-        let mut data = AppData::default();
-        data.license = Some(LicenseData {
-            license_key,
-            activated_at: 1700000000,
-            email: None,
-            instance_id: None,
-            checksum: Some("not-a-valid-sha256-checksum".to_string()),
-        });
-        save_data_to(&data_path, &data).unwrap();
-
-        // Should reject - return None
-        let result = get_license_from(&data_path).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_get_license_no_license_returns_none() {
-        let (_temp_dir, data_path) = setup_test_dir();
-
-        // Empty app data - no license
-        let data = AppData::default();
-        save_data_to(&data_path, &data).unwrap();
-
-        let result = get_license_from(&data_path).unwrap();
-        assert!(result.is_none());
-    }
 }

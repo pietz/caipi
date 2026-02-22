@@ -1,0 +1,86 @@
+---
+---
+
+<section class="py-16 md:py-20 overflow-hidden relative">
+  <!-- Top border accent -->
+  <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent"></div>
+
+  <!-- Marquee -->
+  <div class="marquee-container">
+    <div class="marquee-track">
+      <span class="marquee-item">Reads your local files</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Runs commands on your machine</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">No API keys needed</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Works with any file type</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Results saved locally</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Reads your local files</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Runs commands on your machine</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">No API keys needed</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Works with any file type</span>
+      <span class="marquee-separator">&#9670;</span>
+      <span class="marquee-item">Results saved locally</span>
+      <span class="marquee-separator">&#9670;</span>
+    </div>
+  </div>
+
+  <!-- Centered statement below marquee -->
+  <div class="mt-10 md:mt-14 text-center px-4">
+    <p class="text-xl md:text-2xl font-medium max-w-2xl mx-auto leading-relaxed">
+      Web AI can talk. Desktop AI can <span class="text-primary font-semibold">actually do things</span> — on your files, on your machine, in the background.
+    </p>
+  </div>
+
+  <!-- Bottom border accent -->
+  <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent"></div>
+</section>
+
+<style>
+  .marquee-container {
+    width: 100%;
+    overflow: hidden;
+    mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+  }
+
+  .marquee-track {
+    display: flex;
+    white-space: nowrap;
+    animation: marquee 35s linear infinite;
+    width: max-content;
+  }
+
+  .marquee-item {
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    padding: 0 1.5rem;
+  }
+
+  .marquee-separator {
+    color: var(--primary);
+    opacity: 0.5;
+    font-size: 0.5rem;
+    display: flex;
+    align-items: center;
+  }
+
+  @keyframes marquee {
+    0% {
+      transform: translateX(0);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+</style>

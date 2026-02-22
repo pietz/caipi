@@ -6,16 +6,9 @@ import { getBackendConfig, type Backend } from '$lib/config/backends';
 import { info } from '$lib/utils/logger';
 
 export type { CliStatus };
-export type Screen = 'loading' | 'license' | 'onboarding' | 'folder' | 'chat';
+export type Screen = 'loading' | 'onboarding' | 'folder' | 'chat';
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 export type Model = string;
-
-export interface LicenseInfo {
-  valid: boolean;
-  licenseKey?: string;
-  activatedAt?: number;
-  email?: string;
-}
 
 const RECENT_SESSIONS_PREWARM_LIMIT = 50;
 const RECENT_SESSIONS_PREWARM_TTL_MS = 5 * 60_000;
@@ -117,9 +110,6 @@ class AppState {
   // Auth info
   authType = $state<string | null>(null);
 
-  // License
-  license = $state<LicenseInfo | null>(null);
-
   // Derived
   get folderName(): string {
     if (!this.folder) return '';
@@ -176,10 +166,6 @@ class AppState {
 
   setAuthType(authType: string | null) {
     this.authType = authType;
-  }
-
-  setLicense(license: LicenseInfo | null) {
-    this.license = license;
   }
 
   setCliPath(path: string | null, backend: Backend = this.defaultBackend) {

@@ -4,17 +4,15 @@
 
 Caipi is a macOS desktop app written in Tauri 2, providing a chat UI for Claude Code. Svelte 5 frontend, Rust backend.
 
-## Repositories
+## Repository
 
-| Repo | Purpose | Location |
-|------|---------|----------|
-| `pietz/caipi` (private) | Source code | `/Users/pietz/Private/caipi` |
-| `pietz/caipi.ai` (public) | Releases, website, Homebrew tap | `/Users/pietz/Private/caipi.ai` |
+Single monorepo: `pietz/caipi` (private) at `/Users/pietz/Private/caipi`
+- App source code in root
+- Marketing website in `website/`
 
 **URLs:**
 - Website: https://caipi.ai
-- Download: `https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg`
-- Homebrew cask: `caipi.ai/Casks/caipi.rb`
+- Download: `https://github.com/pietz/caipi/releases/latest/download/caipi_aarch64.dmg`
 
 ## Commands
 

@@ -4,16 +4,15 @@
 
 Caipi is a macOS + Windows desktop app written in Tauri 2, providing a chat UI for Claude Code. Svelte 5 frontend, Rust backend.
 
-## Repositories
+## Repository
 
-| Repo | Purpose | Location |
-|------|---------|----------|
-| `pietz/caipi` (private) | Source code | `/Users/pietz/Private/caipi` |
-| `pietz/caipi.ai` (public) | Releases, website | `/Users/pietz/Private/caipi.ai` |
+Single monorepo: `pietz/caipi` (private) at `/Users/pietz/Private/caipi`
+- App source code in root
+- Marketing website in `website/`
 
 **URLs:**
 - Website: https://caipi.ai
-- Download: `https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg`
+- Download: `https://github.com/pietz/caipi/releases/latest/download/caipi_aarch64.dmg`
 
 ## Commands
 
@@ -21,6 +20,10 @@ Caipi is a macOS + Windows desktop app written in Tauri 2, providing a chat UI f
 npm run tauri dev      # Run app in dev mode
 npm run check          # Type check frontend
 npm run test:all       # Run all tests
+
+# Website (from website/ directory)
+cd website && npm run dev    # Local dev server
+cd website && npm run build  # Production build
 
 # Test builds (manual, never publishes)
 gh workflow run Build -f platform=windows  # Windows only
@@ -40,6 +43,10 @@ gh workflow run Build -f platform=both     # Both platforms
 - Builds Windows only (macOS is built locally to save CI costs)
 - Does NOT publish — the local `scripts/release.sh` handles publishing
 
+**Deploy Website**
+- Triggers: push to main when `website/**` changes, or manual dispatch
+- Builds Astro site from `website/` and deploys to GitHub Pages (caipi.ai)
+
 ## Release Process
 
 When asked to release a new version:
@@ -56,7 +63,7 @@ When asked to release a new version:
 
 **After release**, update the release notes:
 ```bash
-gh release edit v0.X.X --repo pietz/caipi.ai --notes "## What's New
+gh release edit v0.X.X --repo pietz/caipi --notes "## What's New
 
 - Change 1
 - Change 2"
@@ -75,7 +82,7 @@ gh release edit v0.X.X --repo pietz/caipi.ai --notes "## What's New
 ## Architecture
 
 - **Data flow**: User message → Tauri command → Rust backend → CLI subprocess → `chat:event` stream → frontend UI
-- **Events**: `chat:event`, `license:invalid`
+- **Events**: `chat:event`
 - **Stores**: `app` (screen, folder, settings), `chat` (messages, tools, streaming), `files` (tree state)
 - **Permission modes**: Default (prompts), Edit (auto-allow edits), Danger (bypass all)
 - **Models**: Opus 4.6, Sonnet 4.5, Haiku 4.5

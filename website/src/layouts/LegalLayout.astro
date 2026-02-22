@@ -1,0 +1,81 @@
+---
+import Layout from './Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  lastUpdated?: string;
+  canonicalPath: string;
+  description?: string;
+}
+
+const { title, lastUpdated, canonicalPath, description } = Astro.props;
+---
+
+<Layout title={`${title} - Caipi`} canonicalPath={canonicalPath} description={description}>
+  <Nav currentPage="legal" />
+
+  <main class="pt-32 pb-16 px-4 md:px-8">
+    <div class="max-w-3xl mx-auto">
+      <h1 class="text-3xl md:text-4xl font-bold text-foreground mb-2">{title}</h1>
+      {lastUpdated && <p class="text-muted-foreground mb-12">Last updated: {lastUpdated}</p>}
+
+      <div class="space-y-8 text-foreground/90 legal-content">
+        <slot />
+      </div>
+
+      <div class="mt-12 pt-8 border-t border-border">
+        <a href="/" class="text-sm text-primary hover:underline">← Back to home</a>
+      </div>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>
+
+<style is:global>
+  .legal-content section {
+    margin-bottom: 2rem;
+  }
+
+  .legal-content h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 1rem;
+  }
+
+  .legal-content h3 {
+    font-size: 1.125rem;
+    font-weight: 500;
+    color: var(--foreground);
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .legal-content p {
+    color: var(--muted-foreground);
+    line-height: 1.75;
+  }
+
+  .legal-content ul {
+    list-style-type: disc;
+    padding-left: 1.5rem;
+    margin-top: 0.5rem;
+    color: var(--muted-foreground);
+  }
+
+  .legal-content li {
+    margin-bottom: 0.25rem;
+    line-height: 1.6;
+  }
+
+  .legal-content a {
+    color: var(--primary);
+  }
+
+  .legal-content a:hover {
+    text-decoration: underline;
+  }
+</style>

@@ -151,11 +151,11 @@ cat > "$RELEASE_DIR/latest.json" << EOF
   "platforms": {
     "darwin-aarch64": {
       "signature": "$MAC_SIG_CONTENT",
-      "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi.app.tar.gz"
+      "url": "https://github.com/pietz/caipi/releases/download/v$VERSION/caipi.app.tar.gz"
     },
     "windows-x86_64": {
       "signature": "$WIN_SIG_CONTENT",
-      "url": "https://github.com/pietz/caipi.ai/releases/download/v$VERSION/caipi_x64.exe"
+      "url": "https://github.com/pietz/caipi/releases/download/v$VERSION/caipi_x64.exe"
     }
   }
 }
@@ -180,13 +180,13 @@ gh release create "v$VERSION" \
   "$RELEASE_DIR/latest.json" \
   "$WIN_EXE" \
   "$WIN_SIG" \
-  --repo pietz/caipi.ai \
+  --repo pietz/caipi \
   --title "v$VERSION" \
   --notes "Release v$VERSION"
 
 echo ""
 echo "=== Release v$VERSION published! ==="
-echo "https://github.com/pietz/caipi.ai/releases/tag/v$VERSION"
+echo "https://github.com/pietz/caipi/releases/tag/v$VERSION"
 
 # Cleanup temp dirs
 rm -rf "$WIN_DIR" "$RELEASE_DIR"

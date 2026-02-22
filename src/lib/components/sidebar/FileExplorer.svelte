@@ -94,7 +94,7 @@
   <!-- Footer -->
   <button
     class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer border-t border-border"
-    onclick={() => openUrl('https://github.com/pietz/caipi.ai/issues')}
+    onclick={() => openUrl('https://github.com/pietz/caipi/issues')}
   >
     <Bug size={12} />
     <span>Report an issue</span>

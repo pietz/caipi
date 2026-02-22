@@ -9,5 +9,7 @@ node_modules
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 opcode-main/
-website/
+website/node_modules/
+website/dist/
+website/.astro/
 yaak-main/

@@ -1,0 +1,104 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  canonicalPath?: string;
+  ogType?: string;
+  articleMeta?: {
+    datePublished?: string;
+    author?: string;
+  };
+}
+
+const { title, description = "Caipi is a desktop app for Claude Code. A native AI assistant for macOS and Windows that can read your files, run commands, do research, and get real work done on your computer.", canonicalPath = "/", ogType = "website", articleMeta } = Astro.props;
+const canonicalUrl = `https://caipi.ai${canonicalPath}`;
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta name="generator" content={Astro.generator} />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content="https://caipi.ai/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://caipi.ai/og-image.png" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json" set:html={JSON.stringify(
+      articleMeta ? {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": title,
+        "description": description,
+        "url": canonicalUrl,
+        ...(articleMeta.datePublished && { "datePublished": articleMeta.datePublished }),
+        "author": {
+          "@type": "Organization",
+          "name": articleMeta.author || "Caipi"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "Caipi",
+          "url": "https://caipi.ai"
+        }
+      } : {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Caipi",
+        "description": "A native desktop AI assistant powered by Claude. Read files, run commands, do research, and get real work done.",
+        "url": "https://caipi.ai",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "macOS 12+, Windows 10+",
+        "author": {
+          "@type": "Organization",
+          "name": "Caipi"
+        }
+      }
+    )} />
+
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen">
+    <slot />
+
+    <script is:inline>
+      // Initialize theme - always dark for this design
+      document.documentElement.classList.add('dark');
+
+      // Scroll-triggered reveal animations
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+          }
+        });
+      }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+      document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    </script>
+
+  </body>
+</html>

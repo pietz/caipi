@@ -383,25 +383,6 @@ describe('AppState Store', () => {
       expect(app.cliPath).toBe(null);
     });
 
-    it('setLicense updates license state', async () => {
-      const { app } = await import('./app.svelte');
-
-      expect(app.license).toBe(null);
-
-      const license = {
-        valid: true,
-        licenseKey: 'test-key',
-        activatedAt: 1700000000,
-        email: 'test@example.com',
-      };
-
-      app.setLicense(license);
-      expect(app.license).toEqual(license);
-
-      app.setLicense(null);
-      expect(app.license).toBe(null);
-    });
-
     it('cycleThinking cycles through thinking levels', async () => {
       const { app } = await import('./app.svelte');
 

@@ -1,0 +1,115 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import { getCollection } from 'astro:content';
+
+const articles = await getCollection('articles', ({ data }) => {
+  return data.draft !== true;
+});
+
+// Featured article (first one) and rest
+const [featured, ...rest] = articles;
+---
+
+<Layout title="Articles - Caipi" description="Learn about desktop AI assistants, how Caipi compares to ChatGPT and Claude.ai, and what you can do with AI that has access to your files." canonicalPath="/articles/">
+  <Nav currentPage="articles" />
+
+  <main class="pt-32 pb-16 px-4 md:px-8 relative">
+    <!-- Ambient glow -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-primary/5 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="max-w-4xl mx-auto relative">
+      <!-- Header -->
+      <div class="text-center mb-16">
+        <div class="inline-flex items-center gap-2 text-xs uppercase tracking-widest text-primary font-semibold mb-4 px-3 py-1 rounded-full border border-primary/20 bg-primary/5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          Learn
+        </div>
+        <h1 class="text-4xl md:text-5xl font-bold text-foreground mb-4 tracking-tight">Articles</h1>
+        <p class="text-xl text-muted-foreground max-w-2xl mx-auto">
+          Understanding desktop AI, comparing tools, and getting more done with AI that actually works with your computer.
+        </p>
+      </div>
+
+      <!-- Featured Article -->
+      {featured && (
+        <a href={`/articles/${featured.id}/`} class="block group mb-8">
+          <article class="relative p-8 md:p-10 rounded-2xl overflow-hidden">
+            <!-- Gradient background -->
+            <div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-card to-card"></div>
+            <div class="absolute inset-0 border border-primary/20 rounded-2xl"></div>
+
+            <!-- Content -->
+            <div class="relative">
+              <div class="flex items-center gap-2 mb-4">
+                <span class="text-xs font-medium text-primary uppercase tracking-wider">Featured</span>
+                <span class="text-muted-foreground">·</span>
+                {featured.data.date && <span class="text-xs text-muted-foreground">{featured.data.date}</span>}
+              </div>
+              <h2 class="text-2xl md:text-3xl font-bold text-foreground mb-3 group-hover:text-primary transition-colors">
+                {featured.data.title}
+              </h2>
+              <p class="text-muted-foreground leading-relaxed text-lg mb-6">
+                {featured.data.description}
+              </p>
+              <div class="flex items-center gap-2 text-primary font-medium">
+                Read article
+                <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+              </div>
+            </div>
+          </article>
+        </a>
+      )}
+
+      <!-- Other Articles Grid -->
+      {rest.length > 0 && (
+        <div class="grid md:grid-cols-2 gap-6">
+          {rest.map((article) => (
+            <a href={`/articles/${article.id}/`} class="block group">
+              <article class="relative h-full p-6 rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1">
+                <!-- Background -->
+                <div class="absolute inset-0 bg-gradient-to-br from-secondary/50 to-card border border-border group-hover:border-primary/30 rounded-xl transition-colors"></div>
+
+                <!-- Content -->
+                <div class="relative">
+                  {article.data.date && (
+                    <p class="text-xs text-muted-foreground mb-3">{article.data.date}</p>
+                  )}
+                  <h2 class="text-lg font-semibold text-foreground mb-2 group-hover:text-primary transition-colors">
+                    {article.data.title}
+                  </h2>
+                  <p class="text-muted-foreground text-sm leading-relaxed mb-4">
+                    {article.data.description}
+                  </p>
+                  <div class="flex items-center gap-1 text-sm text-primary font-medium">
+                    Read
+                    <svg class="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </article>
+            </a>
+          ))}
+        </div>
+      )}
+
+      <!-- Back link -->
+      <div class="mt-16 text-center">
+        <a href="/" class="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          Back to Caipi
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <Footer />
+</Layout>

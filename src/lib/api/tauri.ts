@@ -3,8 +3,6 @@ import type {
   BackendCliStatus,
   StartupInfo,
   RecentFolder,
-  LicenseStatus,
-  LicenseValidationResult,
   SessionInfo,
   ProjectSessions,
   HistoryMessage,
@@ -50,13 +48,6 @@ export const api = {
     invoke<void>('set_model', { sessionId, model }),
   setThinkingLevel: (sessionId: string, level: string) =>
     invoke<void>('set_thinking_level', { sessionId, level }),
-
-  // License
-  validateLicense: (licenseKey: string) =>
-    invoke<LicenseValidationResult>('validate_license', { licenseKey }),
-  getLicenseStatus: () => invoke<LicenseStatus>('get_license_status'),
-  clearLicense: () => invoke<void>('clear_license'),
-  revalidateLicenseBackground: () => invoke<void>('revalidate_license_background'),
 
   // CLI Path
   getBackendCliPath: (backend: string) => invoke<string | null>('get_backend_cli_path', { backend }),

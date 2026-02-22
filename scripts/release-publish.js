@@ -2,7 +2,6 @@ import { readFile, writeFile, access } from "fs/promises";
 import { execFileSync, execSync } from "child_process";
 import { join } from "path";
 
-const CAIPI_AI_PATH = "/Users/pietz/Private/caipi.ai";
 const BUNDLE_PATH = "src-tauri/target/release/bundle";
 
 async function fileExists(path) {
@@ -31,7 +30,7 @@ async function publish() {
     platforms: {
       "darwin-aarch64": {
         signature,
-        url: `https://github.com/pietz/caipi.ai/releases/download/v${version}/caipi.app.tar.gz`,
+        url: `https://github.com/pietz/caipi/releases/download/v${version}/caipi.app.tar.gz`,
       },
     },
   };
@@ -51,7 +50,7 @@ async function publish() {
     const windowsSignature = (await readFile(winSigPath, "utf-8")).trim();
     latestJson.platforms["windows-x86_64"] = {
       signature: windowsSignature,
-      url: `https://github.com/pietz/caipi.ai/releases/download/v${version}/caipi_x64.exe`,
+      url: `https://github.com/pietz/caipi/releases/download/v${version}/caipi_x64.exe`,
     };
   }
 
@@ -65,19 +64,7 @@ async function publish() {
   const sha256 = sha256Output.split(" ")[0];
   console.log(`✓ SHA256: ${sha256.slice(0, 16)}...`);
 
-  // 5. Update cask formula (if it exists)
-  const caskPath = join(CAIPI_AI_PATH, "Casks/caipi.rb");
-  try {
-    let caskContent = await readFile(caskPath, "utf-8");
-    caskContent = caskContent.replace(/version "[^"]+"/, `version "${version}"`);
-    caskContent = caskContent.replace(/sha256 "[^"]+"/, `sha256 "${sha256}"`);
-    await writeFile(caskPath, caskContent);
-    console.log(`✓ Updated cask formula`);
-  } catch (err) {
-    console.log(`⏭ Skipped cask formula (not found)`);
-  }
-
-  // 6. Create GitHub release with files
+  // 5. Create GitHub release with files
   const dmgFile = join(BUNDLE_PATH, "dmg/caipi_aarch64.dmg");
   const tgzFile = join(BUNDLE_PATH, "macos/caipi.app.tar.gz");
   const sigFile = join(BUNDLE_PATH, "macos/caipi.app.tar.gz.sig");
@@ -87,7 +74,7 @@ async function publish() {
   try {
     // Delete existing release if it exists (for re-runs)
     try {
-      execFileSync("gh", ["release", "delete", `v${version}`, "--repo", "pietz/caipi.ai", "--yes"], {
+      execFileSync("gh", ["release", "delete", `v${version}`, "--repo", "pietz/caipi", "--yes"], {
         stdio: "ignore",
       });
     } catch {
@@ -108,7 +95,7 @@ async function publish() {
         `v${version}`,
         ...releaseFiles,
         "--repo",
-        "pietz/caipi.ai",
+        "pietz/caipi",
         "--title",
         `v${version}`,
         "--notes",
@@ -122,22 +109,10 @@ async function publish() {
     process.exit(1);
   }
 
-  // 7. Commit cask formula update (if it exists)
-  try {
-    await readFile(caskPath, "utf-8"); // Check if file exists
-    console.log(`\n📝 Committing cask formula update...\n`);
-    execSync(`git -C "${CAIPI_AI_PATH}" add Casks/caipi.rb`);
-    execSync(`git -C "${CAIPI_AI_PATH}" commit -m "Update cask to v${version}"`);
-    execSync(`git -C "${CAIPI_AI_PATH}" push`);
-    console.log(`✓ Cask formula committed and pushed`);
-  } catch (err) {
-    // Cask doesn't exist or no changes - skip silently
-  }
-
   console.log(`
 ✅ Release v${version} published!
 
-Download: https://github.com/pietz/caipi.ai/releases/latest/download/caipi_aarch64.dmg
+Download: https://github.com/pietz/caipi/releases/latest/download/caipi_aarch64.dmg
 `);
 }
 
