@@ -10,6 +10,7 @@ import {
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 import { invoke } from '@tauri-apps/api/core';
+import { error as logError } from '$lib/utils/logger';
 
 // Mock the stores
 vi.mock('$lib/stores/chat.svelte', () => ({
@@ -930,6 +931,7 @@ describe('handleChatEvent', () => {
     });
 
     it('should prefer context token/window when provided', () => {
+      chat.tokenCount = 0; // ensure clean state
       const event: ChatEvent = {
         type: 'TokenUsage',
         totalTokens: 1234,
@@ -941,6 +943,22 @@ describe('handleChatEvent', () => {
 
       expect(chat.tokenCount).toBe(800);
       expect(chat.contextWindow).toBe(200000);
+    });
+
+    it('should use high-water mark to avoid sub-agent context flicker', () => {
+      chat.tokenCount = 0;
+
+      // Main agent reports 150k context
+      handleChatEvent({ type: 'TokenUsage', totalTokens: 150000 } as ChatEvent);
+      expect(chat.tokenCount).toBe(150000);
+
+      // Sub-agent reports smaller context — should be ignored
+      handleChatEvent({ type: 'TokenUsage', totalTokens: 5000 } as ChatEvent);
+      expect(chat.tokenCount).toBe(150000);
+
+      // Main agent resumes with higher context
+      handleChatEvent({ type: 'TokenUsage', totalTokens: 155000 } as ChatEvent);
+      expect(chat.tokenCount).toBe(155000);
     });
 
     it('should ignore TokenUsage without matching sessionId', () => {
@@ -1075,8 +1093,6 @@ describe('handleChatEvent', () => {
     });
 
     it('should log error and return early if no permissionRequestId', async () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
       const tool: ToolState = {
         id: 'tool-123',
         toolType: 'Edit',
@@ -1088,17 +1104,13 @@ describe('handleChatEvent', () => {
 
       await respondToPermission('session-789', tool, true);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'No permission request ID for tool:',
-        'tool-123'
+      expect(logError).toHaveBeenCalledWith(
+        'No permission request ID for tool: tool-123'
       );
       expect(invoke).not.toHaveBeenCalled();
-
-      consoleSpy.mockRestore();
     });
 
     it('should handle invoke errors gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       vi.mocked(invoke).mockRejectedValue(new Error('Network error'));
 
       const tool: ToolState = {
@@ -1113,12 +1125,9 @@ describe('handleChatEvent', () => {
 
       await respondToPermission('session-789', tool, true);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Failed to respond to permission:',
-        expect.any(Error)
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to respond to permission:')
       );
-
-      consoleSpy.mockRestore();
     });
   });
 });

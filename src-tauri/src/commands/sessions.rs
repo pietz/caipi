@@ -48,6 +48,8 @@ pub struct HistoryTool {
     #[serde(rename = "toolType")]
     pub tool_type: String,
     pub target: String,
+    #[serde(rename = "isError")]
+    pub is_error: bool,
 }
 
 /// Message from session history for display

@@ -332,7 +332,7 @@ class ChatState {
 
   // --- History ---
 
-  loadHistory(historyMessages: Array<{ id: string; role: string; content: string; timestamp: number; tools: Array<{ id: string; toolType: string; target: string }> }>) {
+  loadHistory(historyMessages: Array<{ id: string; role: string; content: string; timestamp: number; tools: Array<{ id: string; toolType: string; target: string; isError?: boolean }> }>) {
     // Merge consecutive assistant messages that have tools but no text content
     const mergedMessages: Message[] = [];
     let toolCounter = 0;
@@ -342,7 +342,7 @@ class ChatState {
         id: tool.id,
         toolType: tool.toolType,
         target: tool.target,
-        status: 'history' as const,
+        status: (tool.isError ? 'error' : 'history') as ToolStatus,
         timestamp: msg.timestamp,
         insertionIndex: toolCounter++,
       }));

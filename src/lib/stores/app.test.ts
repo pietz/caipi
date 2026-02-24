@@ -386,14 +386,17 @@ describe('AppState Store', () => {
     it('cycleThinking cycles through thinking levels', async () => {
       const { app } = await import('./app.svelte');
 
-      // Claude CLI currently has no thinking controls exposed.
-      expect(app.thinkingLevel).toBe('');
+      // Sonnet 4.6 (default) has thinking options: low, medium, high
+      expect(app.thinkingLevel).toBe('medium');
 
       app.cycleThinking();
-      expect(app.thinkingLevel).toBe('');
+      expect(app.thinkingLevel).toBe('high');
 
       app.cycleThinking();
-      expect(app.thinkingLevel).toBe('');
+      expect(app.thinkingLevel).toBe('low');
+
+      app.cycleThinking();
+      expect(app.thinkingLevel).toBe('medium');
     });
 
     it('setThinkingLevel updates and persists thinking level per model', async () => {
@@ -545,6 +548,7 @@ describe('AppState Store', () => {
       vi.spyOn(chat, 'loadHistory').mockImplementation(() => {});
       vi.mocked(invoke)
         .mockResolvedValueOnce('session-resume')  // create_session
+        .mockResolvedValueOnce(undefined)          // set_thinking_level
         .mockResolvedValueOnce(history);          // get_session_history
 
       await app.resumeSession('/test/project', 'session-abc');
@@ -559,9 +563,10 @@ describe('AppState Store', () => {
           backend: 'claude',
         })
       );
-      expect(invoke).not.toHaveBeenCalledWith(
+      // Sonnet 4.6 has thinking options, so thinking level is synced
+      expect(invoke).toHaveBeenCalledWith(
         'set_thinking_level',
-        expect.anything()
+        expect.objectContaining({ level: 'medium' })
       );
       expect(invoke).toHaveBeenCalledWith('get_session_history', {
         folderPath: '/test/project',

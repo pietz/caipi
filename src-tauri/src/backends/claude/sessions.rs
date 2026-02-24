@@ -234,6 +234,8 @@ pub(crate) fn load_session_history_messages(
 
     let mut messages: Vec<HistoryMessage> = Vec::new();
     let mut seen_uuids: HashSet<String> = HashSet::new();
+    // Track tool_result errors: tool_use_id -> is_error
+    let mut tool_errors: HashSet<String> = HashSet::new();
 
     for line in content.lines() {
         if line.trim().is_empty() {
@@ -289,6 +291,24 @@ pub(crate) fn load_session_history_messages(
                 // Simple string content (user messages)
                 content_text.to_string()
             } else if let Some(content_arr) = message.get("content").and_then(|v| v.as_array()) {
+                // Scan for tool_result blocks with is_error in user messages
+                if role == "user" {
+                    for block in content_arr {
+                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                            if block
+                                .get("is_error")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                if let Some(tid) =
+                                    block.get("tool_use_id").and_then(|v| v.as_str())
+                                {
+                                    tool_errors.insert(tid.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
                 // Array content (assistant messages with text/tool_use blocks)
                 let mut text_parts: Vec<String> = Vec::new();
                 let mut thinking_idx: usize = 0;
@@ -319,6 +339,7 @@ pub(crate) fn load_session_history_messages(
                                         id: tool_id,
                                         tool_type: tool_name,
                                         target,
+                                        is_error: false, // patched after full parse
                                     });
                                 }
                             }
@@ -333,6 +354,7 @@ pub(crate) fn load_session_history_messages(
                                         id: thinking_id,
                                         tool_type: "Thinking".to_string(),
                                         target: thinking_content.to_string(),
+                                        is_error: false,
                                     });
                                 }
                             }
@@ -363,6 +385,17 @@ pub(crate) fn load_session_history_messages(
             timestamp,
             tools,
         });
+    }
+
+    // Patch tool error status from collected tool_result blocks
+    if !tool_errors.is_empty() {
+        for msg in &mut messages {
+            for tool in &mut msg.tools {
+                if tool_errors.contains(&tool.id) {
+                    tool.is_error = true;
+                }
+            }
+        }
     }
 
     Ok(messages)

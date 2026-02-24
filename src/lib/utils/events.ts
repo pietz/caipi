@@ -319,7 +319,12 @@ function handleStateChangedEvent(event: Extract<ChatEvent, { type: 'StateChanged
 }
 
 function handleTokenUsageEvent(event: Extract<ChatEvent, { type: 'TokenUsage' }>) {
-  chat.tokenCount = event.contextTokens ?? event.totalTokens;
+  const tokens = event.contextTokens ?? event.totalTokens;
+  // Use high-water mark: sub-agents report smaller context than the main agent,
+  // so only update if the new value is >= current to avoid flickering.
+  if (tokens >= chat.tokenCount) {
+    chat.tokenCount = tokens;
+  }
   chat.contextWindow = event.contextWindow ?? null;
 }
 

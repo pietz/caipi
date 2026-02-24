@@ -6,6 +6,7 @@
   import { ClaudeIcon, OpenAIIcon } from '$lib/components/icons';
   import { theme, type ThemePreference } from '$lib/stores/theme.svelte';
   import { app } from '$lib/stores/app.svelte';
+  import { chat } from '$lib/stores/chat.svelte';
   import { api } from '$lib/api';
   import type { Backend } from '$lib/config/backends';
 
@@ -95,6 +96,11 @@
     if (backend === app.defaultBackend) return;
     await app.setDefaultBackend(backend);
     cliPathInput = app.getCliPath(backend) ?? '';
+    // Auto-start a new session on the new backend if one is active
+    if (app.sessionId && app.folder) {
+      chat.reset();
+      await app.startSession(app.folder);
+    }
   }
 </script>
 
@@ -151,7 +157,7 @@
           {/each}
         </div>
         <p class="text-[10px] text-muted-foreground/70 mt-1">
-          Applies to new sessions only. Current chat continues on {app.sessionBackend ?? app.defaultBackend}.
+          Switching backends will start a new session. Current backend: {app.sessionBackend ?? app.defaultBackend}.
         </p>
       </div>
 

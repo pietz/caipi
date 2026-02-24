@@ -91,6 +91,10 @@ pub struct CliSession {
     model: Arc<RwLock<String>>,
     /// Model the running process was started with (for detecting model changes)
     process_model: Arc<RwLock<Option<String>>>,
+    /// Current thinking/effort level (what the user wants; empty = CLI default)
+    thinking_level: Arc<RwLock<String>>,
+    /// Thinking level the running process was started with (for detecting changes)
+    process_thinking_level: Arc<RwLock<Option<String>>>,
     /// CLI path override
     cli_path: Option<String>,
     /// Resume session ID (if resuming)
@@ -212,6 +216,7 @@ impl CliSession {
         *process_guard = None;
         *self.stdin_writer.lock().await = None;
         *self.process_model.write().await = None;
+        *self.process_thinking_level.write().await = None;
     }
 
     async fn abort_background_tasks(&self) {
@@ -245,6 +250,8 @@ impl CliSession {
             permission_mode: Arc::new(RwLock::new(permission_mode)),
             model: Arc::new(RwLock::new(model)),
             process_model: Arc::new(RwLock::new(None)),
+            thinking_level: Arc::new(RwLock::new(String::new())),
+            process_thinking_level: Arc::new(RwLock::new(None)),
             cli_path: config.cli_path,
             resume_session_id: config.resume_session_id,
             app_handle,
@@ -281,10 +288,12 @@ impl CliSession {
 
         let cli_cmd = self.cli_path.as_deref().unwrap_or("claude");
         let model = self.model.read().await.clone();
+        let thinking_level = self.thinking_level.read().await.clone();
         let permission_mode = self.permission_mode.read().await.clone();
 
-        // Store the model we're spawning with
+        // Store the model and thinking level we're spawning with
         *self.process_model.write().await = Some(model.clone());
+        *self.process_thinking_level.write().await = Some(thinking_level.clone());
 
         let mut cmd = Command::new(cli_cmd);
         cmd.arg("-p")
@@ -295,6 +304,11 @@ impl CliSession {
             .arg("stream-json")
             .arg("--model")
             .arg(&model);
+
+        // Append --effort if a thinking level is set (empty = let CLI use its default)
+        if !thinking_level.is_empty() {
+            cmd.arg("--effort").arg(&thinking_level);
+        }
 
         // Map permission mode to CLI flag
         // Note: We only use --dangerously-skip-permissions for bypass mode.
@@ -600,15 +614,21 @@ impl BackendSession for CliSession {
         // Check if we have an active process
         let has_process = self.process.lock().await.is_some();
 
-        // Check if model changed since process was spawned
+        // Check if model or thinking level changed since process was spawned
         let current_model = self.model.read().await.clone();
         let process_model = self.process_model.read().await.clone();
         let model_changed = has_process && process_model.as_ref() != Some(&current_model);
 
-        log::debug!("Message routing: has_process={}, model_changed={}, has_cli_session={}", has_process, model_changed, self.cli_session_id.read().await.is_some());
+        let current_thinking = self.thinking_level.read().await.clone();
+        let process_thinking = self.process_thinking_level.read().await.clone();
+        let thinking_changed = has_process && process_thinking.as_ref() != Some(&current_thinking);
 
-        let result = if model_changed {
-            // Model changed - kill old process and respawn with --resume to preserve conversation
+        let needs_respawn = model_changed || thinking_changed;
+
+        log::debug!("Message routing: has_process={}, model_changed={}, thinking_changed={}, has_cli_session={}", has_process, model_changed, thinking_changed, self.cli_session_id.read().await.is_some());
+
+        let result = if needs_respawn {
+            // Model or thinking level changed - kill old process and respawn with --resume to preserve conversation
             self.cleanup_process().await;
             self.spawn_cli_internal(message, true).await
         } else if has_process {
@@ -697,12 +717,9 @@ impl BackendSession for CliSession {
         Ok(())
     }
 
-    async fn set_thinking_level(&self, _level: String) -> Result<(), BackendError> {
-        Err(BackendError {
-            message: "Thinking level control is not supported for the Claude CLI backend"
-                .to_string(),
-            recoverable: true,
-        })
+    async fn set_thinking_level(&self, level: String) -> Result<(), BackendError> {
+        *self.thinking_level.write().await = level;
+        Ok(())
     }
 }
 

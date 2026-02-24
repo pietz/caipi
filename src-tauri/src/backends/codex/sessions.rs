@@ -393,6 +393,7 @@ pub(crate) fn load_codex_history_messages(
                         id: format!("{}-tool-{}", session_id, tool_idx),
                         tool_type,
                         target,
+                        is_error: false, // Codex logs don't track per-tool errors
                     });
                     tool_idx += 1;
                 }

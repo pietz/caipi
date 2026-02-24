@@ -23,9 +23,16 @@ export interface BackendConfig {
 export const backendConfigs: Record<Backend, BackendConfig> = {
   claude: {
     models: [
-      // CLI backend currently doesn't support toggling thinking levels programmatically.
-      { id: 'opus', name: 'Opus 4.6', size: 'large', thinkingOptions: [], defaultThinking: '' },
-      { id: 'sonnet', name: 'Sonnet 4.5', size: 'medium', thinkingOptions: [], defaultThinking: '' },
+      { id: 'opus', name: 'Opus 4.6', size: 'large', thinkingOptions: [
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Med' },
+        { value: 'high', label: 'High' },
+      ], defaultThinking: 'medium' },
+      { id: 'sonnet', name: 'Sonnet 4.6', size: 'medium', thinkingOptions: [
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Med' },
+        { value: 'high', label: 'High' },
+      ], defaultThinking: 'medium' },
       { id: 'haiku', name: 'Haiku 4.5', size: 'small', thinkingOptions: [], defaultThinking: '' },
     ],
     contextLimit: 200_000,

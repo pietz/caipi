@@ -231,11 +231,13 @@ pub fn extract_approval_tool_info(method: &str, params: &Value) -> (String, Stri
 /// Extract token usage from `thread/tokenUsage/updated` notification params
 /// or from `turn/completed` params (legacy).
 pub fn token_usage_from_turn_completed(params: &Value) -> Option<(u64, Option<u64>, Option<u64>)> {
-    // thread/tokenUsage/updated: params.tokenUsage.total.totalTokens (camelCase)
-    // Also try params.usage and params directly as fallbacks.
+    // thread/tokenUsage/updated has two buckets:
+    //   - "total": cumulative across all API calls in the session (NOT what we want)
+    //   - "last":  the most recent API call (= actual context window fill)
+    // Prefer "last" for accurate context tracking, fall back to "total" then legacy paths.
     let usage = params
         .get("tokenUsage")
-        .and_then(|tu| tu.get("total"))
+        .and_then(|tu| tu.get("last").or_else(|| tu.get("total")))
         .or_else(|| params.get("usage"))
         .unwrap_or(params);
 
@@ -396,5 +398,31 @@ mod tests {
         assert_eq!(total, 1200);
         assert_eq!(ctx, Some(1000));
         assert_eq!(window, Some(128000));
+    }
+
+    #[test]
+    fn token_usage_prefers_last_over_total() {
+        // thread/tokenUsage/updated has "last" (per-call) and "total" (cumulative).
+        // We should use "last" for accurate context fill tracking.
+        let params = json!({
+            "tokenUsage": {
+                "total": {
+                    "totalTokens": 22925,
+                    "inputTokens": 22912,
+                    "outputTokens": 13
+                },
+                "last": {
+                    "totalTokens": 11475,
+                    "inputTokens": 11468,
+                    "outputTokens": 7
+                },
+                "modelContextWindow": 258400
+            }
+        });
+        let (total, ctx, window) = token_usage_from_turn_completed(&params).unwrap();
+        // Should use "last" values, not cumulative "total"
+        assert_eq!(total, 11475);
+        assert_eq!(ctx, Some(11468));
+        assert_eq!(window, Some(258400));
     }
 }
