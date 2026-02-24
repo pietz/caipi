@@ -11,6 +11,25 @@ use super::runtime::PermissionChannels;
 #[cfg(target_os = "windows")]
 pub const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Append Homebrew paths to the command's `PATH` environment variable on macOS.
+///
+/// Tauri apps don't inherit the user's shell PATH, so tools installed via
+/// Homebrew (ffmpeg, node, etc.) are invisible to CLI subprocesses. This
+/// prepends `/opt/homebrew/bin` and `/opt/homebrew/sbin` when they exist.
+#[cfg(target_os = "macos")]
+pub fn add_homebrew_paths(cmd: &mut tokio::process::Command) {
+    use std::path::Path;
+
+    let homebrew_bin = Path::new("/opt/homebrew/bin");
+    if !homebrew_bin.exists() {
+        return;
+    }
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("/opt/homebrew/bin:/opt/homebrew/sbin:{current_path}");
+    cmd.env("PATH", new_path);
+}
+
 /// Cancel and await a background task stored in an `Arc<Mutex<Option<JoinHandle<()>>>>`.
 ///
 /// Takes the handle out of the mutex, aborts it, and awaits completion.

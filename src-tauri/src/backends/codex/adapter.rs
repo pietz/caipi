@@ -304,6 +304,9 @@ impl CodexSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        #[cfg(target_os = "macos")]
+        crate::backends::utils::add_homebrew_paths(&mut command);
+
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;

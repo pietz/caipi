@@ -323,6 +323,9 @@ impl CliSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        #[cfg(target_os = "macos")]
+        crate::backends::utils::add_homebrew_paths(&mut cmd);
+
         // On Windows, hide the console window
         #[cfg(target_os = "windows")]
         cmd.creation_flags(crate::backends::utils::CREATE_NO_WINDOW);

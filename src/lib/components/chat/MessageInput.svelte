@@ -131,7 +131,7 @@
               class="justify-start gap-2 h-8 text-xs whitespace-nowrap"
               onclick={handleModelClick}
             >
-              <ModelSizeIcon size={currentModel.size} />
+              <ModelSizeIcon size={currentModel.size} backend={app.activeBackend} />
               {currentModel.name}
             </Button>
           </Tooltip>

@@ -4,11 +4,12 @@
 
   interface Props {
     percentage?: number;
+    label?: string;
     class?: string;
     onclick?: () => void;
   }
 
-  let { percentage = 0, class: className, onclick }: Props = $props();
+  let { percentage = 0, label, class: className, onclick }: Props = $props();
 
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
@@ -49,5 +50,9 @@
       class="transition-all duration-300"
     />
   </svg>
-  <span>{percentage}%</span>
+  {#if label}
+    <span>{label}</span>
+  {:else if percentage > 0}
+    <span>{percentage}%</span>
+  {/if}
 </Button>

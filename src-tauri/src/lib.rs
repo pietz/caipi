@@ -73,7 +73,6 @@ pub fn run() {
                         return;
                     }
 
-                    let window_to_close = window.clone();
                     let app_handle = window.app_handle().clone();
 
                     tauri::async_runtime::spawn(async move {
@@ -97,8 +96,9 @@ pub fn run() {
 
                         log::info!("All sessions cleaned up");
 
-                        // Trigger close again; this time the event is allowed.
-                        let _ = window_to_close.close();
+                        // Exit the process directly — re-triggering close would
+                        // be caught by prevent_close() again.
+                        app_handle.exit(0);
                     });
                 }
             }
