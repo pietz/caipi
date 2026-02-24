@@ -11,7 +11,15 @@ const featuresLink = isHome ? '#features' : '/#features';
 const downloadLink = isHome ? '#download' : '/#download';
 ---
 
-<nav class="fixed top-0 left-0 right-0 z-50 px-6 md:px-12 py-6 flex justify-between items-center" style="background: linear-gradient(to bottom, var(--background) 0%, transparent 100%);">
+<div class="fixed top-0 left-0 right-0 z-50" style="background: linear-gradient(to bottom, var(--background) 0%, var(--background) 80%, transparent 100%);">
+  <div class="bg-primary/10 border-b border-primary/20 px-4 py-1.5 text-center text-xs sm:text-sm">
+    <span class="font-semibold text-foreground">Previously purchased Caipi?</span>
+    <span class="text-muted-foreground"> Now free &amp; open source. </span>
+    <a href="/refund" class="text-primary hover:text-primary/80 font-medium underline underline-offset-2 transition-colors">
+      Request a refund
+    </a>
+  </div>
+  <nav class="px-6 md:px-12 py-4 flex justify-between items-center">
   <a href="/" class="flex items-center gap-2 font-display font-bold text-lg tracking-tight text-foreground">
     <img src="/caipi-icon.png" alt="Caipi" class="w-10 h-10 rounded-lg" />
     Caipi
@@ -45,4 +53,5 @@ const downloadLink = isHome ? '#download' : '/#download';
       GitHub
     </a>
   </div>
-</nav>
+  </nav>
+</div>
