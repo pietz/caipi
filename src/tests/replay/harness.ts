@@ -39,6 +39,7 @@ export function replay(events: ChatEvent[], opts: ReplayOptions = {}): ReplayRes
   resetInvariantState();
 
   // Set up app state for session/turn gating
+  app.setScreen('chat');
   app.setSessionId(opts.sessionId ?? null);
   chat.setActiveTurnId(opts.turnId ?? null);
 

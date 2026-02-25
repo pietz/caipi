@@ -62,6 +62,10 @@ export function setOnContentChange(callback: (() => void) | null) {
 }
 
 export function handleChatEvent(event: ChatEvent, options: EventHandlerOptions = {}) {
+  if (app.screen !== 'chat') {
+    return;
+  }
+
   const { onComplete, onError } = options;
 
   if (shouldIgnoreEvent(event)) {

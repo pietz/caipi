@@ -7,12 +7,36 @@ use backends::codex::CodexBackend;
 use backends::PermissionChannels;
 use backends::{BackendKind, BackendRegistry, BackendSession};
 use commands::chat::SessionStore;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_log::{Target, TargetKind};
 use tokio::sync::Mutex;
+
+pub(crate) fn create_chat_window(app_handle: &AppHandle) -> Result<String, String> {
+    let label = format!("chat-{}", uuid::Uuid::new_v4());
+
+    let mut builder =
+        WebviewWindowBuilder::new(app_handle, &label, WebviewUrl::App("?picker=1".into()))
+            .inner_size(900.0, 640.0)
+            .min_inner_size(800.0, 512.0)
+            .center();
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .hidden_title(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: 16.0,
+                y: 16.0,
+            }));
+    }
+
+    builder.build().map_err(|e| e.to_string())?;
+
+    Ok(label)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -39,9 +63,9 @@ pub fn run() {
     }
 
     let registry = Arc::new(registry);
-    let close_in_progress = Arc::new(AtomicBool::new(false));
+    let closing_windows = Arc::new(std::sync::Mutex::new(HashSet::<String>::new()));
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
@@ -63,30 +87,51 @@ pub fn run() {
         .manage(permission_channels)
         .manage(registry)
         .on_window_event({
-            let close_in_progress = close_in_progress.clone();
+            let closing_windows = closing_windows.clone();
             move |window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
 
-                    // Cleanup already in progress – just keep blocking.
-                    if close_in_progress.swap(true, Ordering::SeqCst) {
+                    let app_handle = window.app_handle().clone();
+                    let label = window.label().to_string();
+                    let should_start_cleanup = if let Ok(mut closing) = closing_windows.lock() {
+                        if closing.contains(&label) {
+                            false
+                        } else {
+                            closing.insert(label.clone());
+                            true
+                        }
+                    } else {
+                        true
+                    };
+
+                    if !should_start_cleanup {
                         return;
                     }
 
-                    let app_handle = window.app_handle().clone();
-
+                    let closing_windows = closing_windows.clone();
                     tauri::async_runtime::spawn(async move {
                         let sessions: tauri::State<'_, SessionStore> = app_handle.state();
-
-                        // Drain sessions from store while holding lock briefly.
                         let sessions_to_cleanup: Vec<(String, Arc<dyn BackendSession>)> = {
                             let mut store = sessions.lock().await;
-                            store.drain().collect()
+                            let session_ids: Vec<String> = store
+                                .iter()
+                                .filter(|(_, entry)| entry.window_label == label.as_str())
+                                .map(|(session_id, _)| session_id.clone())
+                                .collect();
+
+                            session_ids
+                                .into_iter()
+                                .filter_map(|session_id| {
+                                    store
+                                        .remove(&session_id)
+                                        .map(|entry| (session_id, entry.session))
+                                })
+                                .collect()
                         };
 
-                        // Cleanup all sessions without holding the store lock.
-                        for (id, session) in sessions_to_cleanup {
-                            log::info!("Cleaning up session: {}", id);
+                        for (session_id, session) in sessions_to_cleanup {
+                            log::info!("Cleaning up session: {}", session_id);
                             let _ = tokio::time::timeout(
                                 std::time::Duration::from_secs(3),
                                 session.cleanup(),
@@ -94,11 +139,19 @@ pub fn run() {
                             .await;
                         }
 
-                        log::info!("All sessions cleaned up");
+                        if let Some(closing_window) = app_handle.get_webview_window(&label) {
+                            if let Err(err) = closing_window.destroy() {
+                                log::warn!("Failed to destroy window {}: {}", label, err);
+                            }
+                        }
 
-                        // Exit the process directly — re-triggering close would
-                        // be caught by prevent_close() again.
-                        app_handle.exit(0);
+                        if app_handle.webview_windows().is_empty() {
+                            app_handle.exit(0);
+                        }
+
+                        if let Ok(mut closing) = closing_windows.lock() {
+                            closing.remove(&label);
+                        }
                     });
                 }
             }
@@ -123,6 +176,7 @@ pub fn run() {
             // File commands
             commands::list_directory,
             // Chat commands
+            commands::create_window,
             commands::create_session,
             commands::destroy_session,
             commands::send_message,
@@ -132,6 +186,21 @@ pub fn run() {
             commands::set_model,
             commands::set_thinking_level,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            if !has_visible_windows {
+                if let Err(err) = create_chat_window(app_handle) {
+                    log::error!("Failed to reopen chat window: {}", err);
+                }
+            }
+        }
+    });
 }

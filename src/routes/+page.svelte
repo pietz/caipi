@@ -38,6 +38,13 @@
       // the session picker is responsive.
       app.prewarmRecentSessions();
 
+      const showPicker = new URLSearchParams(window.location.search).get('picker') === '1';
+      if (showPicker && startupInfo.onboardingCompleted) {
+        app.setScreen('folder');
+        app.setLoading(false);
+        return;
+      }
+
       // If onboarding is completed and we have a default folder, go directly to chat
       if (startupInfo.onboardingCompleted && startupInfo.defaultFolder) {
         // Validate the folder still exists/is accessible

@@ -1,6 +1,6 @@
-<script lang="ts">
+  <script lang="ts">
   import { api } from '$lib/api';
-  import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { onMount, onDestroy, tick } from 'svelte';
   import { renderMarkdown } from '$lib/utils/markdown';
   import { NavigationBar } from '$lib/components/navigation';
@@ -32,7 +32,7 @@
 
     // Listen for backend-neutral chat events
     debug('Chat event listener registered');
-    unlisten = await listen<ChatEvent>('chat:event', (event) => {
+    unlisten = await getCurrentWebviewWindow().listen<ChatEvent>('chat:event', (event) => {
       handleChatEvent(event.payload, { onComplete: processQueuedMessages });
       scrollToBottom();
     });

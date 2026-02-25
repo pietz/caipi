@@ -13,4 +13,7 @@ pub mod codex;
 
 pub use runtime::{emit_chat_event, PermissionChannels, PermissionResponse};
 pub use session::BackendSession;
-pub use types::{BackendError, BackendKind, BackendRegistry, ChatEvent, Message, SessionConfig, SessionStore};
+pub use types::{
+    BackendError, BackendKind, BackendRegistry, ChatEvent, Message, SessionConfig, SessionRecord,
+    SessionStore,
+};

@@ -1,10 +1,11 @@
 //! Shared runtime primitives for backend integrations.
 
 use crate::backends::types::ChatEvent;
+use crate::backends::types::SessionStore;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{oneshot, Mutex};
 
 /// Backend-neutral event channel for chat stream updates.
@@ -34,6 +35,29 @@ pub fn emit_chat_event(
         turn_id,
         event,
     };
+
+    if let Some(session_id) = session_id {
+        if let Some(sessions) = app_handle.try_state::<SessionStore>() {
+            let target_window = sessions.try_lock().ok().and_then(|store| {
+                store
+                    .get(session_id)
+                    .map(|entry| entry.window_label.clone())
+            });
+
+            if let Some(window_label) = target_window {
+                if app_handle.get_webview_window(&window_label).is_some() {
+                    let _ = app_handle.emit_to(window_label, CHAT_EVENT_CHANNEL, &payload);
+                    return;
+                }
+                log::warn!(
+                    "Session {} mapped to missing window {}; falling back to broadcast",
+                    session_id,
+                    window_label
+                );
+            }
+        }
+    }
+
     let _ = app_handle.emit(CHAT_EVENT_CHANNEL, &payload);
 }
 

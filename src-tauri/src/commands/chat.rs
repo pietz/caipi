@@ -1,9 +1,9 @@
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::backends::{
     emit_chat_event, BackendRegistry, BackendSession, PermissionChannels, PermissionResponse,
-    SessionConfig,
+    SessionConfig, SessionRecord,
 };
 use crate::storage;
 
@@ -18,7 +18,7 @@ async fn get_session_from_store(
     let store = sessions.lock().await;
     store
         .get(session_id)
-        .cloned()
+        .map(|entry| entry.session.clone())
         .ok_or("Session not found".to_string())
 }
 
@@ -27,7 +27,7 @@ async fn remove_session_from_store(
     session_id: &str,
 ) -> Option<Arc<dyn BackendSession>> {
     let mut store = sessions.lock().await;
-    store.remove(session_id)
+    store.remove(session_id).map(|entry| entry.session)
 }
 
 #[tauri::command]
@@ -38,6 +38,7 @@ pub async fn create_session(
     resume_session_id: Option<String>,
     cli_path: Option<String>,
     backend: Option<String>,
+    window: WebviewWindow,
     app: AppHandle,
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
@@ -74,7 +75,9 @@ pub async fn create_session(
                     // No path stored — run detection to find the binary.
                     // Tauri apps don't inherit the user's shell PATH, so bare
                     // binary names like "codex" won't resolve.
-                    let status = crate::commands::setup::check_backend_cli_installed_internal(&backend_name).await;
+                    let status =
+                        crate::commands::setup::check_backend_cli_installed_internal(&backend_name)
+                            .await;
                     status.path
                 }
             }
@@ -97,11 +100,36 @@ pub async fn create_session(
         .map_err(|e| e.to_string())?;
 
     let session_id = session.session_id().to_string();
+    let window_label = window.label().to_string();
 
-    let mut store = sessions.lock().await;
-    store.insert(session_id.clone(), session);
+    {
+        let mut store = sessions.lock().await;
+        store.insert(
+            session_id.clone(),
+            SessionRecord {
+                session,
+                window_label: window_label.clone(),
+            },
+        );
+    }
 
-    log::info!("Session created: id={}, backend={}, folder={}", session_id, backend_name, folder_path);
+    // Close races can destroy the window while the backend session is still
+    // being created. In that case, cleanup immediately to avoid orphaned
+    // sessions with no owning window.
+    if app.get_webview_window(&window_label).is_none() {
+        if let Some(session) = remove_session_from_store(&sessions, &session_id).await {
+            session.cleanup().await;
+        }
+        return Err("Window was closed while creating session".to_string());
+    }
+
+    log::info!(
+        "Session created: id={}, backend={}, folder={}, window={}",
+        session_id,
+        backend_name,
+        folder_path,
+        window_label
+    );
 
     Ok(session_id)
 }
@@ -123,6 +151,11 @@ pub async fn destroy_session(session_id: String, app: AppHandle) -> Result<(), S
 }
 
 #[tauri::command]
+pub async fn create_window(app: AppHandle) -> Result<String, String> {
+    crate::create_chat_window(&app)
+}
+
+#[tauri::command]
 pub async fn send_message(
     session_id: String,
     message: String,
@@ -135,7 +168,12 @@ pub async fn send_message(
     let session = get_session_from_store(&sessions, &session_id).await?;
     // Lock is now released!
 
-    log::debug!("Sending message: session={}, len={}, turn={:?}", session_id, message.len(), turn_id);
+    log::debug!(
+        "Sending message: session={}, len={}, turn={:?}",
+        session_id,
+        message.len(),
+        turn_id
+    );
 
     // Send message via the backend session
     match session.send_message(&message, turn_id.as_deref()).await {
@@ -172,7 +210,11 @@ pub async fn respond_permission(
     };
 
     if let Some(tx) = sender {
-        log::debug!("Permission response: request={}, allowed={}", request_id, allowed);
+        log::debug!(
+            "Permission response: request={}, allowed={}",
+            request_id,
+            allowed
+        );
         let _ = tx.send(PermissionResponse { allowed });
         Ok(())
     } else {
@@ -259,10 +301,8 @@ pub async fn set_thinking_level(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        get_session_from_store, remove_session_from_store, BackendSession, SessionStore,
-    };
-    use crate::backends::{BackendError, BackendKind};
+    use super::{get_session_from_store, remove_session_from_store, BackendSession, SessionStore};
+    use crate::backends::{BackendError, BackendKind, SessionRecord};
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -335,10 +375,13 @@ mod tests {
     async fn get_session_from_store_returns_existing_session() {
         let sessions = test_store();
         let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-1"));
-        sessions
-            .lock()
-            .await
-            .insert("session-1".to_string(), session);
+        sessions.lock().await.insert(
+            "session-1".to_string(),
+            SessionRecord {
+                session,
+                window_label: "main".to_string(),
+            },
+        );
 
         let found = get_session_from_store(&sessions, "session-1")
             .await
@@ -358,10 +401,13 @@ mod tests {
     async fn remove_session_from_store_removes_and_returns_session() {
         let sessions = test_store();
         let session: Arc<dyn BackendSession> = Arc::new(TestSession::new("session-2"));
-        sessions
-            .lock()
-            .await
-            .insert("session-2".to_string(), session);
+        sessions.lock().await.insert(
+            "session-2".to_string(),
+            SessionRecord {
+                session,
+                window_label: "main".to_string(),
+            },
+        );
 
         let removed = remove_session_from_store(&sessions, "session-2").await;
         assert!(removed.is_some());

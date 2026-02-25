@@ -165,6 +165,14 @@
 <div class="flex flex-col h-full pt-9 px-4 pb-8 relative" data-tauri-drag-region>
   <!-- Top right controls - matches ChatContainer titlebar positioning -->
   <div class="absolute top-1.5 right-4 flex items-center gap-1">
+    <Button
+      variant="ghost"
+      size="icon"
+      class="h-6 w-6 text-muted-foreground"
+      onclick={() => void api.createWindow()}
+    >
+      <Plus size={14} />
+    </Button>
     {#if showClose}
       <Button
         variant="ghost"

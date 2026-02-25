@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { PanelLeft, PanelRight, Settings, Menu } from 'lucide-svelte';
+  import { PanelLeft, PanelRight, Settings, Menu, Plus } from 'lucide-svelte';
+  import { api } from '$lib/api';
   import { Button } from '$lib/components/ui';
   import { app } from '$lib/stores/app.svelte';
   import { isMacOS } from '$lib/utils/platform';
@@ -48,6 +49,14 @@
 
   <!-- Right - Controls -->
   <div class="flex items-center gap-1">
+    <Button
+      variant="ghost"
+      size="icon"
+      class="h-6 w-6 text-muted-foreground"
+      onclick={() => void api.createWindow()}
+    >
+      <Plus size={14} />
+    </Button>
     <Button
       variant="ghost"
       size="icon"

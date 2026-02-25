@@ -16,6 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 describe('Behavioral Tests', () => {
   beforeEach(() => {
+    app.setScreen('chat');
     chat.reset();
     resetEventState();
     vi.useFakeTimers();

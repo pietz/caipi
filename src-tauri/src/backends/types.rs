@@ -13,8 +13,17 @@ use super::session::BackendSession;
 // Domain types (moved from commands/chat.rs)
 // ---------------------------------------------------------------------------
 
-/// Global session store - uses Arc<dyn BackendSession> for multi-backend support.
-pub type SessionStore = Arc<Mutex<HashMap<String, Arc<dyn BackendSession>>>>;
+/// Session entry tracked by the runtime.
+///
+/// Keeping `session` and `window_label` together ensures ownership remains
+/// consistent across create, routing, and close cleanup paths.
+pub struct SessionRecord {
+    pub session: Arc<dyn BackendSession>,
+    pub window_label: String,
+}
+
+/// Global session store.
+pub type SessionStore = Arc<Mutex<HashMap<String, SessionRecord>>>;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {

@@ -30,7 +30,14 @@ export const api = {
     invoke<HistoryMessage[]>('get_session_history', { folderPath, sessionId, backend }),
 
   // Session
-  createSession: (folderPath: string, permissionMode?: string, model?: string, resumeSessionId?: string, cliPath?: string, backend?: string) =>
+  createSession: (
+    folderPath: string,
+    permissionMode?: string,
+    model?: string,
+    resumeSessionId?: string,
+    cliPath?: string,
+    backend?: string
+  ) =>
     invoke<string>('create_session', { folderPath, permissionMode, model, resumeSessionId, cliPath, backend }),
   destroySession: (sessionId: string) =>
     invoke<void>('destroy_session', { sessionId }),
@@ -53,4 +60,7 @@ export const api = {
   getBackendCliPath: (backend: string) => invoke<string | null>('get_backend_cli_path', { backend }),
   setBackendCliPath: (backend: string, path?: string) =>
     invoke<void>('set_backend_cli_path', { backend, path }),
+
+  // Window
+  createWindow: () => invoke<string>('create_window'),
 };

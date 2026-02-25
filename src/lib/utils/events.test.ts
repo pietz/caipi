@@ -36,6 +36,7 @@ vi.mock('$lib/stores/chat.svelte', () => ({
 
 vi.mock('$lib/stores/app.svelte', () => ({
   app: {
+    screen: 'chat',
     sessionId: null,
     setAuthType: vi.fn(),
     syncState: vi.fn(),
