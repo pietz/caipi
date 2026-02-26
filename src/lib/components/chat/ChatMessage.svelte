@@ -1,9 +1,16 @@
 <script lang="ts">
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { renderMarkdown } from '$lib/utils/markdown';
-  import type { Message } from '$lib/stores';
+  import type { Message, StreamItem, ToolState } from '$lib/stores';
   import { HIDDEN_TOOL_TYPES } from './constants';
   import ToolCallStack from './ToolCallStack.svelte';
+  import SubagentGroupCard from './SubagentGroupCard.svelte';
+  import {
+    buildGroupedStreamItems,
+    type GroupedItem,
+    type GroupedSubagentItem,
+    type GroupedToolItem,
+  } from './subagent-grouping';
   import Divider from './Divider.svelte';
 
   interface Props {
@@ -15,7 +22,30 @@
   const visibleTools = $derived(
     message.tools?.filter(t => !HIDDEN_TOOL_TYPES.includes(t.toolType)) ?? []
   );
-  const hasTools = $derived(visibleTools.length > 0);
+  const groupedToolItems = $derived.by((): GroupedItem[] => {
+    if (visibleTools.length === 0) {
+      return [];
+    }
+
+    const sortedTools = [...visibleTools].sort((a, b) => a.insertionIndex - b.insertionIndex);
+    const toolsById = new Map<string, ToolState>(sortedTools.map((tool) => [tool.id, tool]));
+    const syntheticStreamItems: StreamItem[] = sortedTools.map((tool) => ({
+      id: `message-tool-${tool.id}`,
+      type: 'tool',
+      toolId: tool.id,
+      timestamp: tool.timestamp,
+      insertionIndex: tool.insertionIndex,
+    }));
+
+    return buildGroupedStreamItems(syntheticStreamItems, (toolId) => toolsById.get(toolId))
+      .filter((item) => item.type !== 'text');
+  });
+  const groupedNonTextToolItems = $derived(
+    groupedToolItems.filter(
+      (item): item is GroupedToolItem | GroupedSubagentItem => item.type !== 'text'
+    )
+  );
+  const hasTools = $derived(groupedNonTextToolItems.length > 0);
 
   function handleClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
@@ -50,7 +80,13 @@
 <!-- Tools (for completed messages) -->
 {#if hasTools}
   <div class="mt-3">
-    <ToolCallStack tools={visibleTools} />
+    {#each groupedNonTextToolItems as group (group.type === 'subagent-group' ? group.group.id : `tool-${group.tools[0]?.id ?? 'empty'}`)}
+      {#if group.type === 'tool-group'}
+        <ToolCallStack tools={group.tools} />
+      {:else if group.type === 'subagent-group'}
+        <SubagentGroupCard group={group.group} />
+      {/if}
+    {/each}
   </div>
 {/if}
 

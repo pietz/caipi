@@ -3,6 +3,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { debug } from '$lib/utils/logger';
 
 export type ToolStatus = 'pending' | 'awaiting_permission' | 'running' | 'completed' | 'error' | 'denied' | 'aborted' | 'history';
+const TERMINAL_TOOL_STATUSES: ToolStatus[] = ['completed', 'error', 'denied', 'aborted', 'history'];
 
 export interface ToolState {
   id: string;  // tool_use_id - the canonical identifier
@@ -11,8 +12,12 @@ export interface ToolState {
   status: ToolStatus;
   permissionRequestId?: string;
   input?: Record<string, unknown>;
+  output?: unknown;
   timestamp: number;
   insertionIndex: number;
+  // Monotonic tool-event order (start/status updates) used for stream-time grouping.
+  startOrder?: number;
+  endOrder?: number;
 }
 
 export interface Message {
@@ -58,6 +63,7 @@ class ChatState {
   activeTurnId = $state<string | null>(null);
   streamItems = $state<StreamItem[]>([]);
   private streamItemCounter = $state(0);
+  private toolEventCounter = $state(0);
 
   // Tools (keyed by tool_use_id)
   tools = $state(new SvelteMap<string, ToolState>());
@@ -65,6 +71,7 @@ class ChatState {
   // UI state: tool stack expanded/collapsed by stable stack key.
   // We key stacks by the first tool id in the group so this survives the stream -> finalized remount.
   toolStackExpanded = $state<Record<string, boolean>>({});
+  subagentGroupExpanded = $state<Record<string, boolean>>({});
 
   // Message queue (for sending while streaming)
   messageQueue = $state<string[]>([]);
@@ -111,6 +118,7 @@ class ChatState {
       // Ending stream - clear streaming state
       this.streamItems = [];
       this.streamItemCounter = 0;
+      this.toolEventCounter = 0;
       this.tools = new SvelteMap();
       this.activeTurnId = null;
     }
@@ -145,10 +153,11 @@ class ChatState {
 
   // --- Tool methods ---
 
-  addTool(tool: Omit<ToolState, 'insertionIndex'>) {
+  addTool(tool: Omit<ToolState, 'insertionIndex' | 'startOrder'>) {
     const toolState: ToolState = {
       ...tool,
       insertionIndex: this.streamItemCounter,
+      startOrder: this.toolEventCounter++,
     };
 
     // Add to tools map
@@ -167,13 +176,18 @@ class ChatState {
     this.streamItemCounter++;
   }
 
-  updateToolStatus(id: string, status: ToolStatus, extras?: { permissionRequestId?: string | null }) {
+  updateToolStatus(
+    id: string,
+    status: ToolStatus,
+    extras?: { permissionRequestId?: string | null; output?: unknown }
+  ) {
     const tool = this.tools.get(id);
     if (!tool) {
       return;
     }
 
     const newTools = new SvelteMap(this.tools);
+    const statusOrder = this.toolEventCounter++;
     const updatedTool = { ...tool, status };
 
     // Handle permissionRequestId: set if provided, clear if explicitly null, keep if undefined
@@ -183,6 +197,14 @@ class ChatState {
       } else {
         updatedTool.permissionRequestId = extras.permissionRequestId;
       }
+    }
+
+    if (extras?.output !== undefined) {
+      updatedTool.output = extras.output;
+    }
+
+    if (TERMINAL_TOOL_STATUSES.includes(status)) {
+      updatedTool.endOrder = statusOrder;
     }
 
     newTools.set(id, updatedTool);
@@ -199,6 +221,14 @@ class ChatState {
 
   setToolStackExpanded(key: string, expanded: boolean) {
     this.toolStackExpanded = { ...this.toolStackExpanded, [key]: expanded };
+  }
+
+  getSubagentGroupExpanded(key: string): boolean {
+    return this.subagentGroupExpanded[key] ?? false;
+  }
+
+  setSubagentGroupExpanded(key: string, expanded: boolean) {
+    this.subagentGroupExpanded = { ...this.subagentGroupExpanded, [key]: expanded };
   }
 
   getToolsAwaitingPermission(): ToolState[] {
@@ -269,6 +299,7 @@ class ChatState {
     this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
+    this.toolEventCounter = 0;
     this.tools = new SvelteMap();
   }
 
@@ -320,8 +351,10 @@ class ChatState {
     this.activeTurnId = null;
     this.streamItems = [];
     this.streamItemCounter = 0;
+    this.toolEventCounter = 0;
     this.tools = new SvelteMap();
     this.toolStackExpanded = {};
+    this.subagentGroupExpanded = {};
     this.messageQueue = [];
     this.todos = [];
     this.activeSkills = [];
@@ -338,14 +371,19 @@ class ChatState {
     let toolCounter = 0;
 
     for (const msg of historyMessages) {
-      const tools: ToolState[] = msg.tools.map((tool) => ({
-        id: tool.id,
-        toolType: tool.toolType,
-        target: tool.target,
-        status: (tool.isError ? 'error' : 'history') as ToolStatus,
-        timestamp: msg.timestamp,
-        insertionIndex: toolCounter++,
-      }));
+      const tools: ToolState[] = msg.tools.map((tool) => {
+        const order = toolCounter++;
+        return {
+          id: tool.id,
+          toolType: tool.toolType,
+          target: tool.target,
+          status: (tool.isError ? 'error' : 'history') as ToolStatus,
+          timestamp: msg.timestamp,
+          insertionIndex: order,
+          startOrder: order,
+          endOrder: order,
+        };
+      });
 
       const lastMessage = mergedMessages[mergedMessages.length - 1];
       const canMerge =

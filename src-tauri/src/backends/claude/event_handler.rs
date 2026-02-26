@@ -244,6 +244,7 @@ impl CliSession {
                         let tool_end = ChatEvent::ToolEnd {
                             id: tool_result.tool_use_id.clone(),
                             status: status.to_string(),
+                            output: Some(tool_result.content.clone()),
                         };
                         emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
                     }
@@ -286,6 +287,7 @@ impl CliSession {
                                 let tool_end = ChatEvent::ToolEnd {
                                     id: tool_use_id.to_string(),
                                     status: status.to_string(),
+                                    output: item.get("content").cloned(),
                                 };
                                 emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
                             }

@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 fn parse_arguments(value: &Value) -> Option<Value> {
     let arguments = value.get("arguments")?;
@@ -8,6 +8,75 @@ fn parse_arguments(value: &Value) -> Option<Value> {
     arguments
         .as_str()
         .and_then(|s| serde_json::from_str::<Value>(s).ok())
+}
+
+fn normalize_collab_tool_name(value: &str) -> String {
+    match value {
+        "spawnAgent" | "spawn_agent" => "spawn_agent".to_string(),
+        "sendInput" | "send_input" => "send_input".to_string(),
+        "resumeAgent" | "resume_agent" => "resume_agent".to_string(),
+        "closeAgent" | "close_agent" => "close_agent".to_string(),
+        "wait" => "wait".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn normalize_tool_type(value: &str) -> String {
+    match value {
+        "commandExecution" => "command_execution".to_string(),
+        "fileChange" => "file_change".to_string(),
+        "webSearch" => "web_search".to_string(),
+        "webFetch" => "web_fetch".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn target_from_args(args: &Value) -> Option<String> {
+    args.get("cmd")
+        .or_else(|| args.get("prompt"))
+        .or_else(|| args.get("message"))
+        .or_else(|| args.get("query"))
+        .or_else(|| args.get("command"))
+        .or_else(|| args.get("id"))
+        .or_else(|| args.get("task"))
+        .or_else(|| args.get("description"))
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+        .or_else(|| {
+            args.get("ids")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        })
+}
+
+fn merge_input_with_metadata(
+    input: Option<Value>,
+    item: &Value,
+    metadata_keys: &[&str],
+) -> Option<Value> {
+    let mut map = match input {
+        Some(Value::Object(obj)) => obj,
+        Some(other) => {
+            let mut obj = Map::new();
+            obj.insert("arguments".to_string(), other);
+            obj
+        }
+        None => Map::new(),
+    };
+
+    for key in metadata_keys {
+        if let Some(value) = item.get(*key) {
+            map.entry((*key).to_string()).or_insert_with(|| value.clone());
+        }
+    }
+
+    if map.is_empty() {
+        None
+    } else {
+        Some(Value::Object(map))
+    }
 }
 
 fn first_array_entry<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
@@ -85,23 +154,49 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         .or_else(|| item.get("name").and_then(Value::as_str))
         .unwrap_or("command_execution");
 
+    // Codex 0.105+ sub-agent protocol.
+    if raw_tool_type == "collabAgentToolCall" || raw_tool_type == "collab_agent_tool_call" {
+        let tool = item.get("tool").and_then(Value::as_str).unwrap_or(raw_tool_type);
+        let tool_type = normalize_collab_tool_name(tool);
+        let input = merge_input_with_metadata(
+            parse_arguments(item),
+            item,
+            &[
+                "tool",
+                "prompt",
+                "message",
+                "id",
+                "ids",
+                "senderThreadId",
+                "receiverThreadIds",
+                "agentsStates",
+                "status",
+            ],
+        );
+        let target = input
+            .as_ref()
+            .and_then(target_from_args)
+            .or_else(|| {
+                item.get("prompt")
+                    .or_else(|| item.get("message"))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_default();
+        return (tool_type, target, input);
+    }
+
+    // Codex 0.104.x compatibility path.
     if raw_tool_type == "function_call" {
         let function_name = item
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or("command_execution");
-        let arguments = parse_arguments(item);
-
-        let target_from_args = arguments.as_ref().and_then(|args| {
-            args.get("cmd")
-                .or_else(|| args.get("query"))
-                .or_else(|| args.get("command"))
-                .or_else(|| args.get("task"))
-                .or_else(|| args.get("prompt"))
-                .or_else(|| args.get("description"))
-                .and_then(Value::as_str)
-                .map(|s| s.to_string())
-        });
+        let arguments = merge_input_with_metadata(
+            parse_arguments(item),
+            item,
+            &["threadId", "thread_id", "senderThreadId", "receiverThreadIds"],
+        );
 
         if function_name == "web.run" {
             let has_search_queries = arguments
@@ -125,11 +220,13 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         }
 
         let tool_type = match function_name {
-            "exec_command" => "command_execution",
-            other => other,
-        }
-        .to_string();
-        let target = target_from_args.unwrap_or_default();
+            "exec_command" => "command_execution".to_string(),
+            other => normalize_tool_type(other),
+        };
+        let target = arguments
+            .as_ref()
+            .and_then(target_from_args)
+            .unwrap_or_default();
         return (tool_type, target, arguments);
     }
 
@@ -154,12 +251,15 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    (raw_tool_type.to_string(), target, None)
+    (normalize_tool_type(raw_tool_type), target, None)
 }
 
 pub(crate) fn codex_tool_from_payload(payload: &Value) -> Option<(String, String)> {
     match payload.get("type").and_then(Value::as_str) {
-        Some("function_call") | Some("web_search_call") => {
+        Some("function_call")
+        | Some("web_search_call")
+        | Some("collabAgentToolCall")
+        | Some("collab_agent_tool_call") => {
             let (tool_type, target, _) = normalized_tool_from_item(payload);
             Some((tool_type, target))
         }
@@ -205,5 +305,81 @@ mod tests {
             "content": "hello"
         });
         assert!(codex_tool_from_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn normalized_tool_maps_collab_spawn_agent() {
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "tool": "spawnAgent",
+            "prompt": "Research changelog",
+            "senderThreadId": "thread-parent",
+            "receiverThreadIds": ["thread-child"]
+        });
+        let (tool_type, target, input) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "spawn_agent");
+        assert_eq!(target, "Research changelog");
+        assert_eq!(
+            input.and_then(|value| value.get("receiverThreadIds").cloned()),
+            Some(json!(["thread-child"]))
+        );
+    }
+
+    #[test]
+    fn payload_tool_maps_collab_wait() {
+        let payload = json!({
+            "type": "collabAgentToolCall",
+            "tool": "wait",
+            "ids": ["thread-child"]
+        });
+        let result = codex_tool_from_payload(&payload);
+        assert_eq!(result, Some(("wait".to_string(), "thread-child".to_string())));
+    }
+
+    #[test]
+    fn merge_metadata_does_not_override_existing_arguments() {
+        let item = json!({
+            "type": "function_call",
+            "name": "send_input",
+            "id": "tool-call-id",
+            "message": "top-level message",
+            "arguments": {
+                "id": "agent-from-args",
+                "message": "message from args"
+            }
+        });
+        let (_tool_type, target, input) = normalized_tool_from_item(&item);
+        assert_eq!(target, "message from args");
+        assert_eq!(
+            input.as_ref().and_then(|value| value.get("id").cloned()),
+            Some(json!("agent-from-args"))
+        );
+        assert_eq!(
+            input.as_ref().and_then(|value| value.get("message").cloned()),
+            Some(json!("message from args"))
+        );
+    }
+
+    #[test]
+    fn normalized_tool_maps_camel_case_command_execution() {
+        let item = json!({
+            "type": "function_call",
+            "name": "commandExecution",
+            "arguments": { "cmd": "echo hi" }
+        });
+        let (tool_type, target, _) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "command_execution");
+        assert_eq!(target, "echo hi");
+    }
+
+    #[test]
+    fn normalized_raw_camel_case_item_type() {
+        let item = json!({
+            "type": "commandExecution",
+            "command": "ls -la"
+        });
+        let (tool_type, target, _) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "command_execution");
+        assert_eq!(target, "ls -la");
     }
 }

@@ -25,7 +25,7 @@ export type ChatEvent = EventMeta & (
   | { type: 'Text'; content: string }
   | { type: 'ToolStart'; toolUseId: string; toolType: string; target: string; status: string; input?: Record<string, unknown> }
   | { type: 'ToolStatusUpdate'; toolUseId: string; status: string; permissionRequestId?: string }
-  | { type: 'ToolEnd'; id: string; status: string }
+  | { type: 'ToolEnd'; id: string; status: string; output?: unknown }
   | { type: 'SessionInit'; auth_type: string }
   | { type: 'StateChanged'; permissionMode: string; model: string }
   | { type: 'TokenUsage'; totalTokens: number; contextTokens?: number; contextWindow?: number }
@@ -202,7 +202,12 @@ function handleToolStatusUpdateEvent(event: Extract<ChatEvent, { type: 'ToolStat
 }
 
 function handleToolEndEvent(event: Extract<ChatEvent, { type: 'ToolEnd' }>) {
-  chat.updateToolStatus(event.id, parseToolStatus(event.status));
+  const extras = event.output === undefined ? undefined : { output: event.output };
+  if (extras) {
+    chat.updateToolStatus(event.id, parseToolStatus(event.status), extras);
+  } else {
+    chat.updateToolStatus(event.id, parseToolStatus(event.status));
+  }
 
   // Track skill activation and handle special tools
   if (event.status === 'completed') {

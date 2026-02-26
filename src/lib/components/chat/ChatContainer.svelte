@@ -9,18 +9,15 @@
   import { Settings as SettingsPanel } from '$lib/components/settings';
   import ChatMessage from './ChatMessage.svelte';
   import ToolCallStack from './ToolCallStack.svelte';
+  import SubagentGroupCard from './SubagentGroupCard.svelte';
   import MessageInput from './MessageInput.svelte';
   import { HIDDEN_TOOL_TYPES } from './constants';
+  import { buildGroupedStreamItems, type GroupedItem } from './subagent-grouping';
   import { FileExplorer, ContextPanel } from '$lib/components/sidebar';
   import { app } from '$lib/stores/app.svelte';
-  import { chat, type StreamItem, type ToolState } from '$lib/stores/chat.svelte';
+  import { chat } from '$lib/stores/chat.svelte';
   import { handleChatEvent, respondToPermission, resetEventState, setOnContentChange, type ChatEvent } from '$lib/utils/events';
   import { debug, error as logError } from '$lib/utils/logger';
-
-  // Types for grouped stream items
-  type GroupedTextItem = { type: 'text'; content: string };
-  type GroupedToolItem = { type: 'tool-group'; tools: ToolState[] };
-  type GroupedItem = GroupedTextItem | GroupedToolItem;
 
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
@@ -200,31 +197,7 @@
 
   // Group consecutive tools together
   const groupedStreamItems = $derived.by((): GroupedItem[] => {
-    const groups: GroupedItem[] = [];
-    let currentToolGroup: ToolState[] = [];
-
-    for (const item of sortedStreamItems) {
-      if (item.type === 'tool' && item.toolId) {
-        const tool = chat.getTool(item.toolId);
-        if (tool) {
-          currentToolGroup.push(tool);
-        }
-      } else if (item.type === 'text' && item.content) {
-        // Text breaks tool groups
-        if (currentToolGroup.length > 0) {
-          groups.push({ type: 'tool-group', tools: [...currentToolGroup] });
-          currentToolGroup = [];
-        }
-        groups.push({ type: 'text', content: item.content });
-      }
-    }
-
-    // Don't forget remaining tools
-    if (currentToolGroup.length > 0) {
-      groups.push({ type: 'tool-group', tools: currentToolGroup });
-    }
-
-    return groups;
+    return buildGroupedStreamItems(sortedStreamItems, (toolId) => chat.getTool(toolId));
   });
 </script>
 
@@ -280,6 +253,11 @@
                     {:else if group.type === 'tool-group'}
                       <ToolCallStack
                         tools={group.tools}
+                        onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
+                      />
+                    {:else if group.type === 'subagent-group'}
+                      <SubagentGroupCard
+                        group={group.group}
                         onPermissionResponse={(toolId, allowed) => handlePermissionResponse(toolId, allowed)}
                       />
                     {/if}

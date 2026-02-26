@@ -25,6 +25,49 @@ use super::cli_protocol::{
     JsonRpcResponse,
 };
 
+fn extract_notification_thread_id(params: &Value, item: &Value) -> Option<String> {
+    first_string(
+        params,
+        &[
+            &["threadId"],
+            &["thread_id"],
+            &["senderThreadId"],
+            &["sender_thread_id"],
+            &["item", "threadId"],
+            &["item", "thread_id"],
+            &["item", "senderThreadId"],
+            &["item", "sender_thread_id"],
+        ],
+    )
+    .or_else(|| first_string(item, &[&["threadId"], &["thread_id"], &["senderThreadId"], &["sender_thread_id"]]))
+    .map(|value| value.to_string())
+}
+
+fn attach_thread_id_to_input(input: Option<Value>, thread_id: Option<String>) -> Option<Value> {
+    let Some(thread_id) = thread_id else {
+        return input;
+    };
+
+    match input {
+        Some(Value::Object(mut map)) => {
+            map.entry("__threadId".to_string())
+                .or_insert_with(|| Value::String(thread_id));
+            Some(Value::Object(map))
+        }
+        Some(other) => {
+            let mut map = serde_json::Map::new();
+            map.insert("arguments".to_string(), other);
+            map.insert("__threadId".to_string(), Value::String(thread_id));
+            Some(Value::Object(map))
+        }
+        None => {
+            let mut map = serde_json::Map::new();
+            map.insert("__threadId".to_string(), Value::String(thread_id));
+            Some(Value::Object(map))
+        }
+    }
+}
+
 impl CodexSession {
     /// Handle a JSON-RPC notification from the app-server.
     #[allow(clippy::too_many_arguments)]
@@ -66,7 +109,15 @@ impl CodexSession {
             }
 
             "item/started" => {
-                Self::handle_item_started(params, app_handle, session_id, turn_id, active_tools);
+                let default_thread_id = thread_id.read().await.clone();
+                Self::handle_item_started(
+                    params,
+                    app_handle,
+                    session_id,
+                    turn_id,
+                    active_tools,
+                    default_thread_id.as_deref(),
+                );
             }
 
             "item/agentMessage/delta" | "item/delta" => {
@@ -86,6 +137,7 @@ impl CodexSession {
             }
 
             "item/completed" => {
+                let default_thread_id = thread_id.read().await.clone();
                 Self::handle_item_completed(
                     params,
                     app_handle,
@@ -93,6 +145,7 @@ impl CodexSession {
                     turn_id,
                     active_tools,
                     assistant_parts,
+                    default_thread_id.as_deref(),
                 );
             }
 
@@ -148,6 +201,7 @@ impl CodexSession {
         session_id: &str,
         turn_id: Option<&str>,
         active_tools: &mut HashMap<String, String>,
+        default_thread_id: Option<&str>,
     ) {
         let item = params.get("item").unwrap_or(params);
         let item_kind = first_string(item, &[&["type"], &["kind"]])
@@ -172,6 +226,11 @@ impl CodexSession {
             // User/agent messages handled via delta/completed -- skip
         } else {
             let (tool_type, target, input) = normalized_tool_from_item(item);
+            let input = attach_thread_id_to_input(
+                input,
+                extract_notification_thread_id(params, item)
+                    .or_else(|| default_thread_id.map(std::string::ToString::to_string)),
+            );
             active_tools.insert(item_id.clone(), tool_type.clone());
             let event = ChatEvent::ToolStart {
                 tool_use_id: item_id.clone(),
@@ -192,6 +251,7 @@ impl CodexSession {
         turn_id: Option<&str>,
         active_tools: &mut HashMap<String, String>,
         _assistant_parts: &mut Vec<String>,
+        default_thread_id: Option<&str>,
     ) {
         let item = params.get("item").unwrap_or(params);
         let item_kind = first_string(item, &[&["type"], &["kind"]])
@@ -223,17 +283,23 @@ impl CodexSession {
             let target = first_string(item, &[&["action", "query"], &["query"]])
                 .unwrap_or("")
                 .to_string();
+            let input = attach_thread_id_to_input(
+                None,
+                extract_notification_thread_id(params, item)
+                    .or_else(|| default_thread_id.map(std::string::ToString::to_string)),
+            );
             let start = ChatEvent::ToolStart {
                 tool_use_id: item_id.clone(),
                 tool_type: "web_search".to_string(),
                 target,
                 status: "pending".to_string(),
-                input: None,
+                input,
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &start);
             let end = ChatEvent::ToolEnd {
                 id: item_id,
                 status: "completed".to_string(),
+                output: None,
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &end);
         } else if (item_kind == "fileChange" || item_kind == "file_change") && !active_tools.contains_key(&item_id) {
@@ -245,17 +311,23 @@ impl CodexSession {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
+            let input = attach_thread_id_to_input(
+                None,
+                extract_notification_thread_id(params, item)
+                    .or_else(|| default_thread_id.map(std::string::ToString::to_string)),
+            );
             let start = ChatEvent::ToolStart {
                 tool_use_id: item_id.clone(),
                 tool_type: "file_change".to_string(),
                 target,
                 status: "pending".to_string(),
-                input: None,
+                input,
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &start);
             let end = ChatEvent::ToolEnd {
                 id: item_id,
                 status: "completed".to_string(),
+                output: None,
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &end);
         } else if active_tools.contains_key(&item_id) {
@@ -268,6 +340,7 @@ impl CodexSession {
             let end = ChatEvent::ToolEnd {
                 id: item_id,
                 status: status.to_string(),
+                output: item.get("output").cloned(),
             };
             emit_chat_event(app_handle, Some(session_id), turn_id, &end);
         }
@@ -462,5 +535,53 @@ impl CodexSession {
         if !allowed && abort_flag.load(Ordering::SeqCst) {
             active_tools.remove(&tool_use_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{attach_thread_id_to_input, extract_notification_thread_id};
+    use serde_json::json;
+
+    #[test]
+    fn extract_thread_id_prefers_explicit_thread_id() {
+        let params = json!({
+            "threadId": "thread-main",
+            "item": { "senderThreadId": "thread-parent" }
+        });
+        let item = params.get("item").cloned().unwrap_or_else(|| json!({}));
+
+        let thread_id = extract_notification_thread_id(&params, &item);
+        assert_eq!(thread_id.as_deref(), Some("thread-main"));
+    }
+
+    #[test]
+    fn extract_thread_id_falls_back_to_sender_thread_id() {
+        let params = json!({
+            "item": { "senderThreadId": "thread-parent" }
+        });
+        let item = params.get("item").cloned().unwrap_or_else(|| json!({}));
+
+        let thread_id = extract_notification_thread_id(&params, &item);
+        assert_eq!(thread_id.as_deref(), Some("thread-parent"));
+    }
+
+    #[test]
+    fn attach_thread_id_adds_metadata_without_clobbering_input() {
+        let input = json!({
+            "receiverThreadIds": ["thread-child-1"]
+        });
+
+        let enriched = attach_thread_id_to_input(Some(input), Some("thread-parent".to_string()))
+            .expect("thread metadata should be attached");
+
+        assert_eq!(
+            enriched.get("__threadId"),
+            Some(&json!("thread-parent"))
+        );
+        assert_eq!(
+            enriched.get("receiverThreadIds"),
+            Some(&json!(["thread-child-1"]))
+        );
     }
 }

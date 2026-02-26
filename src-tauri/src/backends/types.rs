@@ -77,6 +77,8 @@ pub enum ChatEvent {
     ToolEnd {
         id: String,
         status: String, // "completed", "error"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<serde_json::Value>,
     },
     SessionInit {
         auth_type: String,
