@@ -611,6 +611,7 @@ impl CliSession {
 
     /// Send a user message to the CLI.
     async fn send_user_message(&self, content: &str) -> Result<(), BackendError> {
+        let styled_content = crate::backends::apply_app_response_style_instructions(content);
         // Get the CLI session ID if available
         let session_id = self.cli_session_id.read().await.clone();
 
@@ -618,7 +619,7 @@ impl CliSession {
             "type": "user",
             "message": {
                 "role": "user",
-                "content": content
+                "content": styled_content
             },
             "session_id": session_id.as_deref().unwrap_or("default")
         });

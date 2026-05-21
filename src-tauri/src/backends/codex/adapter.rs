@@ -696,10 +696,11 @@ impl BackendSession for CodexSession {
         let current_model = self.model.read().await.clone();
         let current_thinking = self.thinking_level.read().await.clone();
         let mode = self.permission_mode.read().await.clone();
+        let styled_message = crate::backends::apply_app_response_style_instructions(message);
 
         let params = json!({
             "threadId": thread_id,
-            "input": [{ "type": "text", "text": message }],
+            "input": [{ "type": "text", "text": styled_message }],
             "model": current_model,
             "effort": Self::effort_from_thinking(&current_thinking),
             "approvalPolicy": Self::approval_policy(&mode),
