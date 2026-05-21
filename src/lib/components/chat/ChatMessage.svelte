@@ -23,17 +23,17 @@
     const text = code?.textContent;
     if (!text) return;
 
-    const original = button.textContent ?? 'Copy';
+    const original = button.textContent ?? '⧉';
 
     try {
       await navigator.clipboard.writeText(text);
-      button.textContent = 'Copied';
+      button.textContent = '✓';
       window.setTimeout(() => {
         button.textContent = original;
       }, 2000);
     } catch (error) {
       console.error('Failed to copy code block:', error);
-      button.textContent = 'Failed';
+      button.textContent = '!';
       window.setTimeout(() => {
         button.textContent = original;
       }, 2000);

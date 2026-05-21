@@ -10,7 +10,7 @@ renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
     <div class="code-block">
       <div class="code-block-toolbar">
         <span class="code-block-language">${language}</span>
-        <button type="button" class="code-block-copy-button" data-copy-code-block>Copy</button>
+        <button type="button" class="code-block-copy-button" data-copy-code-block aria-label="Copy code block">⧉</button>
       </div>
       <pre><code class="hljs language-${language}">${highlighted}</code></pre>
     </div>

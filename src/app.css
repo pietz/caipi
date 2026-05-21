@@ -6,7 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-    --background: oklch(1 0 0);
+    --background: oklch(0.995 0.004 190);
     --foreground: oklch(0.13 0.028 261.692);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.13 0.028 261.692);
@@ -16,13 +16,13 @@
     --primary-foreground: oklch(0.98 0.02 166);
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.967 0.003 264.542);
+    --muted: oklch(0.95 0.006 250);
     --muted-foreground: oklch(0.551 0.027 264.364);
-    --accent: oklch(0.967 0.003 264.542);
+    --accent: oklch(0.945 0.008 250);
     --accent-foreground: oklch(0.21 0.034 264.665);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.928 0.006 264.531);
-    --input: oklch(0.928 0.006 264.531);
+    --border: oklch(0.89 0.01 245);
+    --input: oklch(0.89 0.01 245);
     --ring: oklch(0.707 0.022 261.325);
     --chart-1: oklch(0.85 0.13 165);
     --chart-2: oklch(0.77 0.15 163);
@@ -30,7 +30,7 @@
     --chart-4: oklch(0.60 0.13 163);
     --chart-5: oklch(0.51 0.10 166);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0.002 247.839);
+    --sidebar: oklch(0.975 0.004 210);
     --sidebar-foreground: oklch(0.13 0.028 261.692);
     --sidebar-primary: oklch(0.60 0.13 163);
     --sidebar-primary-foreground: oklch(0.98 0.02 166);
@@ -200,10 +200,11 @@
 
 .message-content .code-block {
   margin: 0.75em 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
+  border: 1px solid hsl(var(--foreground) / 0.14);
+  border-radius: 10px;
   overflow: hidden;
-  background: hsl(var(--muted) / 0.35);
+  background: hsl(var(--foreground) / 0.055);
+  box-shadow: 0 1px 0 hsl(var(--foreground) / 0.06), 0 10px 24px hsl(var(--foreground) / 0.05);
 }
 
 .message-content .code-block-toolbar {
@@ -211,9 +212,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.45rem 0.65rem;
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.7);
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid hsl(var(--foreground) / 0.12);
+  background: linear-gradient(to bottom, hsl(var(--foreground) / 0.08), hsl(var(--foreground) / 0.05));
 }
 
 .message-content .code-block-language {
@@ -221,23 +222,28 @@
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground) / 0.72);
 }
 
 .message-content .code-block-copy-button {
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-size: 0.75rem;
+  border: 1px solid hsl(var(--foreground) / 0.12);
+  border-radius: 999px;
+  background: hsl(var(--background) / 0.96);
+  color: hsl(var(--foreground) / 0.72);
+  font-size: 0.95rem;
   line-height: 1;
-  padding: 0.35rem 0.55rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
 }
 
 .message-content .code-block-copy-button:hover {
-  background: hsl(var(--accent));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 .message-content .code-block-copy-button:active {
@@ -247,7 +253,8 @@
 .message-content .code-block pre {
   margin: 0;
   border-radius: 0;
-  padding: 0.75rem;
+  padding: 0.9rem;
+  background: hsl(var(--foreground) / 0.08);
 }
 
 .message-content pre code {
