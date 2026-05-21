@@ -102,6 +102,7 @@ Or grab the latest release from the [releases page](https://github.com/pietz/cai
 **Exploring**
 - Plan mode
 - Linux support
+  First target: `x86_64-unknown-linux-gnu` with an `AppImage` release artifact
 - GitHub Copilot CLI support
 - Gemini CLI support
 
