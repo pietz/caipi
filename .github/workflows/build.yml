@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - both
+          - linux
           - macos
           - windows
         default: both
@@ -115,5 +116,65 @@ jobs:
         with:
           name: build-windows
           path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/caipi_x64.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  build-linux:
+    if: inputs.platform == 'linux'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync SvelteKit
+        run: npx svelte-kit sync
+
+      - name: Run tests
+        if: inputs.skip_tests == false
+        run: npm run test:all
+
+      - name: Build Tauri app (Linux AppImage)
+        run: npm run tauri build -- --target x86_64-unknown-linux-gnu --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-linux
+          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
           retention-days: 7
           if-no-files-found: error

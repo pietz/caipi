@@ -95,6 +95,8 @@ pub struct CliSession {
     thinking_level: Arc<RwLock<String>>,
     /// Thinking level the running process was started with (for detecting changes)
     process_thinking_level: Arc<RwLock<Option<String>>>,
+    /// Cached support for Claude CLI `--effort` flag.
+    supports_effort: Arc<RwLock<Option<bool>>>,
     /// CLI path override
     cli_path: Option<String>,
     /// Resume session ID (if resuming)
@@ -225,6 +227,50 @@ impl CliSession {
         crate::backends::utils::abort_task_slot(&self.lifecycle_task).await;
     }
 
+    fn help_output_supports_effort(help_text: &str) -> bool {
+        help_text.contains("--effort")
+    }
+
+    async fn supports_effort_flag(&self, cli_cmd: &str) -> bool {
+        if let Some(cached) = *self.supports_effort.read().await {
+            return cached;
+        }
+
+        let mut cmd = Command::new(cli_cmd);
+        cmd.arg("--help")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "macos")]
+        crate::backends::utils::add_homebrew_paths(&mut cmd);
+
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(crate::backends::utils::CREATE_NO_WINDOW);
+
+        let supported = match tokio::time::timeout(std::time::Duration::from_secs(3), cmd.output())
+            .await
+        {
+            Ok(Ok(output)) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Self::help_output_supports_effort(&stdout)
+                    || Self::help_output_supports_effort(&stderr)
+            }
+            Ok(Err(err)) => {
+                log::warn!("Failed to probe Claude CLI help for --effort support: {}", err);
+                false
+            }
+            Err(_) => {
+                log::warn!("Timed out probing Claude CLI help for --effort support");
+                false
+            }
+        };
+
+        *self.supports_effort.write().await = Some(supported);
+        supported
+    }
+
     /// Create a new CLI session.
     pub async fn new(config: SessionConfig, app_handle: AppHandle) -> Result<Self, BackendError> {
         let permission_mode = config
@@ -252,6 +298,7 @@ impl CliSession {
             process_model: Arc::new(RwLock::new(None)),
             thinking_level: Arc::new(RwLock::new(String::new())),
             process_thinking_level: Arc::new(RwLock::new(None)),
+            supports_effort: Arc::new(RwLock::new(None)),
             cli_path: config.cli_path,
             resume_session_id: config.resume_session_id,
             app_handle,
@@ -290,6 +337,7 @@ impl CliSession {
         let model = self.model.read().await.clone();
         let thinking_level = self.thinking_level.read().await.clone();
         let permission_mode = self.permission_mode.read().await.clone();
+        let use_effort = !thinking_level.is_empty() && self.supports_effort_flag(cli_cmd).await;
 
         // Store the model and thinking level we're spawning with
         *self.process_model.write().await = Some(model.clone());
@@ -305,9 +353,13 @@ impl CliSession {
             .arg("--model")
             .arg(&model);
 
-        // Append --effort if a thinking level is set (empty = let CLI use its default)
-        if !thinking_level.is_empty() {
+        // Only pass --effort when this Claude CLI actually supports it.
+        if use_effort {
             cmd.arg("--effort").arg(&thinking_level);
+        } else if !thinking_level.is_empty() {
+            log::info!(
+                "Claude CLI does not support --effort; starting without explicit thinking level"
+            );
         }
 
         // Map permission mode to CLI flag
@@ -759,6 +811,16 @@ mod tests {
     fn test_cli_backend_kind() {
         let backend = ClaudeBackend::new();
         assert_eq!(backend.kind(), BackendKind::Claude);
+    }
+
+    #[test]
+    fn detects_effort_support_from_help_text() {
+        assert!(CliSession::help_output_supports_effort(
+            "Usage: claude [options]\n  --effort <low|medium|high>\n"
+        ));
+        assert!(!CliSession::help_output_supports_effort(
+            "Usage: claude [options]\n  --model <name>\n"
+        ));
     }
 
     #[test]

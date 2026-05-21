@@ -47,6 +47,12 @@ gh workflow run Build -f platform=both     # Both platforms
 - Triggers: push to main when `website/**` changes, or manual dispatch
 - Builds Astro site from `website/` and deploys to GitHub Pages (caipi.ai)
 
+## Linux Support Plan
+
+- First Linux target: `x86_64-unknown-linux-gnu`
+- First Linux package format: `AppImage`
+- Do not describe Linux as supported until CI, packaging, updater metadata, and runtime validation are all in place
+
 ## Release Process
 
 When asked to release a new version:
