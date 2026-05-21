@@ -198,6 +198,58 @@
   overflow-y: visible;
 }
 
+.message-content .code-block {
+  margin: 0.75em 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+  background: hsl(var(--muted) / 0.35);
+}
+
+.message-content .code-block-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.7);
+}
+
+.message-content .code-block-language {
+  font-size: 0.7rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.message-content .code-block-copy-button {
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.message-content .code-block-copy-button:hover {
+  background: hsl(var(--accent));
+}
+
+.message-content .code-block-copy-button:active {
+  opacity: 0.8;
+}
+
+.message-content .code-block pre {
+  margin: 0;
+  border-radius: 0;
+  padding: 0.75rem;
+}
+
 .message-content pre code {
   /* hljs defaults to `white-space: pre`, so override to allow long lines to wrap. */
   white-space: pre-wrap;
