@@ -60,6 +60,12 @@ export const api = {
   getBackendCliPath: (backend: string) => invoke<string | null>('get_backend_cli_path', { backend }),
   setBackendCliPath: (backend: string, path?: string) =>
     invoke<void>('set_backend_cli_path', { backend, path }),
+  logoutBackend: (backend: string) =>
+    invoke<void>('logout_backend', { backend }),
+  getBackendProxyTarget: (backend: string) =>
+    invoke<string | null>('get_backend_proxy_target', { backend }),
+  setBackendProxyTarget: (backend: string, target?: string) =>
+    invoke<void>('set_backend_proxy_target', { backend, target }),
 
   // Window
   createWindow: () => invoke<string>('create_window'),

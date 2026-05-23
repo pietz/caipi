@@ -164,6 +164,9 @@ pub fn run() {
             commands::set_default_backend,
             commands::get_backend_cli_path,
             commands::set_backend_cli_path,
+            commands::logout_backend,
+            commands::get_backend_proxy_target,
+            commands::set_backend_proxy_target,
             // Folder commands
             commands::validate_folder,
             commands::get_recent_folders,

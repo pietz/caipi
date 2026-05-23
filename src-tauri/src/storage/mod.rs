@@ -71,6 +71,8 @@ pub struct AppData {
     pub default_backend: Option<String>,
     #[serde(default)]
     pub backend_cli_paths: HashMap<String, String>,
+    #[serde(default)]
+    pub backend_proxy_targets: HashMap<String, String>,
 }
 
 fn get_app_dir() -> Result<PathBuf, StorageError> {
@@ -263,6 +265,29 @@ pub fn get_backend_cli_path(backend: &str) -> Result<Option<String>, StorageErro
     })
 }
 
+pub fn get_backend_proxy_targets() -> Result<HashMap<String, String>, StorageError> {
+    with_data_ro(|data| Ok(data.backend_proxy_targets.clone()))
+}
+
+pub fn get_backend_proxy_target(backend: &str) -> Result<Option<String>, StorageError> {
+    with_data_ro(|data| Ok(data.backend_proxy_targets.get(backend).cloned()))
+}
+
+pub fn set_backend_proxy_target(backend: &str, target: Option<String>) -> Result<(), StorageError> {
+    with_data(|data| {
+        match target {
+            Some(target) if !target.trim().is_empty() => {
+                data.backend_proxy_targets
+                    .insert(backend.to_string(), target);
+            }
+            _ => {
+                data.backend_proxy_targets.remove(backend);
+            }
+        }
+        Ok(())
+    })
+}
+
 pub fn set_backend_cli_path(backend: &str, path: Option<String>) -> Result<(), StorageError> {
     let key = if backend == "claudecli" { "claude" } else { backend };
     with_data(|data| {
@@ -390,6 +415,7 @@ mod tests {
             cli_path: None,
             default_backend: Some("claude".to_string()),
             backend_cli_paths: HashMap::new(),
+            backend_proxy_targets: HashMap::new(),
         };
 
         save_data_to(&data_path, &original_data).unwrap();

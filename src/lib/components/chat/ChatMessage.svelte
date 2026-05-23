@@ -17,8 +17,38 @@
   );
   const hasTools = $derived(visibleTools.length > 0);
 
+  async function copyCodeBlock(button: HTMLButtonElement) {
+    const wrapper = button.closest('.code-block');
+    const code = wrapper?.querySelector('code');
+    const text = code?.textContent;
+    if (!text) return;
+
+    const original = button.textContent ?? '⧉';
+
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = '✓';
+      window.setTimeout(() => {
+        button.textContent = original;
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to copy code block:', error);
+      button.textContent = '!';
+      window.setTimeout(() => {
+        button.textContent = original;
+      }, 2000);
+    }
+  }
+
   function handleClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
+    const copyButton = target.closest('[data-copy-code-block]') as HTMLButtonElement | null;
+    if (copyButton) {
+      event.preventDefault();
+      void copyCodeBlock(copyButton);
+      return;
+    }
+
     const anchor = target.closest('a');
     if (anchor && anchor.href) {
       event.preventDefault();

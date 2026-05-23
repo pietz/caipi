@@ -26,6 +26,13 @@
           }
         }
       }
+      if (startupInfo.backendProxyTargets) {
+        for (const [backend, target] of Object.entries(startupInfo.backendProxyTargets)) {
+          if (backend === 'claude' || backend === 'codex') {
+            app.setProxyTarget(target, backend);
+          }
+        }
+      }
       if (startupInfo.defaultBackend) {
         const normalized = startupInfo.defaultBackend === 'claudecli' ? 'claude' : startupInfo.defaultBackend;
         if (normalized === 'claude' || normalized === 'codex') {

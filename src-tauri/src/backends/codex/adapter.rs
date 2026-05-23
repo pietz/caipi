@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -85,6 +86,7 @@ pub struct CodexSession {
     id: String,
     folder_path: String,
     cli_path: Option<String>,
+    proxy_target: Option<String>,
     app_handle: AppHandle,
 
     // User-controlled settings (per-turn, no process restart needed)
@@ -107,6 +109,7 @@ pub struct CodexSession {
     thread_id: Arc<RwLock<Option<String>>>,
     codex_turn_id: Arc<RwLock<Option<String>>>,
     initialized: Arc<AtomicBool>,
+    auth_lost: Arc<AtomicBool>,
 
     // Resume
     resume_session_id: Option<String>,
@@ -121,6 +124,29 @@ pub struct CodexSession {
     stdout_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     stderr_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     monitor_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+#[derive(serde::Serialize)]
+struct ProxyChatRequest {
+    model: String,
+    messages: Vec<ProxyChatMessage>,
+    stream: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ProxyChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ProxyChatResponse {
+    message: Option<ProxyChatMessageResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ProxyChatMessageResponse {
+    content: String,
 }
 
 impl CodexSession {
@@ -140,6 +166,7 @@ impl CodexSession {
             id: Uuid::new_v4().to_string(),
             folder_path,
             cli_path: config.cli_path,
+            proxy_target: config.proxy_target,
             app_handle,
             permission_mode: Arc::new(RwLock::new(
                 config
@@ -158,6 +185,7 @@ impl CodexSession {
             thread_id: Arc::new(RwLock::new(None)),
             codex_turn_id: Arc::new(RwLock::new(None)),
             initialized: Arc::new(AtomicBool::new(false)),
+            auth_lost: Arc::new(AtomicBool::new(false)),
             resume_session_id,
             messages: Arc::new(RwLock::new(initial_messages)),
             in_flight: Arc::new(AtomicBool::new(false)),
@@ -168,6 +196,136 @@ impl CodexSession {
             stderr_task: Arc::new(Mutex::new(None)),
             monitor_task: Arc::new(Mutex::new(None)),
         })
+    }
+
+    fn proxy_url(&self) -> Option<String> {
+        self.proxy_target
+            .as_ref()
+            .map(|target| format!("{}/api/chat", target.trim_end_matches('/')))
+    }
+
+    fn codex_auth_lost_message() -> &'static str {
+        "Codex authentication expired. Run `codex login` in your terminal, then refresh status in Caipi."
+    }
+
+    async fn send_message_via_proxy(&self, message: &str, turn_id: String) -> Result<(), BackendError> {
+        let url = self.proxy_url().ok_or_else(|| BackendError {
+            message: "Codex proxy target is not configured".to_string(),
+            recoverable: false,
+        })?;
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let model = self.model.read().await.clone();
+        let messages_state = self.messages.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let in_flight = self.in_flight.clone();
+        let styled_message = crate::backends::apply_app_response_style_instructions(message);
+
+        let history = {
+            let messages = messages_state.read().await;
+            messages
+                .iter()
+                .map(|entry| {
+                    let content = if entry.role == "user" && entry.content == message {
+                        styled_message.clone()
+                    } else {
+                        entry.content.clone()
+                    };
+                    ProxyChatMessage {
+                        role: entry.role.clone(),
+                        content,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let request_body = ProxyChatRequest {
+            model,
+            messages: history,
+            stream: false,
+        };
+
+        let task = tokio::spawn(async move {
+            let client = Client::new();
+            let result = client.post(url).json(&request_body).send().await;
+
+            match result {
+                Ok(response) => {
+                    let status = response.status();
+                    if !status.is_success() {
+                        let body = response.text().await.unwrap_or_default();
+                        let error_event = ChatEvent::Error {
+                            message: format!("Codex proxy returned {}: {}", status, body),
+                        };
+                        emit_chat_event(
+                            &app_handle,
+                            Some(&session_id),
+                            Some(&turn_id),
+                            &error_event,
+                        );
+                    } else {
+                        match response.json::<ProxyChatResponse>().await {
+                            Ok(payload) => {
+                                let content = payload
+                                    .message
+                                    .map(|message| message.content)
+                                    .unwrap_or_default();
+
+                                if !content.is_empty() {
+                                    emit_chat_event(
+                                        &app_handle,
+                                        Some(&session_id),
+                                        Some(&turn_id),
+                                        &ChatEvent::Text {
+                                            content: content.clone(),
+                                        },
+                                    );
+                                    messages_state
+                                        .write()
+                                        .await
+                                        .push(Message::new("assistant", content));
+                                }
+
+                                emit_chat_event(
+                                    &app_handle,
+                                    Some(&session_id),
+                                    Some(&turn_id),
+                                    &ChatEvent::Complete,
+                                );
+                            }
+                            Err(error) => {
+                                let error_event = ChatEvent::Error {
+                                    message: format!("Failed to parse Codex proxy response: {error}"),
+                                };
+                                emit_chat_event(
+                                    &app_handle,
+                                    Some(&session_id),
+                                    Some(&turn_id),
+                                    &error_event,
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    let error_event = ChatEvent::Error {
+                        message: format!("Failed to reach Codex proxy: {error}"),
+                    };
+                    emit_chat_event(
+                        &app_handle,
+                        Some(&session_id),
+                        Some(&turn_id),
+                        &error_event,
+                    );
+                }
+            }
+
+            in_flight.store(false, Ordering::SeqCst);
+            *current_turn_id.write().await = None;
+        });
+        *self.stdout_task.lock().await = Some(task);
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -335,6 +493,7 @@ impl CodexSession {
 
         *self.process.lock().await = Some(child);
         *self.stdin_writer.lock().await = Some(stdin);
+        self.auth_lost.store(false, Ordering::SeqCst);
 
         log::info!("Codex app-server spawned: folder={}", self.folder_path);
 
@@ -342,8 +501,8 @@ impl CodexSession {
         let stdout_handle = self.spawn_stdout_reader(stdout);
         *self.stdout_task.lock().await = Some(stdout_handle);
 
-        // Spawn stderr drain task
-        let stderr_handle = crate::backends::utils::spawn_stderr_drain(stderr, "codex");
+        // Spawn stderr drain task with auth-loss detection
+        let stderr_handle = self.spawn_stderr_reader(stderr);
         *self.stderr_task.lock().await = Some(stderr_handle);
 
         // Spawn process monitor
@@ -442,17 +601,28 @@ impl CodexSession {
 
         // If resuming, try thread/resume first
         if let Some(resume_id) = &self.resume_session_id {
-            let result = self
+            match self
                 .send_request("thread/resume", json!({ "threadId": resume_id }))
-                .await?;
-            if let Some(tid) = result
-                .pointer("/thread/id")
-                .or_else(|| result.get("threadId"))
-                .and_then(Value::as_str)
+                .await
             {
-                let tid = tid.to_string();
-                *self.thread_id.write().await = Some(tid.clone());
-                return Ok(tid);
+                Ok(result) => {
+                    if let Some(tid) = result
+                        .pointer("/thread/id")
+                        .or_else(|| result.get("threadId"))
+                        .and_then(Value::as_str)
+                    {
+                        let tid = tid.to_string();
+                        *self.thread_id.write().await = Some(tid.clone());
+                        return Ok(tid);
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Codex thread resume failed for {}: {}. Falling back to thread/start.",
+                        resume_id,
+                        error
+                    );
+                }
             }
             // If resume failed, fall through to create new thread
         }
@@ -624,6 +794,58 @@ impl CodexSession {
             }
         })
     }
+    fn spawn_stderr_reader(&self, stderr: tokio::process::ChildStderr) -> JoinHandle<()> {
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let auth_lost = self.auth_lost.clone();
+        let in_flight = self.in_flight.clone();
+        let process = self.process.clone();
+        let stdin_writer = self.stdin_writer.clone();
+        let initialized = self.initialized.clone();
+        let pending_requests = self.pending_requests.clone();
+
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Some(line) = lines.next_line().await.unwrap_or(None) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                log::debug!("[codex stderr] {}", trimmed);
+
+                if trimmed.contains("401 Unauthorized")
+                    && auth_lost
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
+                    let turn_id = current_turn_id.read().await.clone();
+                    emit_chat_event(
+                        &app_handle,
+                        Some(&session_id),
+                        turn_id.as_deref(),
+                        &ChatEvent::Error {
+                            message: Self::codex_auth_lost_message().to_string(),
+                        },
+                    );
+
+                    in_flight.store(false, Ordering::SeqCst);
+                    *current_turn_id.write().await = None;
+                    initialized.store(false, Ordering::SeqCst);
+                    pending_requests.lock().await.clear();
+                    *stdin_writer.lock().await = None;
+
+                    let mut guard = process.lock().await;
+                    if let Some(child) = guard.as_mut() {
+                        let _ = child.kill().await;
+                    }
+                    *guard = None;
+                }
+            }
+        })
+    }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -645,6 +867,13 @@ impl BackendSession for CodexSession {
     }
 
     async fn send_message(&self, message: &str, turn_id: Option<&str>) -> Result<(), BackendError> {
+        if self.auth_lost.load(Ordering::SeqCst) {
+            return Err(BackendError {
+                message: Self::codex_auth_lost_message().to_string(),
+                recoverable: true,
+            });
+        }
+
         if self.in_flight.swap(true, Ordering::SeqCst) {
             return Err(BackendError {
                 message: "Codex session is busy".to_string(),
@@ -662,6 +891,19 @@ impl BackendSession for CodexSession {
         {
             let mut messages = self.messages.write().await;
             messages.push(Message::new("user", message));
+        }
+
+        if self.proxy_target.is_some() {
+            let session_init = ChatEvent::SessionInit {
+                auth_type: "codex".to_string(),
+            };
+            emit_chat_event(
+                &self.app_handle,
+                Some(&self.id),
+                Some(&turn_id),
+                &session_init,
+            );
+            return self.send_message_via_proxy(message, turn_id).await;
         }
 
         // Ensure app-server is running
@@ -696,10 +938,11 @@ impl BackendSession for CodexSession {
         let current_model = self.model.read().await.clone();
         let current_thinking = self.thinking_level.read().await.clone();
         let mode = self.permission_mode.read().await.clone();
+        let styled_message = crate::backends::apply_app_response_style_instructions(message);
 
         let params = json!({
             "threadId": thread_id,
-            "input": [{ "type": "text", "text": message }],
+            "input": [{ "type": "text", "text": styled_message }],
             "model": current_model,
             "effort": Self::effort_from_thinking(&current_thinking),
             "approvalPolicy": Self::approval_policy(&mode),
