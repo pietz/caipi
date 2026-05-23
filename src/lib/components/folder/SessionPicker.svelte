@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type ProjectSessions, type SessionInfo } from '$lib/api';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { Folder, Loader2, X, ChevronRight, ChevronDown, Plus } from 'lucide-svelte';
+  import { Folder, Loader2, X, ChevronRight, ChevronDown, Plus, Copy, Check, AlertTriangle } from 'lucide-svelte';
   import { Button } from '$lib/components/ui';
   import { app } from '$lib/stores/app.svelte';
   import { chat } from '$lib/stores/chat.svelte';
@@ -21,10 +21,59 @@
   let loading = $state(true);
   let validating = $state(false);
   let error = $state<string | null>(null);
+  let backendReady = $state(true);
+  let backendInstalled = $state(false);
+  let backendVersion = $state<string | null>(null);
+  let backendStatuses = $state<Record<string, { installed: boolean; authenticated: boolean; version?: string }>>({});
+  let copiedCommand = $state(false);
+
+  function loginCommandForBackend(backend: Backend): string {
+    return backend === 'codex' ? 'codex login' : 'claude auth login';
+  }
+
+  function backendLabel(backend: Backend): string {
+    return backend === 'codex' ? 'Codex' : 'Claude';
+  }
+
+  async function copyLoginCommand() {
+    try {
+      await navigator.clipboard.writeText(loginCommandForBackend(app.defaultBackend));
+      copiedCommand = true;
+      setTimeout(() => {
+        copiedCommand = false;
+      }, 2000);
+    } catch (e) {
+      console.error('Failed to copy login command:', e);
+    }
+  }
+
+  async function refreshBackendStatus() {
+    try {
+      const statuses = await api.checkAllBackendsStatus();
+      backendStatuses = Object.fromEntries(
+        statuses.map((status) => [status.backend, {
+          installed: status.installed,
+          authenticated: status.authenticated,
+          version: status.version,
+        }])
+      );
+      const current = statuses.find((status) => status.backend === app.defaultBackend);
+      backendInstalled = current?.installed ?? false;
+      backendReady = !!current?.installed && !!current?.authenticated;
+      backendVersion = current?.version ?? null;
+    } catch (e) {
+      console.error('Failed to check backend status:', e);
+      backendStatuses = {};
+      backendInstalled = false;
+      backendReady = false;
+      backendVersion = null;
+    }
+  }
 
   async function loadSessions() {
     try {
       loading = true;
+      await refreshBackendStatus();
       // Backend handles: filtering non-existent folders, sorting, limiting to 50
       projects = await api.getRecentSessions(50, app.defaultBackend);
       expandedFolders = new SvelteSet();
@@ -156,9 +205,19 @@
     app.setScreen('chat');
   }
 
+  async function switchToBackend(backend: Backend) {
+    if (backend === app.defaultBackend) return;
+    await app.setDefaultBackend(backend);
+    await loadSessions();
+  }
+
+  const availableLoggedInBackends = $derived(
+    (['claude', 'codex'] as Backend[]).filter((backend) => backendStatuses[backend]?.installed && backendStatuses[backend]?.authenticated)
+  );
+
   // Load sessions on mount
   onMount(() => {
-    loadSessions();
+    void loadSessions();
   });
 </script>
 
@@ -200,9 +259,82 @@
       <div class="text-xs text-red-500 text-center mb-4">{error}</div>
     {/if}
 
+    {#if backendInstalled && !backendReady}
+      <div class="mb-4 rounded-md border border-yellow-500/30 bg-yellow-500/8 px-3 py-3">
+        <div class="flex items-start gap-2">
+          <AlertTriangle size={14} class="mt-0.5 shrink-0 text-yellow-500" />
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-medium text-foreground">
+              Log in to {app.defaultBackend === 'codex' ? 'Codex CLI' : 'Claude Code'} via terminal first
+            </div>
+            <p class="text-[10px] text-muted-foreground mt-1">
+              Caipi reuses your terminal CLI session. Run this command there, complete login, then refresh status here.
+            </p>
+            <div class="mt-2 flex items-center gap-2">
+              <code class="flex-1 text-[11px] px-2 py-1.5 rounded bg-muted border border-border text-foreground">{loginCommandForBackend(app.defaultBackend)}</code>
+              <Button
+                variant="outline"
+                size="icon"
+                class="h-7 w-7 shrink-0"
+                onclick={copyLoginCommand}
+              >
+                {#if copiedCommand}
+                  <Check size={12} />
+                {:else}
+                  <Copy size={12} />
+                {/if}
+              </Button>
+            </div>
+            <div class="mt-2 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+              <span>{backendVersion ?? 'Installed'}</span>
+              <button
+                type="button"
+                class="text-primary hover:underline"
+                onclick={refreshBackendStatus}
+              >
+                Refresh status
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    {/if}
+
     {#if loading}
       <div class="flex items-center justify-center flex-1">
         <Loader2 size={24} class="animate-spin text-muted-foreground" />
+      </div>
+    {:else if backendInstalled && !backendReady}
+      <div class="flex flex-1 items-center justify-center">
+        <div class="w-full max-w-sm rounded-lg border border-border bg-card px-5 py-6 text-center">
+          <div class="text-sm font-medium text-foreground">
+            You are logged out of {backendLabel(app.defaultBackend)}
+          </div>
+          <p class="mt-2 text-xs text-muted-foreground">
+            Log back in from your terminal, or switch to another backend that is still signed in.
+          </p>
+          {#if availableLoggedInBackends.length > 0}
+            <div class="mt-4">
+              <div class="text-[10px] uppercase tracking-widest text-muted-foreground/60 mb-2">Available Backends</div>
+              <div class="flex flex-col gap-2">
+                {#each availableLoggedInBackends as backend}
+                  <button
+                    type="button"
+                    class="w-full rounded-md border border-border px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+                    onclick={() => switchToBackend(backend)}
+                  >
+                    <div class="text-xs font-medium text-foreground">{backendLabel(backend)}</div>
+                    <div class="text-[10px] text-muted-foreground mt-0.5">{backendStatuses[backend]?.version ?? 'Authenticated'}</div>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div class="mt-4 text-[10px] text-muted-foreground">
+              No other authenticated backends found.
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <!-- Sessions list -->

@@ -389,9 +389,21 @@ pub async fn check_backend_cli_installed_internal(backend: &str) -> CliInstallSt
     };
 
     // Strategy:
-    // 1. Check custom configured path (if set)
-    // 2. Check common installation paths directly
-    // 3. Try platform-specific shell/command detection
+    // 1. Prefer the user's shell-resolved CLI path so terminal login/install state
+    //    is the source of truth. Tauri apps do not reliably inherit shell PATH.
+    // 2. Fall back to a custom configured path (if set).
+    // 3. Check common installation paths directly.
+
+    if let Some(detected_path) = try_shell_based_cli_detection(binary).await {
+        if let Some(status) = detect_cli_install_at_path(&detected_path).await {
+            return status;
+        }
+        return CliInstallStatus {
+            installed: true,
+            version: None,
+            path: Some(detected_path),
+        };
+    }
 
     if let Ok(Some(custom_path)) = storage::get_backend_cli_path(&backend_name) {
         if let Some(status) = detect_cli_install_at_path(&custom_path).await {
@@ -411,18 +423,6 @@ pub async fn check_backend_cli_installed_internal(backend: &str) -> CliInstallSt
                 }
             }
         }
-    }
-
-    // Try platform-specific shell-based detection
-    if let Some(detected_path) = try_shell_based_cli_detection(binary).await {
-        if let Some(status) = detect_cli_install_at_path(&detected_path).await {
-            return status;
-        }
-        return CliInstallStatus {
-            installed: true,
-            version: None,
-            path: Some(detected_path),
-        };
     }
 
     CliInstallStatus {
@@ -584,6 +584,61 @@ async fn check_backend_cli_status_internal(backend: &str) -> CliStatus {
     }
 }
 
+async fn logout_backend_internal(backend: &str) -> Result<(), String> {
+    let backend_name = backend
+        .parse::<BackendKind>()
+        .map_err(|e| format!("Invalid backend '{}': {}", backend, e))?
+        .to_string();
+
+    let install = check_backend_cli_installed_internal(&backend_name).await;
+    let cli_path = install
+        .path
+        .clone()
+        .ok_or_else(|| format!("{} CLI is not installed", backend_name))?;
+
+    let mut command = create_hidden_command(&cli_path);
+    match backend_name.as_str() {
+        "codex" => {
+            command.arg("logout");
+        }
+        "claude" => {
+            command.arg("auth").arg("logout");
+        }
+        _ => {
+            return Err(format!("Logout is not supported for {} yet", backend_name));
+        }
+    }
+
+    let output = timeout(CLI_AUTH_PROBE_TIMEOUT, command.output())
+    .await
+    .map_err(|_| format!("Timed out while logging out of {}", backend_name))?
+    .map_err(|e| format!("Failed to run {} logout: {}", backend_name, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(if detail.is_empty() {
+            format!("{} logout failed with status {}", backend_name, output.status)
+        } else {
+            format!("{} logout failed: {}", backend_name, detail)
+        });
+    }
+
+    storage::set_cli_status_cache(
+        CliStatus {
+            installed: install.installed,
+            version: install.version,
+            authenticated: false,
+            path: install.path,
+        },
+        Some(backend_name),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn check_all_backends_status() -> Result<Vec<BackendCliStatus>, String> {
     let backends = [BackendKind::Claude, BackendKind::Codex];
@@ -738,6 +793,13 @@ pub async fn set_backend_proxy_target(
 ) -> Result<(), String> {
     storage::set_backend_proxy_target(&backend, target).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn logout_backend(backend: String) -> Result<(), String> {
+    let backend = validate_backend_option(Some(backend))?
+        .ok_or_else(|| "Backend is required".to_string())?;
+    logout_backend_internal(&backend).await
 }
 
 #[cfg(test)]

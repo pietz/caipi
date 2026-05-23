@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Sun, Moon, Monitor, Loader2 } from 'lucide-svelte';
+  import { X, Sun, Moon, Monitor, Loader2, Copy, Check } from 'lucide-svelte';
   import { getVersion } from '@tauri-apps/api/app';
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui';
@@ -21,6 +21,9 @@
   let proxyTargetInput = $state(app.proxyTarget ?? '');
   let savingCliPath = $state(false);
   let savingProxyTarget = $state(false);
+  let loggingOut = $state(false);
+  let copiedCommand = $state<string | null>(null);
+  const STATUS_TIMEOUT_MS = 6000;
   type BackendInstallState = 'checking' | 'installed' | 'not_installed';
   type BackendStatus = {
     installState: BackendInstallState;
@@ -40,14 +43,32 @@
   });
 
   const currentPreference = $derived(theme.preference);
+  const currentBackendStatus = $derived(backendStatuses[app.defaultBackend]);
+  const loginCommand = $derived(app.defaultBackend === 'codex' ? 'codex login' : 'claude auth login');
 
   onMount(async () => {
+    await refreshBackendStatuses();
     try {
-      const [version, statuses] = await Promise.all([
-        getVersion(),
-        api.checkAllBackendsStatus()
+      appVersion = await getVersion();
+    } catch (e) {
+      console.error('Failed to get app version:', e);
+    }
+  });
+
+  async function refreshBackendStatuses() {
+    const previousStatuses = backendStatuses;
+    backendStatuses = {
+      claude: { installState: 'checking', authenticated: previousStatuses.claude?.authenticated ?? false, version: previousStatuses.claude?.version },
+      codex: { installState: 'checking', authenticated: previousStatuses.codex?.authenticated ?? false, version: previousStatuses.codex?.version },
+    };
+
+    try {
+      const statuses = await Promise.race([
+        api.checkAllBackendsStatus(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out while checking backend status')), STATUS_TIMEOUT_MS)
+        ),
       ]);
-      appVersion = version;
       backendStatuses = Object.fromEntries(
         statuses.map(s => [s.backend, {
           installState: s.installed ? 'installed' : 'not_installed',
@@ -56,13 +77,13 @@
         }])
       );
     } catch (e) {
-      console.error('Failed to get app version:', e);
+      console.error('Failed to refresh backend statuses:', e);
       backendStatuses = {
-        claude: { installState: 'not_installed', authenticated: false },
-        codex: { installState: 'not_installed', authenticated: false },
+        claude: { installState: 'not_installed', authenticated: false, version: previousStatuses.claude?.version },
+        codex: { installState: 'not_installed', authenticated: false, version: previousStatuses.codex?.version },
       };
     }
-  });
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
@@ -111,6 +132,41 @@
   function handleProxyTargetKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       saveProxyTarget();
+    }
+  }
+
+  async function copyCommand(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      copiedCommand = command;
+      setTimeout(() => {
+        if (copiedCommand === command) copiedCommand = null;
+      }, 2000);
+    } catch (e) {
+      console.error('Failed to copy command:', e);
+    }
+  }
+
+  async function logoutCurrentBackend() {
+    loggingOut = true;
+    try {
+      await api.logoutBackend(app.defaultBackend);
+      app.setAuthType(null);
+
+      if (app.sessionId && (app.sessionBackend ?? app.defaultBackend) === app.defaultBackend) {
+        const activeSession = app.sessionId;
+        app.setSessionId(null);
+        app.sessionBackend = null;
+        void api.destroySession(activeSession).catch(() => {});
+        chat.reset();
+        app.setScreen('folder');
+      }
+
+      await refreshBackendStatuses();
+    } catch (e) {
+      console.error('Failed to log out backend:', e);
+    } finally {
+      loggingOut = false;
     }
   }
 
@@ -235,6 +291,61 @@
           Leave empty to use default. Requires restart.
         </p>
       </label>
+
+      {#if currentBackendStatus?.installState === 'installed'}
+        <div class="rounded-md border border-border/70 bg-muted/30 px-3 py-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-medium text-foreground">{app.defaultBackend === 'codex' ? 'Codex Account' : 'Claude Account'}</div>
+              <p class="text-[10px] text-muted-foreground mt-1">
+                {#if currentBackendStatus?.authenticated}
+                  Signed in via the terminal {app.defaultBackend === 'codex' ? 'Codex CLI' : 'Claude CLI'}.
+                {:else}
+                  Caipi uses the CLI session from your terminal. Run this command there, finish login, then refresh status here.
+                {/if}
+              </p>
+            </div>
+            {#if currentBackendStatus?.authenticated}
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 text-xs shrink-0"
+                onclick={logoutCurrentBackend}
+                disabled={loggingOut}
+              >
+                {loggingOut ? 'Logging out...' : 'Log out'}
+              </Button>
+            {/if}
+          </div>
+          {#if !currentBackendStatus?.authenticated}
+            <div class="mt-2 flex items-center gap-2">
+              <code class="flex-1 text-[11px] px-2 py-1.5 rounded bg-muted border border-border text-foreground">{loginCommand}</code>
+              <Button
+                variant="outline"
+                size="icon"
+                class="h-7 w-7 shrink-0"
+                onclick={() => copyCommand(loginCommand)}
+              >
+                {#if copiedCommand === loginCommand}
+                  <Check size={12} />
+                {:else}
+                  <Copy size={12} />
+                {/if}
+              </Button>
+            </div>
+          {/if}
+          <div class="mt-2 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+            <span>{currentBackendStatus.version ?? 'Installed'}{app.cliPath ? ` • Custom path override set` : ''}</span>
+            <button
+              type="button"
+              class="text-primary hover:underline"
+              onclick={refreshBackendStatuses}
+            >
+              Refresh status
+            </button>
+          </div>
+        </div>
+      {/if}
 
       {#if backendStatuses.codex?.installState === 'installed' || app.defaultBackend === 'codex'}
         <label class="block">

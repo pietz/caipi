@@ -131,6 +131,10 @@
       };
     })
   );
+  function loginCommandForBackend(backend: Backend): string {
+    return backend === 'codex' ? 'codex login' : 'claude';
+  }
+
   const helperText = $derived(
     !readyBackends.length && !checkingCli
       ? 'Install and authenticate at least one backend to continue'
@@ -235,7 +239,29 @@
                 </Button>
               </div>
             {:else if !checkingCli && backend.installed && !backend.authenticated && backend.authHint}
-              <p class="text-[10px] text-muted-foreground mt-2">{backend.authHint}</p>
+              <div class="mt-2 rounded-md border border-yellow-500/30 bg-yellow-500/8 px-2.5 py-2">
+                <p class="text-[10px] text-muted-foreground">
+                  Log in via terminal first, then recheck backends.
+                </p>
+                <div class="mt-1.5 flex items-center gap-2">
+                  <code class="flex-1 text-[10px] px-2 py-1 rounded bg-muted border border-border text-foreground">{loginCommandForBackend(backend.backend as Backend)}</code>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    class="shrink-0 h-7 w-7 {copiedBackend === backend.backend ? 'text-green-500' : ''}"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      copyToClipboard(loginCommandForBackend(backend.backend as Backend), backend.backend);
+                    }}
+                  >
+                    {#if copiedBackend === backend.backend}
+                      <Check size={12} />
+                    {:else}
+                      <Copy size={12} />
+                    {/if}
+                  </Button>
+                </div>
+              </div>
             {/if}
           </button>
         {/each}

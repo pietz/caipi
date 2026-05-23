@@ -109,6 +109,7 @@ pub struct CodexSession {
     thread_id: Arc<RwLock<Option<String>>>,
     codex_turn_id: Arc<RwLock<Option<String>>>,
     initialized: Arc<AtomicBool>,
+    auth_lost: Arc<AtomicBool>,
 
     // Resume
     resume_session_id: Option<String>,
@@ -184,6 +185,7 @@ impl CodexSession {
             thread_id: Arc::new(RwLock::new(None)),
             codex_turn_id: Arc::new(RwLock::new(None)),
             initialized: Arc::new(AtomicBool::new(false)),
+            auth_lost: Arc::new(AtomicBool::new(false)),
             resume_session_id,
             messages: Arc::new(RwLock::new(initial_messages)),
             in_flight: Arc::new(AtomicBool::new(false)),
@@ -200,6 +202,10 @@ impl CodexSession {
         self.proxy_target
             .as_ref()
             .map(|target| format!("{}/api/chat", target.trim_end_matches('/')))
+    }
+
+    fn codex_auth_lost_message() -> &'static str {
+        "Codex authentication expired. Run `codex login` in your terminal, then refresh status in Caipi."
     }
 
     async fn send_message_via_proxy(&self, message: &str, turn_id: String) -> Result<(), BackendError> {
@@ -487,6 +493,7 @@ impl CodexSession {
 
         *self.process.lock().await = Some(child);
         *self.stdin_writer.lock().await = Some(stdin);
+        self.auth_lost.store(false, Ordering::SeqCst);
 
         log::info!("Codex app-server spawned: folder={}", self.folder_path);
 
@@ -494,8 +501,8 @@ impl CodexSession {
         let stdout_handle = self.spawn_stdout_reader(stdout);
         *self.stdout_task.lock().await = Some(stdout_handle);
 
-        // Spawn stderr drain task
-        let stderr_handle = crate::backends::utils::spawn_stderr_drain(stderr, "codex");
+        // Spawn stderr drain task with auth-loss detection
+        let stderr_handle = self.spawn_stderr_reader(stderr);
         *self.stderr_task.lock().await = Some(stderr_handle);
 
         // Spawn process monitor
@@ -787,6 +794,58 @@ impl CodexSession {
             }
         })
     }
+    fn spawn_stderr_reader(&self, stderr: tokio::process::ChildStderr) -> JoinHandle<()> {
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let auth_lost = self.auth_lost.clone();
+        let in_flight = self.in_flight.clone();
+        let process = self.process.clone();
+        let stdin_writer = self.stdin_writer.clone();
+        let initialized = self.initialized.clone();
+        let pending_requests = self.pending_requests.clone();
+
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Some(line) = lines.next_line().await.unwrap_or(None) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                log::debug!("[codex stderr] {}", trimmed);
+
+                if trimmed.contains("401 Unauthorized")
+                    && auth_lost
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
+                    let turn_id = current_turn_id.read().await.clone();
+                    emit_chat_event(
+                        &app_handle,
+                        Some(&session_id),
+                        turn_id.as_deref(),
+                        &ChatEvent::Error {
+                            message: Self::codex_auth_lost_message().to_string(),
+                        },
+                    );
+
+                    in_flight.store(false, Ordering::SeqCst);
+                    *current_turn_id.write().await = None;
+                    initialized.store(false, Ordering::SeqCst);
+                    pending_requests.lock().await.clear();
+                    *stdin_writer.lock().await = None;
+
+                    let mut guard = process.lock().await;
+                    if let Some(child) = guard.as_mut() {
+                        let _ = child.kill().await;
+                    }
+                    *guard = None;
+                }
+            }
+        })
+    }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +867,13 @@ impl BackendSession for CodexSession {
     }
 
     async fn send_message(&self, message: &str, turn_id: Option<&str>) -> Result<(), BackendError> {
+        if self.auth_lost.load(Ordering::SeqCst) {
+            return Err(BackendError {
+                message: Self::codex_auth_lost_message().to_string(),
+                recoverable: true,
+            });
+        }
+
         if self.in_flight.swap(true, Ordering::SeqCst) {
             return Err(BackendError {
                 message: "Codex session is busy".to_string(),
