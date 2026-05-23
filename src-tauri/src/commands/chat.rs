@@ -83,6 +83,8 @@ pub async fn create_session(
             }
         }
     };
+    let resolved_proxy_target =
+        storage::get_backend_proxy_target(&backend_name).map_err(|e| e.to_string())?;
 
     // Create session config
     let config = SessionConfig {
@@ -91,6 +93,7 @@ pub async fn create_session(
         model,
         resume_session_id,
         cli_path: resolved_cli_path,
+        proxy_target: resolved_proxy_target,
     };
 
     // Create session via backend

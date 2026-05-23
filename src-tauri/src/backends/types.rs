@@ -194,6 +194,7 @@ pub struct SessionConfig {
     pub model: Option<String>,
     pub resume_session_id: Option<String>,
     pub cli_path: Option<String>,
+    pub proxy_target: Option<String>,
 }
 
 /// Trait for a backend implementation (e.g., Claude, Codex).

@@ -101,6 +101,7 @@ class AppState {
   defaultBackend = $state<Backend>('claude');
   sessionBackend = $state<Backend | null>(null);
   backendCliPaths = $state<Record<string, string>>({});
+  backendProxyTargets = $state<Record<string, string>>({});
 
   // Settings
   permissionMode = $state<PermissionMode>('default');
@@ -136,6 +137,10 @@ class AppState {
 
   get cliPath(): string | null {
     return this.backendCliPaths[this.defaultBackend] ?? null;
+  }
+
+  get proxyTarget(): string | null {
+    return this.backendProxyTargets[this.defaultBackend] ?? null;
   }
 
   // Methods
@@ -180,6 +185,20 @@ class AppState {
 
   getCliPath(backend: Backend): string | undefined {
     return this.backendCliPaths[backend];
+  }
+
+  setProxyTarget(target: string | null, backend: Backend = this.defaultBackend) {
+    const next = { ...this.backendProxyTargets };
+    if (target) {
+      next[backend] = target;
+    } else {
+      delete next[backend];
+    }
+    this.backendProxyTargets = next;
+  }
+
+  getProxyTarget(backend: Backend): string | undefined {
+    return this.backendProxyTargets[backend];
   }
 
   async setDefaultBackend(backend: Backend) {

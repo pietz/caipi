@@ -628,6 +628,8 @@ pub struct StartupInfo {
     pub default_backend: String,
     #[serde(default)]
     pub backend_cli_paths: HashMap<String, String>,
+    #[serde(default)]
+    pub backend_proxy_targets: HashMap<String, String>,
 }
 
 #[tauri::command]
@@ -645,6 +647,8 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
         })
         .unwrap_or_else(|| "claude".to_string());
     let backend_cli_paths = storage::get_backend_cli_paths().map_err(|e| e.to_string())?;
+    let backend_proxy_targets =
+        storage::get_backend_proxy_targets().map_err(|e| e.to_string())?;
 
     let cache = storage::get_cli_status_cache().map_err(|e| e.to_string())?;
     let (cli_status, cli_status_fresh) = match cache {
@@ -675,6 +679,7 @@ pub async fn get_startup_info() -> Result<StartupInfo, String> {
         cli_path,
         default_backend,
         backend_cli_paths,
+        backend_proxy_targets,
     })
 }
 
@@ -718,6 +723,20 @@ pub async fn get_backend_cli_path(backend: String) -> Result<Option<String>, Str
 #[tauri::command]
 pub async fn set_backend_cli_path(backend: String, path: Option<String>) -> Result<(), String> {
     storage::set_backend_cli_path(&backend, path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_backend_proxy_target(backend: String) -> Result<Option<String>, String> {
+    storage::get_backend_proxy_target(&backend).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_backend_proxy_target(
+    backend: String,
+    target: Option<String>,
+) -> Result<(), String> {
+    storage::set_backend_proxy_target(&backend, target).map_err(|e| e.to_string())?;
     Ok(())
 }
 

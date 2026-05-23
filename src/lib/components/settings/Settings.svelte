@@ -18,7 +18,9 @@
 
   let appVersion = $state<string | null>(null);
   let cliPathInput = $state(app.cliPath ?? '');
+  let proxyTargetInput = $state(app.proxyTarget ?? '');
   let savingCliPath = $state(false);
+  let savingProxyTarget = $state(false);
   type BackendInstallState = 'checking' | 'installed' | 'not_installed';
   type BackendStatus = {
     installState: BackendInstallState;
@@ -86,9 +88,29 @@
     }
   }
 
+  async function saveProxyTarget() {
+    savingProxyTarget = true;
+    try {
+      const trimmed = proxyTargetInput.trim();
+      const targetToSave = trimmed === '' ? undefined : trimmed;
+      await api.setBackendProxyTarget(app.defaultBackend, targetToSave);
+      app.setProxyTarget(targetToSave ?? null, app.defaultBackend);
+    } catch (e) {
+      console.error('Failed to save proxy target:', e);
+    } finally {
+      savingProxyTarget = false;
+    }
+  }
+
   function handleCliPathKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       saveCliPath();
+    }
+  }
+
+  function handleProxyTargetKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      saveProxyTarget();
     }
   }
 
@@ -96,6 +118,7 @@
     if (backend === app.defaultBackend) return;
     await app.setDefaultBackend(backend);
     cliPathInput = app.getCliPath(backend) ?? '';
+    proxyTargetInput = app.getProxyTarget(backend) ?? '';
     // Auto-start a new session on the new backend if one is active
     if (app.sessionId && app.folder) {
       chat.reset();
@@ -134,9 +157,12 @@
             {@const status = backendStatuses[backend]}
             {@const isChecking = status?.installState === 'checking'}
             {@const isReady = status?.installState === 'installed' && !!status?.authenticated}
+            {@const isSelectable = backend === 'codex'
+              ? status?.installState === 'installed'
+              : isReady}
             <button
-              class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {app.defaultBackend === backend ? 'bg-background shadow-sm' : 'hover:bg-background/50'} {isReady ? '' : 'opacity-50'}"
-              disabled={!isReady}
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors {app.defaultBackend === backend ? 'bg-background shadow-sm' : 'hover:bg-background/50'} {isSelectable ? '' : 'opacity-50'}"
+              disabled={!isSelectable}
               onclick={() => switchBackend(backend)}
             >
               {#if isChecking}
@@ -209,6 +235,33 @@
           Leave empty to use default. Requires restart.
         </p>
       </label>
+
+      {#if backendStatuses.codex?.installState === 'installed' || app.defaultBackend === 'codex'}
+        <label class="block">
+          <span class="text-xs text-muted-foreground">Codex Proxy Target</span>
+          <div class="mt-1 flex gap-2">
+            <input
+              type="text"
+              bind:value={proxyTargetInput}
+              onkeydown={handleProxyTargetKeydown}
+              placeholder="http://localhost:8080"
+              class="flex-1 h-7 px-2 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              onclick={saveProxyTarget}
+              disabled={savingProxyTarget}
+            >
+              {savingProxyTarget ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+          <p class="text-[10px] text-muted-foreground/70 mt-1">
+            Optional. When set, Codex chats use this HTTP proxy target instead of `codex app-server`.
+          </p>
+        </label>
+      {/if}
     </div>
 
     <!-- About Section -->

@@ -24,6 +24,7 @@ export interface StartupInfo {
   cliPath?: string;
   defaultBackend: string;
   backendCliPaths: Record<string, string>;
+  backendProxyTargets: Record<string, string>;
 }
 
 // Folders

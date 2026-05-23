@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -85,6 +86,7 @@ pub struct CodexSession {
     id: String,
     folder_path: String,
     cli_path: Option<String>,
+    proxy_target: Option<String>,
     app_handle: AppHandle,
 
     // User-controlled settings (per-turn, no process restart needed)
@@ -123,6 +125,29 @@ pub struct CodexSession {
     monitor_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
+#[derive(serde::Serialize)]
+struct ProxyChatRequest {
+    model: String,
+    messages: Vec<ProxyChatMessage>,
+    stream: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ProxyChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ProxyChatResponse {
+    message: Option<ProxyChatMessageResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ProxyChatMessageResponse {
+    content: String,
+}
+
 impl CodexSession {
     async fn new(config: SessionConfig, app_handle: AppHandle) -> Result<Self, BackendError> {
         let folder_path = config.folder_path.clone();
@@ -140,6 +165,7 @@ impl CodexSession {
             id: Uuid::new_v4().to_string(),
             folder_path,
             cli_path: config.cli_path,
+            proxy_target: config.proxy_target,
             app_handle,
             permission_mode: Arc::new(RwLock::new(
                 config
@@ -168,6 +194,132 @@ impl CodexSession {
             stderr_task: Arc::new(Mutex::new(None)),
             monitor_task: Arc::new(Mutex::new(None)),
         })
+    }
+
+    fn proxy_url(&self) -> Option<String> {
+        self.proxy_target
+            .as_ref()
+            .map(|target| format!("{}/api/chat", target.trim_end_matches('/')))
+    }
+
+    async fn send_message_via_proxy(&self, message: &str, turn_id: String) -> Result<(), BackendError> {
+        let url = self.proxy_url().ok_or_else(|| BackendError {
+            message: "Codex proxy target is not configured".to_string(),
+            recoverable: false,
+        })?;
+        let app_handle = self.app_handle.clone();
+        let session_id = self.id.clone();
+        let model = self.model.read().await.clone();
+        let messages_state = self.messages.clone();
+        let current_turn_id = self.current_turn_id.clone();
+        let in_flight = self.in_flight.clone();
+        let styled_message = crate::backends::apply_app_response_style_instructions(message);
+
+        let history = {
+            let messages = messages_state.read().await;
+            messages
+                .iter()
+                .map(|entry| {
+                    let content = if entry.role == "user" && entry.content == message {
+                        styled_message.clone()
+                    } else {
+                        entry.content.clone()
+                    };
+                    ProxyChatMessage {
+                        role: entry.role.clone(),
+                        content,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let request_body = ProxyChatRequest {
+            model,
+            messages: history,
+            stream: false,
+        };
+
+        let task = tokio::spawn(async move {
+            let client = Client::new();
+            let result = client.post(url).json(&request_body).send().await;
+
+            match result {
+                Ok(response) => {
+                    let status = response.status();
+                    if !status.is_success() {
+                        let body = response.text().await.unwrap_or_default();
+                        let error_event = ChatEvent::Error {
+                            message: format!("Codex proxy returned {}: {}", status, body),
+                        };
+                        emit_chat_event(
+                            &app_handle,
+                            Some(&session_id),
+                            Some(&turn_id),
+                            &error_event,
+                        );
+                    } else {
+                        match response.json::<ProxyChatResponse>().await {
+                            Ok(payload) => {
+                                let content = payload
+                                    .message
+                                    .map(|message| message.content)
+                                    .unwrap_or_default();
+
+                                if !content.is_empty() {
+                                    emit_chat_event(
+                                        &app_handle,
+                                        Some(&session_id),
+                                        Some(&turn_id),
+                                        &ChatEvent::Text {
+                                            content: content.clone(),
+                                        },
+                                    );
+                                    messages_state
+                                        .write()
+                                        .await
+                                        .push(Message::new("assistant", content));
+                                }
+
+                                emit_chat_event(
+                                    &app_handle,
+                                    Some(&session_id),
+                                    Some(&turn_id),
+                                    &ChatEvent::Complete,
+                                );
+                            }
+                            Err(error) => {
+                                let error_event = ChatEvent::Error {
+                                    message: format!("Failed to parse Codex proxy response: {error}"),
+                                };
+                                emit_chat_event(
+                                    &app_handle,
+                                    Some(&session_id),
+                                    Some(&turn_id),
+                                    &error_event,
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    let error_event = ChatEvent::Error {
+                        message: format!("Failed to reach Codex proxy: {error}"),
+                    };
+                    emit_chat_event(
+                        &app_handle,
+                        Some(&session_id),
+                        Some(&turn_id),
+                        &error_event,
+                    );
+                }
+            }
+
+            in_flight.store(false, Ordering::SeqCst);
+            *current_turn_id.write().await = None;
+        });
+        *self.stdout_task.lock().await = Some(task);
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -442,17 +594,28 @@ impl CodexSession {
 
         // If resuming, try thread/resume first
         if let Some(resume_id) = &self.resume_session_id {
-            let result = self
+            match self
                 .send_request("thread/resume", json!({ "threadId": resume_id }))
-                .await?;
-            if let Some(tid) = result
-                .pointer("/thread/id")
-                .or_else(|| result.get("threadId"))
-                .and_then(Value::as_str)
+                .await
             {
-                let tid = tid.to_string();
-                *self.thread_id.write().await = Some(tid.clone());
-                return Ok(tid);
+                Ok(result) => {
+                    if let Some(tid) = result
+                        .pointer("/thread/id")
+                        .or_else(|| result.get("threadId"))
+                        .and_then(Value::as_str)
+                    {
+                        let tid = tid.to_string();
+                        *self.thread_id.write().await = Some(tid.clone());
+                        return Ok(tid);
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Codex thread resume failed for {}: {}. Falling back to thread/start.",
+                        resume_id,
+                        error
+                    );
+                }
             }
             // If resume failed, fall through to create new thread
         }
@@ -662,6 +825,19 @@ impl BackendSession for CodexSession {
         {
             let mut messages = self.messages.write().await;
             messages.push(Message::new("user", message));
+        }
+
+        if self.proxy_target.is_some() {
+            let session_init = ChatEvent::SessionInit {
+                auth_type: "codex".to_string(),
+            };
+            emit_chat_event(
+                &self.app_handle,
+                Some(&self.id),
+                Some(&turn_id),
+                &session_init,
+            );
+            return self.send_message_via_proxy(message, turn_id).await;
         }
 
         // Ensure app-server is running
