@@ -1,6 +1,7 @@
 <script lang="ts">
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { renderMarkdown } from '$lib/utils/markdown';
+  import { isAllowedExternalUrl } from '$lib/utils/url';
   import type { Message, StreamItem, ToolState } from '$lib/stores';
   import { HIDDEN_TOOL_TYPES } from './constants';
   import ToolCallStack from './ToolCallStack.svelte';
@@ -52,7 +53,12 @@
     const anchor = target.closest('a');
     if (anchor && anchor.href) {
       event.preventDefault();
-      openUrl(anchor.href);
+      if (isAllowedExternalUrl(anchor.href)) {
+        void openUrl(anchor.href);
+        return;
+      }
+
+      console.warn('[ChatMessage] Blocked URL with disallowed scheme:', anchor.href);
     }
   }
 
@@ -67,28 +73,29 @@
 
 <!-- Message content -->
 {#if message.content}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div
-    class="message-content text-sm leading-relaxed {isUser ? 'text-foreground/70 italic' : isError ? 'text-red-500' : 'text-foreground/90'}"
-    class:error-message={isError}
-    onclick={handleClick}
-  >
-    {@html htmlContent}
-  </div>
-{/if}
+	  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	  <div
+	    class="message-content text-sm leading-relaxed {isUser ? 'text-foreground/70 italic' : isError ? 'text-red-500' : 'text-foreground/90'}"
+	    class:error-message={isError}
+	    role="presentation"
+	    onclick={handleClick}
+	  >
+	    {@html htmlContent}
+	  </div>
+	{/if}
 
-<!-- Tools (for completed messages) -->
-{#if hasTools}
-  <div class="mt-3">
-    {#each groupedNonTextToolItems as group (group.type === 'subagent-group' ? group.group.id : `tool-${group.tools[0]?.id ?? 'empty'}`)}
-      {#if group.type === 'tool-group'}
-        <ToolCallStack tools={group.tools} />
-      {:else if group.type === 'subagent-group'}
-        <SubagentGroupCard group={group.group} />
-      {/if}
-    {/each}
-  </div>
-{/if}
+	<!-- Tools (for completed messages) -->
+	{#if hasTools}
+	  <div class="mt-3">
+	    {#each groupedNonTextToolItems as group (group.type === 'subagent-group' ? group.group.id : `tool-${group.tools[0] ? `${group.tools[0].id}:${group.tools[0].insertionIndex}` : 'empty'}`)}
+	      {#if group.type === 'tool-group'}
+	        <ToolCallStack tools={group.tools} />
+	      {:else if group.type === 'subagent-group'}
+	        <SubagentGroupCard group={group.group} />
+	      {/if}
+	    {/each}
+	  </div>
+	{/if}
 
 {#if isUser}<Divider />{/if}
 

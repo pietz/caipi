@@ -10,6 +10,10 @@ describe('getCompactToolTarget', () => {
     expect(getCompactToolTarget('Thinking', '**Plan** Step 1: inspect')).toBe('Plan');
   });
 
+  it('returns bold title prefix even when followed by punctuation', () => {
+    expect(getCompactToolTarget('Thinking', '**Plan**: Step 1')).toBe('Plan');
+  });
+
   it('returns full thinking text when there is no bold prefix', () => {
     const summary = 'Inspecting project structure and dependencies';
     expect(getCompactToolTarget('Thinking', summary)).toBe(summary);

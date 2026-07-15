@@ -15,6 +15,7 @@
   let pendingPermission = $state(false);
 
   const storageKey = $derived(group.id);
+  const toolKey = (tool: SubagentGroup['tools'][number]) => `${tool.id}:${tool.insertionIndex}`;
 
   $effect(() => {
     expanded = chat.getSubagentGroupExpanded(storageKey);
@@ -97,7 +98,7 @@
 
     {#if expanded}
       <div class="border-t border-border bg-muted/20">
-        {#each group.tools as tool (tool.id)}
+        {#each group.tools as tool (toolKey(tool))}
           <ToolExpandedRow
             {tool}
             showPermissionButtons={tool.status === 'awaiting_permission' && tool.id !== firstAwaitingPermission?.id}

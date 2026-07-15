@@ -21,15 +21,17 @@ use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-use crate::backends::session::BackendSession;
+use super::cli_protocol::CliEvent;
+use super::sessions::load_session_log_messages;
+use super::settings::{self, ClaudeSettings};
+use crate::backends::session::{
+    validate_permission_mode, BackendSession, PERMISSION_MODE_BYPASS, PERMISSION_MODE_DEFAULT,
+};
 use crate::backends::types::{
     AuthStatus, Backend, BackendError, BackendKind, InstallStatus, SessionConfig,
 };
-use crate::backends::{emit_chat_event, PermissionChannels};
-use super::cli_protocol::CliEvent;
-use super::settings::{self, ClaudeSettings};
 use crate::backends::types::{ChatEvent, Message};
-use super::sessions::load_session_log_messages;
+use crate::backends::{emit_chat_event, PermissionChannels};
 use crate::commands::setup::{check_cli_authenticated_internal, check_cli_installed_internal};
 
 /// Claude backend implementation (CLI-backed).
@@ -229,7 +231,8 @@ impl CliSession {
     pub async fn new(config: SessionConfig, app_handle: AppHandle) -> Result<Self, BackendError> {
         let permission_mode = config
             .permission_mode
-            .unwrap_or_else(|| "default".to_string());
+            .unwrap_or_else(|| PERMISSION_MODE_DEFAULT.to_string());
+        validate_permission_mode(&permission_mode)?;
         let model = config.model.unwrap_or_else(|| "sonnet".to_string());
         let user_settings = settings::load_user_settings();
         let initial_messages = config
@@ -314,7 +317,7 @@ impl CliSession {
         // Note: We only use --dangerously-skip-permissions for bypass mode.
         // For acceptEdits and default, we handle permissions via the control protocol hooks.
         // Don't use --allowedTools as it breaks Bash prompting behavior.
-        if permission_mode == "bypassPermissions" {
+        if permission_mode == PERMISSION_MODE_BYPASS {
             cmd.arg("--dangerously-skip-permissions");
         }
         // Note: --thinking is not a valid CLI flag. Extended thinking content comes
@@ -377,7 +380,12 @@ impl CliSession {
         *self.stdin_writer.lock().await = Some(stdin);
         *self.process.lock().await = Some(child);
 
-        log::info!("Claude CLI spawned: pid={:?}, model={}, mode={}", spawned_pid, model, permission_mode);
+        log::info!(
+            "Claude CLI spawned: pid={:?}, model={}, mode={}",
+            spawned_pid,
+            model,
+            permission_mode
+        );
 
         // Send initialize request with hooks before user message
         if let Err(e) = self.send_initialize().await {
@@ -460,8 +468,16 @@ impl CliSession {
                         .await;
                     }
                     Err(e) => {
-                        // Log parse errors but continue
-                        log::warn!("Failed to parse Claude CLI event: {} - line: {}", e, line);
+                        let sanitized = crate::backends::utils::sanitize_untrusted_log_text(&line);
+                        // Log parse errors but continue (avoid logging raw untrusted payloads).
+                        log::warn!(
+                            "Failed to parse Claude CLI event: {} [line_len={}, redactions={}, truncated={}, preview={}]",
+                            e,
+                            sanitized.original_len,
+                            sanitized.redaction_count,
+                            sanitized.truncated,
+                            sanitized.text
+                        );
                     }
                 }
             }
@@ -475,16 +491,15 @@ impl CliSession {
         let in_flight = self.in_flight.clone();
         let current_turn_id = self.current_turn_id.clone();
         let lifecycle_handle = tokio::spawn(async move {
-            if let Some(message) =
-                Self::monitor_process_lifecycle(
-                    process,
-                    stdin_writer,
-                    abort_flag,
-                    in_flight,
-                    current_turn_id.clone(),
-                    spawned_pid,
-                )
-                    .await
+            if let Some(message) = Self::monitor_process_lifecycle(
+                process,
+                stdin_writer,
+                abort_flag,
+                in_flight,
+                current_turn_id.clone(),
+                spawned_pid,
+            )
+            .await
             {
                 let turn_id = current_turn_id.read().await.clone();
                 let error_event = ChatEvent::Error { message };
@@ -588,11 +603,7 @@ impl BackendSession for CliSession {
         &self.folder_path
     }
 
-    async fn send_message(
-        &self,
-        message: &str,
-        turn_id: Option<&str>,
-    ) -> Result<(), BackendError> {
+    async fn send_message(&self, message: &str, turn_id: Option<&str>) -> Result<(), BackendError> {
         if self.in_flight.swap(true, Ordering::SeqCst) {
             return Err(BackendError {
                 message: "Claude session is busy".to_string(),
@@ -704,6 +715,7 @@ impl BackendSession for CliSession {
     }
 
     async fn set_permission_mode(&self, mode: String) -> Result<(), BackendError> {
+        validate_permission_mode(&mode)?;
         *self.permission_mode.write().await = mode;
         Ok(())
     }
@@ -725,8 +737,8 @@ impl BackendSession for CliSession {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::cli_protocol::UsageInfo;
+    use super::*;
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
     use tokio::sync::{Mutex, RwLock};
@@ -824,5 +836,22 @@ mod tests {
         assert!(process.lock().await.is_none());
         assert!(stdin_writer.lock().await.is_none());
         assert!(message.is_none());
+    }
+
+    #[test]
+    fn permission_mode_validation_accepts_known_modes() {
+        for mode in crate::backends::session::VALID_PERMISSION_MODES {
+            assert!(validate_permission_mode(mode).is_ok());
+        }
+    }
+
+    #[test]
+    fn permission_mode_validation_rejects_unknown_mode() {
+        let err = validate_permission_mode("allAccess").expect_err("invalid mode should fail");
+        assert_eq!(
+            err.message,
+            "Invalid permission mode: allAccess. Expected one of: default, acceptEdits, bypassPermissions"
+        );
+        assert!(err.recoverable);
     }
 }

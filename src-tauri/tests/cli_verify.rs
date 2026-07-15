@@ -469,16 +469,17 @@ impl CliHarness {
         );
     }
 
-    // ========================================================================
-    // Behavioral helpers — content extractors
-    // ========================================================================
+	    // ========================================================================
+	    // Behavioral helpers — content extractors
+	    // ========================================================================
 
-    /// Concatenated text from all Text ContentBlocks across all assistant events.
-    fn all_text(&self) -> String {
-        let mut out = String::new();
-        for e in self.parsed_events() {
-            if let CliEvent::Assistant(a) = e {
-                for block in &a.message.content {
+	    /// Concatenated text from all Text ContentBlocks across all assistant events.
+	    #[allow(dead_code)]
+	    fn all_text(&self) -> String {
+	        let mut out = String::new();
+	        for e in self.parsed_events() {
+	            if let CliEvent::Assistant(a) = e {
+	                for block in &a.message.content {
                     if let ContentBlock::Text(t) = block {
                         out.push_str(&t.text);
                     }

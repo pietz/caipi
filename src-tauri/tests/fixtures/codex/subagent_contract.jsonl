@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","method":"item/started","params":{"event":{"item":{"id":"spawn-1","type":"function_call","name":"spawn_agent","receiver_thread_ids":["thread-child-a"],"arguments":{"message":"Research release notes"}}}}}
+{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"tool-child-read","type":"function_call","name":"Read","threadId":"thread-parent","senderThreadId":"thread-child-a","arguments":{"filePath":"README.md"}}}}
+{"jsonrpc":"2.0","id":"req_approval_1","method":"item/commandExecution/requestApproval","params":{"toolUseId":"tool-cmd-1","command":"ls -la"}}
+{"jsonrpc":"2.0","id":"42","result":{"threadId":"thread-main"}}

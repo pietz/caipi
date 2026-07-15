@@ -14,23 +14,107 @@ use uuid::Uuid;
 
 use crate::backends::emit_chat_event;
 use crate::backends::types::BackendError;
-use crate::backends::PermissionChannels;
 use crate::backends::types::{ChatEvent, Message};
+use crate::backends::PermissionChannels;
 
 use super::adapter::CliSession;
 use super::cli_protocol::{
-    AssistantEvent, CliEvent, ContentBlock, IncomingControlRequest, OutgoingControlResponse,
-    ResultEvent, SystemEvent, UsageInfo,
+    AssistantEvent, CliEvent, ContentBlock, HookResponseData, IncomingControlRequest,
+    OutgoingControlResponse, OutgoingHookSpecificOutput, OutgoingResponsePayload, ResultEvent,
+    SystemEvent, UsageInfo,
 };
 use super::hooks::{determine_permission, PermissionDecision};
 use super::settings::ClaudeSettings;
 use super::tool_utils::extract_tool_target;
+
+#[derive(Clone, Copy)]
+struct EventContext<'a> {
+    app_handle: &'a AppHandle,
+    session_id: &'a str,
+    turn_id: Option<&'a str>,
+}
+
+impl EventContext<'_> {
+    fn emit(&self, event: &ChatEvent) {
+        emit_chat_event(self.app_handle, Some(self.session_id), self.turn_id, event);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ControlContext<'a> {
+    event: EventContext<'a>,
+    permission_mode: &'a Arc<RwLock<String>>,
+    user_settings: Option<&'a ClaudeSettings>,
+    permission_channels: &'a PermissionChannels,
+    stdin_writer: &'a Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+    abort_flag: &'a Arc<AtomicBool>,
+    abort_notify: &'a Arc<Notify>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HookCallbackAction {
+    Ignore,
+    PreToolUse,
+    PostToolUse,
+    UnknownHook(String),
+    MissingInput,
+}
 
 impl CliSession {
     /// Compute context usage for UI from assistant usage.
     /// This tracks effective input-side context load for the current call.
     pub(super) fn context_tokens_from_usage(usage: &UsageInfo) -> u64 {
         usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+    }
+
+    fn ack_hook_continue(request_id: String, hook_event_name: &str) -> OutgoingControlResponse {
+        OutgoingControlResponse {
+            msg_type: "control_response".to_string(),
+            response: OutgoingResponsePayload {
+                subtype: "success".to_string(),
+                request_id,
+                response: Some(HookResponseData {
+                    continue_: true,
+                    hook_specific_output: OutgoingHookSpecificOutput {
+                        hook_event_name: hook_event_name.to_string(),
+                        permission_decision: "allow".to_string(),
+                        permission_decision_reason: Some("Acknowledged".to_string()),
+                        updated_input: None,
+                    },
+                }),
+            },
+        }
+    }
+
+    fn is_error_result_subtype(subtype: &str) -> bool {
+        let subtype = subtype.to_ascii_lowercase();
+        subtype == "error" || subtype.contains("error") || subtype.contains("fail")
+    }
+
+    fn classify_hook_callback(request: &IncomingControlRequest) -> HookCallbackAction {
+        if request.request.subtype != "hook_callback" {
+            return HookCallbackAction::Ignore;
+        }
+
+        match request
+            .request
+            .input
+            .as_ref()
+            .map(|input| input.hook_event_name.as_str())
+        {
+            Some("PreToolUse") => HookCallbackAction::PreToolUse,
+            Some("PostToolUse") => HookCallbackAction::PostToolUse,
+            Some(other) => HookCallbackAction::UnknownHook(other.to_string()),
+            None => HookCallbackAction::MissingInput,
+        }
+    }
+
+    fn pretool_prompt_resolution(allowed: bool) -> (&'static str, &'static str) {
+        if allowed {
+            ("running", "User approved")
+        } else {
+            ("denied", "User denied")
+        }
     }
 
     /// Send a control response to CLI stdin.
@@ -54,20 +138,14 @@ impl CliSession {
                     message: format!("Failed to write control response: {}", e),
                     recoverable: false,
                 })?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| BackendError {
-                    message: format!("Failed to write newline: {}", e),
-                    recoverable: false,
-                })?;
-            stdin
-                .flush()
-                .await
-                .map_err(|e| BackendError {
-                    message: format!("Failed to flush stdin: {}", e),
-                    recoverable: false,
-                })?;
+            stdin.write_all(b"\n").await.map_err(|e| BackendError {
+                message: format!("Failed to write newline: {}", e),
+                recoverable: false,
+            })?;
+            stdin.flush().await.map_err(|e| BackendError {
+                message: format!("Failed to flush stdin: {}", e),
+                recoverable: false,
+            })?;
             Ok(())
         } else {
             Err(BackendError {
@@ -96,51 +174,36 @@ impl CliSession {
         in_flight: &Arc<AtomicBool>,
         current_turn_id: &Arc<RwLock<Option<String>>>,
     ) {
+        let event_ctx = EventContext {
+            app_handle,
+            session_id,
+            turn_id,
+        };
+
         match event {
             CliEvent::System(system) => {
-                Self::handle_system_event(system, app_handle, session_id, turn_id, cli_session_id)
-                    .await;
+                Self::handle_system_event(system, event_ctx, cli_session_id).await;
             }
             CliEvent::Assistant(assistant) => {
-                Self::handle_assistant_event(
-                    assistant,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    active_tools,
-                    messages,
-                )
-                .await;
+                Self::handle_assistant_event(assistant, event_ctx, active_tools, messages).await;
             }
             CliEvent::User(_user) => {
-                Self::handle_user_event(_user, app_handle, session_id, turn_id, active_tools).await;
+                Self::handle_user_event(_user, event_ctx, active_tools).await;
             }
             CliEvent::Result(result) => {
-                Self::handle_result_event(
-                    result,
-                    app_handle,
-                    session_id,
-                    turn_id,
-                    in_flight,
-                    current_turn_id,
-                )
-                .await;
+                Self::handle_result_event(result, event_ctx, in_flight, current_turn_id).await;
             }
             CliEvent::ControlRequest(request) => {
-                Self::handle_control_request(
-                    request,
-                    app_handle,
-                    session_id,
-                    turn_id,
+                let control_ctx = ControlContext {
+                    event: event_ctx,
                     permission_mode,
                     user_settings,
                     permission_channels,
                     stdin_writer,
                     abort_flag,
                     abort_notify,
-                    active_tools,
-                )
-                .await;
+                };
+                Self::handle_control_request(request, control_ctx, active_tools).await;
             }
             CliEvent::ControlResponse(_ack) => {
                 // Acknowledgment of our control response - nothing to do
@@ -154,9 +217,7 @@ impl CliSession {
     /// Handle system events (init, health_check).
     async fn handle_system_event(
         event: SystemEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
+        ctx: EventContext<'_>,
         cli_session_id: &Arc<RwLock<Option<String>>>,
     ) {
         if event.subtype == "init" {
@@ -181,7 +242,7 @@ impl CliSession {
             .to_string();
 
             let session_init = ChatEvent::SessionInit { auth_type };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &session_init);
+            ctx.emit(&session_init);
         }
     }
 
@@ -189,9 +250,7 @@ impl CliSession {
     /// Note: ToolStart is now emitted from hook callbacks, not from tool_use blocks.
     async fn handle_assistant_event(
         event: AssistantEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
+        ctx: EventContext<'_>,
         active_tools: &mut HashMap<String, String>,
         messages: &Arc<RwLock<Vec<Message>>>,
     ) {
@@ -202,7 +261,7 @@ impl CliSession {
                 context_tokens: None,
                 context_window: None,
             };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &token_usage);
+            ctx.emit(&token_usage);
         }
 
         for block in event.message.content {
@@ -211,7 +270,7 @@ impl CliSession {
                     let text_event = ChatEvent::Text {
                         content: text_block.text.clone(),
                     };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &text_event);
+                    ctx.emit(&text_event);
 
                     // Store message
                     let mut msgs = messages.write().await;
@@ -222,10 +281,11 @@ impl CliSession {
                     let thinking_start = ChatEvent::ThinkingStart {
                         thinking_id: thinking_id.clone(),
                         content: thinking_block.thinking,
+                        input: None,
                     };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_start);
+                    ctx.emit(&thinking_start);
                     let thinking_end = ChatEvent::ThinkingEnd { thinking_id };
-                    emit_chat_event(app_handle, Some(session_id), turn_id, &thinking_end);
+                    ctx.emit(&thinking_end);
                 }
                 ContentBlock::ToolUse(tool_use) => {
                     // Track the tool for ToolEnd matching
@@ -246,7 +306,7 @@ impl CliSession {
                             status: status.to_string(),
                             output: Some(tool_result.content.clone()),
                         };
-                        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
+                        ctx.emit(&tool_end);
                     }
                 }
                 ContentBlock::InputJsonDelta(_) => {
@@ -264,9 +324,7 @@ impl CliSession {
     /// Handle user events (tool results).
     async fn handle_user_event(
         event: super::cli_protocol::UserEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
+        ctx: EventContext<'_>,
         active_tools: &mut HashMap<String, String>,
     ) {
         if let Some(message) = event.extra.get("message") {
@@ -289,7 +347,7 @@ impl CliSession {
                                     status: status.to_string(),
                                     output: item.get("content").cloned(),
                                 };
-                                emit_chat_event(app_handle, Some(session_id), turn_id, &tool_end);
+                                ctx.emit(&tool_end);
                             }
                         }
                     }
@@ -300,67 +358,51 @@ impl CliSession {
 
     /// Handle a control request from the CLI (hook callbacks).
     /// This is where ToolStart is emitted and permissions are determined.
-    #[allow(clippy::too_many_arguments)]
     async fn handle_control_request(
         request: IncomingControlRequest,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        user_settings: Option<&ClaudeSettings>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
+        ctx: ControlContext<'_>,
         active_tools: &mut HashMap<String, String>,
     ) {
-        // Handle different control request types
-        if request.request.subtype == "hook_callback" {
-            if let Some(input) = &request.request.input {
-                if input.hook_event_name == "PreToolUse" {
-                    Self::handle_pretool_hook(
-                        &request,
-                        input,
-                        app_handle,
-                        session_id,
-                        turn_id,
-                        permission_mode,
-                        user_settings,
-                        permission_channels,
-                        stdin_writer,
-                        abort_flag,
-                        abort_notify,
-                        active_tools,
-                    )
-                    .await;
-                } else if input.hook_event_name == "PostToolUse" {
-                    // Acknowledge PostToolUse.
-                    // Tool completion is emitted from ToolResult blocks so we preserve
-                    // the real final status (including errors) and avoid duplicate ToolEnd events.
-                    let response =
-                        OutgoingControlResponse::ack_posttool(request.request_id.clone());
-                    if let Err(e) = Self::send_control_response(stdin_writer, response).await {
-                        log::error!("Failed to send PostToolUse ack: {}", e);
-                    }
+        let response = match Self::classify_hook_callback(&request) {
+            HookCallbackAction::Ignore => return,
+            HookCallbackAction::PreToolUse => {
+                if let Some(input) = request.request.input.as_ref() {
+                    Self::handle_pretool_hook(&request, input, ctx, active_tools).await;
+                    return;
                 }
+
+                log::debug!("PreToolUse hook callback missing input; sending safe continue ack");
+                Self::ack_hook_continue(request.request_id.clone(), "UnknownHook")
             }
+            HookCallbackAction::PostToolUse => {
+                // Acknowledge PostToolUse.
+                // Tool completion is emitted from ToolResult blocks so we preserve
+                // the real final status (including errors) and avoid duplicate ToolEnd events.
+                OutgoingControlResponse::ack_posttool(request.request_id.clone())
+            }
+            HookCallbackAction::UnknownHook(hook_event_name) => {
+                log::debug!(
+                    "Unknown hook callback '{}'; sending safe continue ack",
+                    hook_event_name
+                );
+                Self::ack_hook_continue(request.request_id.clone(), &hook_event_name)
+            }
+            HookCallbackAction::MissingInput => {
+                log::debug!("hook_callback missing input; sending safe continue ack");
+                Self::ack_hook_continue(request.request_id.clone(), "UnknownHook")
+            }
+        };
+
+        if let Err(e) = Self::send_control_response(ctx.stdin_writer, response).await {
+            log::error!("Failed to send hook callback ack: {}", e);
         }
     }
 
     /// Handle a PreToolUse hook callback - emit ToolStart and determine permission.
-    #[allow(clippy::too_many_arguments)]
     async fn handle_pretool_hook(
         request: &IncomingControlRequest,
         input: &super::cli_protocol::HookCallbackInput,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
-        permission_mode: &Arc<RwLock<String>>,
-        user_settings: Option<&ClaudeSettings>,
-        permission_channels: &PermissionChannels,
-        stdin_writer: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
-        abort_flag: &Arc<AtomicBool>,
-        abort_notify: &Arc<Notify>,
+        ctx: ControlContext<'_>,
         active_tools: &mut HashMap<String, String>,
     ) {
         let tool_name = input.tool_name.clone().unwrap_or_default();
@@ -391,25 +433,26 @@ impl CliSession {
             status: "pending".to_string(),
             input: input_for_frontend,
         };
-        emit_chat_event(app_handle, Some(session_id), turn_id, &tool_start);
+        ctx.event.emit(&tool_start);
 
         // Check abort first
-        if abort_flag.load(Ordering::SeqCst) {
+        if ctx.abort_flag.load(Ordering::SeqCst) {
             // Remove from active_tools since tool won't run
             active_tools.remove(&tool_use_id);
             let response = OutgoingControlResponse::deny_pretool(
                 request.request_id.clone(),
                 "Session aborted",
             );
-            if let Err(e) = Self::send_control_response(stdin_writer, response).await {
+            if let Err(e) = Self::send_control_response(ctx.stdin_writer, response).await {
                 log::error!("Failed to send abort response: {}", e);
             }
             return;
         }
 
         // Determine permission
-        let current_mode = permission_mode.read().await.clone();
-        let decision = determine_permission(&current_mode, &tool_name, &tool_input, user_settings);
+        let current_mode = ctx.permission_mode.read().await.clone();
+        let decision =
+            determine_permission(&current_mode, &tool_name, &tool_input, ctx.user_settings);
         log::debug!("Permission: tool={}, decision={:?}", tool_name, decision);
 
         match decision {
@@ -420,11 +463,11 @@ impl CliSession {
                     status: "running".to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &running_status);
+                ctx.event.emit(&running_status);
 
                 let response =
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), &reason);
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
+                if let Err(e) = Self::send_control_response(ctx.stdin_writer, response).await {
                     log::error!("Failed to send allow response: {}", e);
                 }
             }
@@ -436,11 +479,11 @@ impl CliSession {
                     status: "denied".to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &denied_status);
+                ctx.event.emit(&denied_status);
 
                 let response =
                     OutgoingControlResponse::deny_pretool(request.request_id.clone(), &reason);
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
+                if let Err(e) = Self::send_control_response(ctx.stdin_writer, response).await {
                     log::error!("Failed to send deny response: {}", e);
                 }
             }
@@ -454,21 +497,16 @@ impl CliSession {
                     status: "awaiting_permission".to_string(),
                     permission_request_id: Some(permission_request_id.clone()),
                 };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &awaiting_permission);
+                ctx.event.emit(&awaiting_permission);
 
                 // Wait for user response with timeout and abort support
                 let allowed = crate::backends::utils::wait_for_permission(
-                    permission_channels,
+                    ctx.permission_channels,
+                    ctx.event.session_id,
                     &permission_request_id,
-                    abort_notify,
+                    ctx.abort_notify,
                 )
                 .await;
-
-                let reason = if allowed {
-                    "User approved"
-                } else {
-                    "User denied"
-                };
 
                 // If denied, remove from active_tools since tool won't run
                 if !allowed {
@@ -476,20 +514,20 @@ impl CliSession {
                 }
 
                 // Emit final status and send control response
-                let status = if allowed { "running" } else { "denied" };
+                let (status, reason) = Self::pretool_prompt_resolution(allowed);
                 let final_status = ChatEvent::ToolStatusUpdate {
                     tool_use_id: tool_use_id.clone(),
                     status: status.to_string(),
                     permission_request_id: None,
                 };
-                emit_chat_event(app_handle, Some(session_id), turn_id, &final_status);
+                ctx.event.emit(&final_status);
 
                 let response = if allowed {
                     OutgoingControlResponse::allow_pretool(request.request_id.clone(), reason)
                 } else {
                     OutgoingControlResponse::deny_pretool(request.request_id.clone(), reason)
                 };
-                if let Err(e) = Self::send_control_response(stdin_writer, response).await {
+                if let Err(e) = Self::send_control_response(ctx.stdin_writer, response).await {
                     log::error!("Failed to send permission response: {}", e);
                 }
             }
@@ -499,20 +537,18 @@ impl CliSession {
     /// Handle result events (completion).
     async fn handle_result_event(
         event: ResultEvent,
-        app_handle: &AppHandle,
-        session_id: &str,
-        turn_id: Option<&str>,
+        ctx: EventContext<'_>,
         in_flight: &Arc<AtomicBool>,
         current_turn_id: &Arc<RwLock<Option<String>>>,
     ) {
-        if event.subtype == "success" {
-            let complete_event = ChatEvent::Complete;
-            emit_chat_event(app_handle, Some(session_id), turn_id, &complete_event);
-        } else if event.subtype == "error" {
+        if Self::is_error_result_subtype(&event.subtype) {
             let error_event = ChatEvent::Error {
                 message: "CLI returned error".to_string(),
             };
-            emit_chat_event(app_handle, Some(session_id), turn_id, &error_event);
+            ctx.emit(&error_event);
+        } else {
+            let complete_event = ChatEvent::Complete;
+            ctx.emit(&complete_event);
         }
 
         in_flight.store(false, Ordering::SeqCst);
@@ -521,5 +557,98 @@ impl CliSession {
 
         // Do not emit token usage from result totals here: result usage is
         // cumulative session accounting and does not match context usage semantics.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CliSession, HookCallbackAction};
+    use crate::backends::claude::cli_protocol::{
+        ControlRequestPayload, HookCallbackInput, IncomingControlRequest,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn is_error_result_subtype_detects_error_like_values() {
+        assert!(CliSession::is_error_result_subtype("error"));
+        assert!(CliSession::is_error_result_subtype("failed"));
+        assert!(CliSession::is_error_result_subtype("tool_error"));
+        assert!(!CliSession::is_error_result_subtype("success"));
+        assert!(!CliSession::is_error_result_subtype("cancelled"));
+    }
+
+    #[test]
+    fn ack_hook_continue_uses_safe_continue_payload() {
+        let response = CliSession::ack_hook_continue("req-1".to_string(), "Stop");
+        let json_value = serde_json::to_value(response).expect("response should serialize");
+
+        assert_eq!(json_value["type"], json!("control_response"));
+        assert_eq!(json_value["response"]["subtype"], json!("success"));
+        assert_eq!(json_value["response"]["request_id"], json!("req-1"));
+        assert_eq!(json_value["response"]["response"]["continue"], json!(true));
+        assert_eq!(
+            json_value["response"]["response"]["hookSpecificOutput"]["hookEventName"],
+            json!("Stop")
+        );
+        assert_eq!(
+            json_value["response"]["response"]["hookSpecificOutput"]["permissionDecision"],
+            json!("allow")
+        );
+        assert_eq!(
+            json_value["response"]["response"]["hookSpecificOutput"]["permissionDecisionReason"],
+            json!("Acknowledged")
+        );
+    }
+
+    #[test]
+    fn pretool_prompt_resolution_maps_user_decision() {
+        assert_eq!(
+            CliSession::pretool_prompt_resolution(true),
+            ("running", "User approved")
+        );
+        assert_eq!(
+            CliSession::pretool_prompt_resolution(false),
+            ("denied", "User denied")
+        );
+    }
+
+    #[test]
+    fn classify_hook_callback_covers_hook_lifecycle_variants() {
+        assert_eq!(
+            CliSession::classify_hook_callback(&hook_request("hook_callback", Some("PreToolUse"))),
+            HookCallbackAction::PreToolUse
+        );
+        assert_eq!(
+            CliSession::classify_hook_callback(&hook_request("hook_callback", Some("PostToolUse"))),
+            HookCallbackAction::PostToolUse
+        );
+        assert_eq!(
+            CliSession::classify_hook_callback(&hook_request("hook_callback", Some("CustomHook"))),
+            HookCallbackAction::UnknownHook("CustomHook".to_string())
+        );
+        assert_eq!(
+            CliSession::classify_hook_callback(&hook_request("hook_callback", None)),
+            HookCallbackAction::MissingInput
+        );
+        assert_eq!(
+            CliSession::classify_hook_callback(&hook_request("initialize", Some("PreToolUse"))),
+            HookCallbackAction::Ignore
+        );
+    }
+
+    fn hook_request(subtype: &str, hook_event_name: Option<&str>) -> IncomingControlRequest {
+        IncomingControlRequest {
+            request_id: "req-test".to_string(),
+            request: ControlRequestPayload {
+                subtype: subtype.to_string(),
+                callback_id: Some("cb-test".to_string()),
+                tool_use_id: Some("tool-1".to_string()),
+                input: hook_event_name.map(|name| HookCallbackInput {
+                    hook_event_name: name.to_string(),
+                    tool_name: None,
+                    tool_input: None,
+                }),
+            },
+        }
     }
 }

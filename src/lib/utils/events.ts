@@ -3,6 +3,7 @@ import { api } from '$lib/api';
 import { chat, type ToolState, type ToolStatus } from '$lib/stores/chat.svelte';
 import { app, type PermissionMode, type Model } from '$lib/stores/app.svelte';
 import { debug, error as logError, info } from '$lib/utils/logger';
+import { summarizeThinking } from '$lib/utils/thinking';
 
 const VALID_TOOL_STATUSES: ToolStatus[] = ['pending', 'awaiting_permission', 'running', 'completed', 'error', 'denied', 'aborted', 'history'];
 const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
@@ -32,7 +33,7 @@ export type ChatEvent = EventMeta & (
   | { type: 'Complete' }
   | { type: 'AbortComplete'; sessionId: string }
   | { type: 'Error'; message: string }
-  | { type: 'ThinkingStart'; thinkingId: string; content: string }
+  | { type: 'ThinkingStart'; thinkingId: string; content: string; input?: Record<string, unknown> }
   | { type: 'ThinkingEnd'; thinkingId: string }
 );
 
@@ -72,7 +73,9 @@ export function handleChatEvent(event: ChatEvent, options: EventHandlerOptions =
     return;
   }
 
-  debug(`Event: type=${event.type} turn=${event.turnId ?? 'none'}`);
+  if (event.type === 'SessionInit' || event.type === 'StateChanged' || event.type === 'Error') {
+    debug(`Event: type=${event.type} turn=${event.turnId ?? 'none'}`);
+  }
 
   switch (event.type) {
     case 'Text':
@@ -181,7 +184,9 @@ function handleToolStartEvent(event: Extract<ChatEvent, { type: 'ToolStart' }>) 
   // Flush buffered text before tool to preserve ordering
   flushLineBuffer();
 
-  debug(`Tool START: id=${event.toolUseId} type=${event.toolType} target=${event.target}`);
+  const inputThreadId = event.input && typeof event.input === 'object' ? (event.input as Record<string, unknown>).__threadId : undefined;
+  const inputReceiverThreadIds = event.input && typeof event.input === 'object' ? (event.input as Record<string, unknown>).receiverThreadIds ?? (event.input as Record<string, unknown>).receiver_thread_ids : undefined;
+  debug(`Tool START: id=${event.toolUseId} type=${event.toolType} target=${event.target} __threadId=${inputThreadId} receiverThreadIds=${JSON.stringify(inputReceiverThreadIds)}`);
   chat.addTool({
     id: event.toolUseId,
     toolType: event.toolType,
@@ -289,12 +294,15 @@ function handleThinkingStartEvent(event: Extract<ChatEvent, { type: 'ThinkingSta
   // Flush buffered text before thinking to preserve ordering
   flushLineBuffer();
 
+  const summary = summarizeThinking(event.content);
+  if (!summary) return;
+
   chat.addTool({
     id: event.thinkingId,
     toolType: 'Thinking',
-    target: event.content,  // Full content, CSS handles truncation
+    target: summary,
     status: 'completed',  // Thinking arrives complete
-    input: { content: event.content },  // Store full content
+    input: { content: event.content, ...event.input },  // Store full content + thread metadata
     timestamp: Math.floor(Date.now() / 1000),
   });
 }

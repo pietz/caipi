@@ -1,6 +1,6 @@
+pub(crate) use super::tool_utils::normalized_tool_from_item;
 use serde::Serialize;
 use serde_json::Value;
-pub(crate) use super::tool_utils::normalized_tool_from_item;
 
 // ---------------------------------------------------------------------------
 // Helpers (retained from previous implementation)
@@ -41,7 +41,11 @@ pub fn clean_thinking_text(text: &str) -> String {
     }
 }
 
-pub fn final_tool_status(tool_type: &str, item_status: &str, exit_code: Option<i64>) -> &'static str {
+pub fn final_tool_status(
+    tool_type: &str,
+    item_status: &str,
+    exit_code: Option<i64>,
+) -> &'static str {
     if item_status != "completed" {
         return "error";
     }
@@ -81,6 +85,14 @@ pub enum IncomingMessage {
 }
 
 impl IncomingMessage {
+    fn parse_response_id(id: &Value) -> Option<u64> {
+        match id {
+            Value::Number(_) => id.as_u64(),
+            Value::String(raw) => raw.parse::<u64>().ok(),
+            _ => None,
+        }
+    }
+
     /// Parse a JSON value into an `IncomingMessage`.
     pub fn parse(value: &Value) -> Option<Self> {
         let has_id = value.get("id").is_some();
@@ -90,7 +102,7 @@ impl IncomingMessage {
 
         if has_id && (has_result || has_error) {
             // Response to our request
-            let id = value.get("id")?.as_u64()?;
+            let id = Self::parse_response_id(value.get("id")?)?;
             return Some(IncomingMessage::Response {
                 id,
                 result: value.get("result").cloned(),
@@ -246,10 +258,22 @@ pub fn token_usage_from_turn_completed(params: &Value) -> Option<(u64, Option<u6
         .or_else(|| usage.get("total_tokens"))
         .and_then(Value::as_u64)
         .or_else(|| {
-            let input = usage.get("inputTokens").or_else(|| usage.get("input_tokens")).and_then(Value::as_u64).unwrap_or(0);
-            let output = usage.get("outputTokens").or_else(|| usage.get("output_tokens")).and_then(Value::as_u64).unwrap_or(0);
+            let input = usage
+                .get("inputTokens")
+                .or_else(|| usage.get("input_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output = usage
+                .get("outputTokens")
+                .or_else(|| usage.get("output_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             let sum = input + output;
-            if sum > 0 { Some(sum) } else { None }
+            if sum > 0 {
+                Some(sum)
+            } else {
+                None
+            }
         })?;
 
     let context_tokens = usage
@@ -269,6 +293,8 @@ pub fn token_usage_from_turn_completed(params: &Value) -> Option<(u64, Option<u6
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
     use serde_json::json;
 
     #[test]
@@ -286,14 +312,26 @@ mod tests {
 
     #[test]
     fn final_tool_status_for_command_requires_zero_exit_code() {
-        assert_eq!(final_tool_status("command_execution", "completed", Some(0)), "completed");
-        assert_eq!(final_tool_status("command_execution", "completed", Some(1)), "error");
-        assert_eq!(final_tool_status("command_execution", "completed", None), "error");
+        assert_eq!(
+            final_tool_status("command_execution", "completed", Some(0)),
+            "completed"
+        );
+        assert_eq!(
+            final_tool_status("command_execution", "completed", Some(1)),
+            "error"
+        );
+        assert_eq!(
+            final_tool_status("command_execution", "completed", None),
+            "error"
+        );
     }
 
     #[test]
     fn final_tool_status_for_non_command_uses_item_status() {
-        assert_eq!(final_tool_status("web_search", "completed", None), "completed");
+        assert_eq!(
+            final_tool_status("web_search", "completed", None),
+            "completed"
+        );
         assert_eq!(final_tool_status("web_search", "failed", None), "error");
     }
 
@@ -324,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_incoming_response() {
+    fn parse_incoming_response_numeric_id() {
         let value = json!({"id": 1, "result": {"threadId": "abc"}, "jsonrpc": "2.0"});
         match IncomingMessage::parse(&value) {
             Some(IncomingMessage::Response { id, result, error }) => {
@@ -334,6 +372,30 @@ mod tests {
             }
             other => panic!("Expected Response, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_incoming_response_numeric_string_id() {
+        let value = json!({"id": "42", "result": {"threadId": "abc"}, "jsonrpc": "2.0"});
+        match IncomingMessage::parse(&value) {
+            Some(IncomingMessage::Response { id, result, error }) => {
+                assert_eq!(id, 42);
+                assert!(result.is_some());
+                assert!(error.is_none());
+            }
+            other => panic!("Expected Response, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_incoming_response_non_numeric_string_id_rejected() {
+        let value = json!({"id": "req_1", "result": {"threadId": "abc"}, "jsonrpc": "2.0"});
+        let parsed = IncomingMessage::parse(&value);
+        assert!(
+            parsed.is_none(),
+            "Expected non-numeric response id to be rejected, got {:?}",
+            parsed
+        );
     }
 
     #[test]
@@ -363,6 +425,71 @@ mod tests {
                 assert!(params.get("parsedCmd").is_some());
             }
             other => panic!("Expected Request, got {:?}", other),
+        }
+    }
+
+    fn load_fixture_json_lines(name: &str) -> Vec<Value> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("codex")
+            .join(name);
+        let raw = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("Failed to read fixture {:?}: {}", path, err));
+
+        raw.lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                serde_json::from_str::<Value>(line).unwrap_or_else(|err| {
+                    panic!("Invalid JSON line in fixture {:?}: {}", path, err)
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fixture_subagent_contract_classifies_incoming_messages() {
+        let lines = load_fixture_json_lines("subagent_contract.jsonl");
+        assert_eq!(lines.len(), 4);
+
+        match IncomingMessage::parse(&lines[0]) {
+            Some(IncomingMessage::Notification { method, .. }) => {
+                assert_eq!(method, "item/started");
+            }
+            other => panic!("Expected notification at line 1, got {:?}", other),
+        }
+
+        match IncomingMessage::parse(&lines[1]) {
+            Some(IncomingMessage::Notification { method, .. }) => {
+                assert_eq!(method, "item/started");
+            }
+            other => panic!("Expected notification at line 2, got {:?}", other),
+        }
+
+        match IncomingMessage::parse(&lines[2]) {
+            Some(IncomingMessage::Request { id, method, params }) => {
+                assert_eq!(id, json!("req_approval_1"));
+                assert_eq!(method, "item/commandExecution/requestApproval");
+                assert_eq!(
+                    params.get("toolUseId").and_then(Value::as_str),
+                    Some("tool-cmd-1")
+                );
+            }
+            other => panic!("Expected request at line 3, got {:?}", other),
+        }
+
+        match IncomingMessage::parse(&lines[3]) {
+            Some(IncomingMessage::Response { id, result, .. }) => {
+                assert_eq!(id, 42);
+                assert_eq!(
+                    result
+                        .and_then(|value| value.get("threadId").cloned())
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .as_deref(),
+                    Some("thread-main")
+                );
+            }
+            other => panic!("Expected response at line 4, got {:?}", other),
         }
     }
 

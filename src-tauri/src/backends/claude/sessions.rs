@@ -8,7 +8,8 @@ use crate::backends::claude::tool_utils::extract_tool_target;
 use crate::backends::types::Message as ChatMessage;
 use crate::commands::sessions::{
     encode_folder_path, get_folder_name, history_to_chat_messages, is_uuid_filename,
-    parse_rfc3339_timestamp, HistoryMessage, HistoryTool, SessionInfo,
+    parse_rfc3339_timestamp, walk_jsonl_files_with_mtime, HistoryMessage, HistoryTool,
+    SessionInfo,
 };
 
 /// Fast summary: reads only the first ~20 lines of a Claude session .jsonl file
@@ -205,19 +206,58 @@ pub(crate) fn resolve_session_file(
     folder_path: &str,
     session_id: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let projects_dir = home_dir.join(".claude").join("projects");
+    let projects_dir = get_claude_projects_dir()?;
 
     // Encode the folder path to match Claude's format
     let encoded = encode_folder_path(folder_path);
     let project_dir = projects_dir.join(&encoded);
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
 
-    if !session_file.exists() {
-        return Ok(None);
+    if session_file.exists() {
+        return Ok(Some(session_file));
     }
 
-    Ok(Some(session_file))
+    let target_name = format!("{}.jsonl", session_id);
+    let mut candidates: Vec<(u8, std::time::SystemTime, PathBuf)> = Vec::new();
+
+    for (path, mtime) in walk_jsonl_files_with_mtime(&projects_dir) {
+        if path.file_name().and_then(|s| s.to_str()) != Some(target_name.as_str()) {
+            continue;
+        }
+
+        let score = match parse_claude_session_summary_fast(&path, mtime) {
+            Some(summary) if paths_match(&summary.folder_path, folder_path) => 3,
+            Some(_) => 1,
+            None => 2,
+        };
+        candidates.push((score, mtime, path));
+    }
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+    Ok(candidates.into_iter().next().map(|(_, _, path)| path))
+}
+
+fn get_claude_projects_dir() -> Result<PathBuf, String> {
+    if let Some(override_dir) = std::env::var_os("CAIPI_CLAUDE_PROJECTS_DIR") {
+        if !override_dir.is_empty() {
+            return Ok(PathBuf::from(override_dir));
+        }
+    }
+
+    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
+    Ok(home_dir.join(".claude").join("projects"))
+}
+
+fn paths_match(a: &str, b: &str) -> bool {
+    let normalize = |value: &str| value.replace('\\', "/").trim_end_matches('/').to_string();
+    let left = normalize(a);
+    let right = normalize(b);
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(&right)
+    } else {
+        left == right
+    }
 }
 
 /// Load parsed history messages from a Claude session log file.
@@ -226,6 +266,11 @@ pub(crate) fn load_session_history_messages(
     session_id: &str,
 ) -> Result<Vec<HistoryMessage>, String> {
     let Some(session_file) = resolve_session_file(folder_path, session_id)? else {
+        log::warn!(
+            "Claude session file not found for folder={} session_id={}",
+            folder_path,
+            session_id
+        );
         return Ok(Vec::new());
     };
 
@@ -413,7 +458,39 @@ pub(crate) fn load_session_log_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    const CLAUDE_PROJECTS_DIR_ENV: &str = "CAIPI_CLAUDE_PROJECTS_DIR";
+
+    fn env_var_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let original = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value.as_ref()) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(value) = &self.original {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
 
     #[test]
     fn test_parse_claude_session_summary_fast_basic() {
@@ -570,5 +647,72 @@ mod tests {
                 .iter()
                 .all(|session| session.session_id != "33333333-3333-4333-8333-333333333333")
         );
+    }
+
+    #[test]
+    fn test_get_claude_projects_dir_respects_env_override() {
+        let _guard = env_var_lock().lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _env = ScopedEnvVar::set(CLAUDE_PROJECTS_DIR_ENV, temp_dir.path().as_os_str());
+
+        let root = get_claude_projects_dir().unwrap();
+        assert_eq!(root, temp_dir.path());
+    }
+
+    #[test]
+    fn test_resolve_session_file_uses_env_root_fast_path() {
+        let _guard = env_var_lock().lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _env = ScopedEnvVar::set(CLAUDE_PROJECTS_DIR_ENV, temp_dir.path().as_os_str());
+
+        let folder_path = "/Users/test/project";
+        let session_id = "dba2996f-69e1-4353-9f41-415af1d4232c";
+        let encoded_dir = temp_dir.path().join(encode_folder_path(folder_path));
+        std::fs::create_dir_all(&encoded_dir).unwrap();
+        let file_path = encoded_dir.join(format!("{}.jsonl", session_id));
+        std::fs::write(
+            &file_path,
+            r#"{"type":"user","cwd":"/Users/test/project","message":{"role":"user","content":"hi"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/Users/test/project","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_session_file(folder_path, session_id).unwrap();
+        assert_eq!(resolved.as_deref(), Some(file_path.as_path()));
+    }
+
+    #[test]
+    fn test_resolve_session_file_fallback_prefers_summary_folder_match() {
+        let _guard = env_var_lock().lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _env = ScopedEnvVar::set(CLAUDE_PROJECTS_DIR_ENV, temp_dir.path().as_os_str());
+
+        let requested_folder = "/Users/test/requested";
+        let session_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let file_name = format!("{}.jsonl", session_id);
+
+        let mismatch_dir = temp_dir.path().join("mismatch");
+        std::fs::create_dir_all(&mismatch_dir).unwrap();
+        let mismatch_path = mismatch_dir.join(&file_name);
+        std::fs::write(
+            &mismatch_path,
+            r#"{"type":"user","cwd":"/Users/test/other","message":{"role":"user","content":"wrong folder"},"uuid":"a","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/Users/test/other","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"uuid":"b","timestamp":"2026-01-01T00:00:01Z"}"#,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let match_dir = temp_dir.path().join("nested").join("match");
+        std::fs::create_dir_all(&match_dir).unwrap();
+        let match_path = match_dir.join(&file_name);
+        std::fs::write(
+            &match_path,
+            r#"{"type":"user","cwd":"/Users/test/requested","message":{"role":"user","content":"right folder"},"uuid":"c","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"assistant","cwd":"/Users/test/requested","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"uuid":"d","timestamp":"2026-01-01T00:00:01Z"}"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_session_file(requested_folder, session_id).unwrap();
+        assert_eq!(resolved.as_deref(), Some(match_path.as_path()));
     }
 }

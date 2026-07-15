@@ -142,6 +142,58 @@ describe('buildGroupedStreamItems', () => {
     }
   });
 
+  it('prefers senderThreadId when mapping codex child tools', () => {
+    const tools = new Map<string, ToolState>([
+      ['tool-spawn', makeTool({
+        id: 'tool-spawn',
+        toolType: 'spawn_agent',
+        status: 'running',
+        insertionIndex: 0,
+        input: {
+          prompt: 'Investigate failing tests',
+          receiverThreadIds: ['thread-child-a'],
+        },
+      })],
+      ['tool-child-read', makeTool({
+        id: 'tool-child-read',
+        toolType: 'Read',
+        status: 'completed',
+        insertionIndex: 1,
+        input: {
+          senderThreadId: 'thread-child-a',
+          threadId: 'thread-parent',
+        },
+      })],
+      ['tool-parent-bash', makeTool({
+        id: 'tool-parent-bash',
+        toolType: 'Bash',
+        status: 'completed',
+        insertionIndex: 2,
+        input: { senderThreadId: 'thread-parent' },
+      })],
+    ]);
+
+    const streamItems: StreamItem[] = [
+      makeToolItem('tool-spawn', 0),
+      makeToolItem('tool-child-read', 1),
+      makeToolItem('tool-parent-bash', 2),
+    ];
+
+    const grouped = buildGroupedStreamItems(streamItems, (toolId) => tools.get(toolId));
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0]?.type).toBe('subagent-group');
+    if (grouped[0]?.type === 'subagent-group') {
+      expect(grouped[0].group.tools.map(tool => tool.id)).toEqual([
+        'tool-spawn',
+        'tool-child-read',
+      ]);
+    }
+    expect(grouped[1]?.type).toBe('tool-group');
+    if (grouped[1]?.type === 'tool-group') {
+      expect(grouped[1].tools.map(tool => tool.id)).toEqual(['tool-parent-bash']);
+    }
+  });
+
   it('groups claude tools between Task start and end boundaries', () => {
     const tools = new Map<string, ToolState>([
       ['task', makeTool({
@@ -253,6 +305,88 @@ describe('buildGroupedStreamItems', () => {
     if (grouped[1]?.type === 'subagent-group') {
       expect(grouped[1].group.title).toBe('Agent B');
       expect(grouped[1].group.tools.map(tool => tool.id)).toEqual(['task-b', 'read-b1']);
+    }
+  });
+
+  it('groups codex child tools when spawn has empty receiverThreadIds and wait provides them', () => {
+    // Real-world scenario: spawn_agent doesn't know child thread at start time.
+    // The wait tool arrives later with the actual receiverThreadIds.
+    const tools = new Map<string, ToolState>([
+      ['tool-spawn', makeTool({
+        id: 'tool-spawn',
+        toolType: 'spawn_agent',
+        status: 'completed',
+        insertionIndex: 0,
+        input: { message: 'Fetch HN stories' },
+        // No receiverThreadIds or agentId at start
+      })],
+      ['tool-thinking-pre', makeTool({
+        id: 'tool-thinking-pre',
+        toolType: 'Thinking',
+        status: 'completed',
+        insertionIndex: 1,
+        input: { content: 'Planning...', __threadId: 'main-thread' },
+      })],
+      ['tool-wait', makeTool({
+        id: 'tool-wait',
+        toolType: 'wait',
+        status: 'completed',
+        insertionIndex: 2,
+        input: { receiverThreadIds: ['child-thread-1'], __threadId: 'main-thread' },
+      })],
+      ['tool-thinking-child', makeTool({
+        id: 'tool-thinking-child',
+        toolType: 'Thinking',
+        status: 'completed',
+        insertionIndex: 3,
+        input: { content: 'Fetching...', __threadId: 'child-thread-1' },
+      })],
+      ['tool-bash-child', makeTool({
+        id: 'tool-bash-child',
+        toolType: 'command_execution',
+        status: 'completed',
+        insertionIndex: 4,
+        input: { cmd: 'curl https://hn.com', __threadId: 'child-thread-1' },
+      })],
+      ['tool-close', makeTool({
+        id: 'tool-close',
+        toolType: 'close_agent',
+        status: 'completed',
+        insertionIndex: 5,
+        input: { receiverThreadIds: ['child-thread-1'], __threadId: 'main-thread' },
+      })],
+    ]);
+
+    const streamItems: StreamItem[] = [
+      makeToolItem('tool-spawn', 0),
+      makeToolItem('tool-thinking-pre', 1),
+      makeToolItem('tool-wait', 2),
+      makeToolItem('tool-thinking-child', 3),
+      makeToolItem('tool-bash-child', 4),
+      makeToolItem('tool-close', 5),
+    ];
+
+    const grouped = buildGroupedStreamItems(streamItems, (toolId) => tools.get(toolId));
+
+    // Should have 1 subagent group + 1 ungrouped thinking-pre
+    expect(grouped).toHaveLength(2);
+
+    // The subagent group appears first (spawn_agent is at index 0)
+    expect(grouped[0]?.type).toBe('subagent-group');
+    if (grouped[0]?.type === 'subagent-group') {
+      expect(grouped[0].group.tools.map(t => t.id)).toEqual([
+        'tool-spawn',
+        'tool-wait',
+        'tool-thinking-child',
+        'tool-bash-child',
+        'tool-close',
+      ]);
+    }
+
+    // The pre-spawn thinking is on the main thread, not grouped into subagent
+    expect(grouped[1]?.type).toBe('tool-group');
+    if (grouped[1]?.type === 'tool-group') {
+      expect(grouped[1].tools.map(t => t.id)).toEqual(['tool-thinking-pre']);
     }
   });
 

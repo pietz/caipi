@@ -86,7 +86,17 @@ function getToolThreadId(tool: ToolState): string | undefined {
 
   // `__threadId` is backend-added metadata so child-thread tools can be grouped
   // with their spawn card (works for both Codex 0.104 function_call and 0.105+ collab items).
-  return asString(input.__threadId) ?? asString(input.threadId) ?? asString(input.thread_id);
+  return asString(input.__threadId)
+    ?? asString(input.senderThreadId)
+    ?? asString(input.sender_thread_id)
+    ?? asString(input.threadId)
+    ?? asString(input.thread_id);
+}
+
+function getReceiverThreadIds(input: Record<string, unknown>): string[] {
+  const ids = asStringArray(input.receiverThreadIds);
+  if (ids.length > 0) return ids;
+  return asStringArray(input.receiver_thread_ids);
 }
 
 function getCodexReferencedIds(tool: ToolState): string[] {
@@ -94,12 +104,17 @@ function getCodexReferencedIds(tool: ToolState): string[] {
   if (!input) return [];
 
   if (tool.toolType === 'wait') {
-    return asStringArray(input.ids);
+    const ids = asStringArray(input.ids);
+    if (ids.length > 0) return ids;
+    // Codex app-server may use receiverThreadIds instead of ids
+    return getReceiverThreadIds(input);
   }
 
   if (tool.toolType === 'send_input' || tool.toolType === 'close_agent' || tool.toolType === 'resume_agent') {
     const id = asString(input.id);
-    return id ? [id] : [];
+    if (id) return [id];
+    // Fallback: check receiverThreadIds
+    return getReceiverThreadIds(input);
   }
 
   return [];
@@ -280,6 +295,20 @@ function inferSubagentGroups(orderedTools: ToolState[]) {
   const finalizedGroups = new Map<string, SubagentGroup>();
   for (const [groupId, group] of groups) {
     finalizedGroups.set(groupId, finalizeGroup(group));
+  }
+
+  // Debug: log grouping results
+  if (finalizedGroups.size > 0 || orderedTools.some(t => t.toolType === 'spawn_agent')) {
+    console.debug('[subagent-grouping] groups:', [...finalizedGroups.entries()].map(([id, g]) => ({
+      id, kind: g.kind, title: g.title.slice(0, 40), toolCount: g.tools.length,
+      toolIds: g.tools.map(t => `${t.id}(${t.toolType})`),
+    })));
+    console.debug('[subagent-grouping] ungrouped tools:', orderedTools
+      .filter(t => !groupByToolId.has(t.id))
+      .map(t => {
+        const input = typeof t.input === 'string' ? JSON.parse(t.input) : t.input;
+        return `${t.id}(${t.toolType}) __threadId=${input?.__threadId}`;
+      }));
   }
 
   return { finalizedGroups, groupByToolId };

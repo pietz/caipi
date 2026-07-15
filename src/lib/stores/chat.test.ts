@@ -172,6 +172,35 @@ describe('ChatState', () => {
       expect(chat.streamItems[0].id).toBe('stream-tool-tool-123');
     });
 
+    it('addTool is idempotent for duplicate tool ids', () => {
+      chat.setStreaming(true);
+      chat.addTool({
+        id: 'tool-dup',
+        toolType: 'Read',
+        target: 'a.txt',
+        status: 'running',
+        timestamp: 1700000000,
+      });
+
+      const firstTool = chat.getTool('tool-dup');
+      expect(firstTool).toBeTruthy();
+      expect(chat.streamItems).toHaveLength(1);
+
+      chat.addTool({
+        id: 'tool-dup',
+        toolType: 'Read',
+        target: 'a.txt',
+        status: 'running',
+        timestamp: 1700000001,
+      });
+
+      const secondTool = chat.getTool('tool-dup');
+      expect(secondTool).toBeTruthy();
+      expect(chat.streamItems).toHaveLength(1);
+      expect(secondTool?.insertionIndex).toBe(firstTool?.insertionIndex);
+      expect(secondTool?.startOrder).toBe(firstTool?.startOrder);
+    });
+
     it('updateToolStatus updates existing tool status', () => {
       chat.addTool({
         id: 'tool-456',

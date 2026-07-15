@@ -11,21 +11,22 @@ use tokio::sync::{oneshot, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use super::sessions::load_codex_log_messages;
 use crate::backends::emit_chat_event;
 use crate::backends::runtime::PermissionChannels;
-use crate::backends::session::BackendSession;
+use crate::backends::session::{
+    validate_permission_mode, BackendSession, PERMISSION_MODE_ACCEPT_EDITS, PERMISSION_MODE_BYPASS,
+    PERMISSION_MODE_DEFAULT,
+};
 use crate::backends::types::{
     AuthStatus, Backend, BackendError, BackendKind, InstallStatus, SessionConfig,
 };
 use crate::backends::types::{ChatEvent, Message};
-use super::sessions::load_codex_log_messages;
 use crate::commands::setup::{
     check_backend_cli_authenticated_internal, check_backend_cli_installed_internal,
 };
 
-use super::cli_protocol::{
-    event_type, IncomingMessage, JsonRpcNotification, JsonRpcRequest,
-};
+use super::cli_protocol::{event_type, IncomingMessage, JsonRpcNotification, JsonRpcRequest};
 
 // ---------------------------------------------------------------------------
 // Backend (stateless factory)
@@ -141,11 +142,13 @@ impl CodexSession {
             folder_path,
             cli_path: config.cli_path,
             app_handle,
-            permission_mode: Arc::new(RwLock::new(
-                config
+            permission_mode: Arc::new(RwLock::new({
+                let mode = config
                     .permission_mode
-                    .unwrap_or_else(|| "default".to_string()),
-            )),
+                    .unwrap_or_else(|| PERMISSION_MODE_DEFAULT.to_string());
+                validate_permission_mode(&mode)?;
+                mode
+            })),
             model: Arc::new(RwLock::new(
                 config.model.unwrap_or_else(|| "gpt-5.3-codex".to_string()),
             )),
@@ -190,10 +193,13 @@ impl CodexSession {
             recoverable: false,
         })?;
         line.push('\n');
-        writer.write_all(line.as_bytes()).await.map_err(|e| BackendError {
-            message: format!("Failed to write to codex stdin: {e}"),
-            recoverable: false,
-        })?;
+        writer
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| BackendError {
+                message: format!("Failed to write to codex stdin: {e}"),
+                recoverable: false,
+            })?;
         writer.flush().await.map_err(|e| BackendError {
             message: format!("Failed to flush codex stdin: {e}"),
             recoverable: false,
@@ -202,11 +208,7 @@ impl CodexSession {
     }
 
     /// Send a JSON-RPC request and wait for its response.
-    async fn send_request(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, BackendError> {
+    async fn send_request(&self, method: &str, params: Value) -> Result<Value, BackendError> {
         let id = self.next_id();
         let (tx, rx) = oneshot::channel();
         {
@@ -291,10 +293,7 @@ impl CodexSession {
         // Defensive: ensure stale reader/monitor tasks are gone before spawning again.
         self.abort_background_tasks().await;
 
-        let cli = self
-            .cli_path
-            .as_deref()
-            .unwrap_or("codex");
+        let cli = self.cli_path.as_deref().unwrap_or("codex");
 
         let mut command = Command::new(cli);
         command
@@ -484,15 +483,15 @@ impl CodexSession {
 
     fn approval_policy(mode: &str) -> &'static str {
         match mode {
-            "bypassPermissions" => "never",
+            PERMISSION_MODE_BYPASS => "never",
             _ => "on-request",
         }
     }
 
     fn sandbox_policy(mode: &str) -> Value {
         match mode {
-            "bypassPermissions" => json!({ "type": "dangerFullAccess" }),
-            "acceptEdits" => json!({ "type": "workspaceWrite" }),
+            PERMISSION_MODE_BYPASS => json!({ "type": "dangerFullAccess" }),
+            PERMISSION_MODE_ACCEPT_EDITS => json!({ "type": "workspaceWrite" }),
             _ => json!({ "type": "readOnly" }),
         }
     }
@@ -524,10 +523,12 @@ impl CodexSession {
         let stdin_writer = self.stdin_writer.clone();
         let messages = self.messages.clone();
 
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            let mut active_tools: HashMap<String, String> = HashMap::new();
-            let mut assistant_parts: Vec<String> = Vec::new();
+	        tokio::spawn(async move {
+	            let mut lines = BufReader::new(stdout).lines();
+	            let mut active_tools: HashMap<String, String> = HashMap::new();
+	            let mut active_collab_thread_id: Option<String> = None;
+	            let mut assistant_parts: Vec<String> = Vec::new();
+	            let mut reasoning_parts: HashMap<String, String> = HashMap::new();
 
             while let Some(line) = lines.next_line().await.unwrap_or(None) {
                 if line.trim().is_empty() {
@@ -564,22 +565,24 @@ impl CodexSession {
                         }
                     }
 
-                    Some(IncomingMessage::Notification { method, params }) => {
-                        Self::handle_notification(
-                            &method,
-                            &params,
-                            &app_handle,
-                            &session_id,
-                            turn_id_ref,
-                            &thread_id,
-                            &codex_turn_id,
-                            &in_flight,
-                            &messages,
-                            &mut active_tools,
-                            &mut assistant_parts,
-                        )
-                        .await;
-                    }
+	                    Some(IncomingMessage::Notification { method, params }) => {
+	                        Self::handle_notification(
+	                            &method,
+	                            &params,
+	                            &app_handle,
+	                            &session_id,
+	                            turn_id_ref,
+	                            &thread_id,
+	                            &codex_turn_id,
+	                            &in_flight,
+	                            &messages,
+	                            &mut active_tools,
+	                            &mut active_collab_thread_id,
+	                            &mut assistant_parts,
+	                            &mut reasoning_parts,
+	                        )
+	                        .await;
+	                    }
 
                     Some(IncomingMessage::Request { id, method, params }) => {
                         Self::handle_approval_request(
@@ -603,26 +606,28 @@ impl CodexSession {
                         // Possibly a legacy-format event line -- try to handle as
                         // notification using the "type" field (backwards compat with
                         // older Codex versions that may mix formats).
-                        if let Some(kind) = event_type(&parsed) {
-                            Self::handle_legacy_event(
-                                kind,
-                                &parsed,
-                                &app_handle,
-                                &session_id,
-                                turn_id_ref,
-                                &thread_id,
-                                &codex_turn_id,
-                                &in_flight,
-                                &messages,
-                                &mut active_tools,
-                                &mut assistant_parts,
-                            )
-                            .await;
-                        }
-                    }
-                }
-            }
-        })
+	                        if let Some(kind) = event_type(&parsed) {
+	                            Self::handle_legacy_event(
+	                                kind,
+	                                &parsed,
+	                                &app_handle,
+	                                &session_id,
+	                                turn_id_ref,
+	                                &thread_id,
+	                                &codex_turn_id,
+	                                &in_flight,
+	                                &messages,
+	                                &mut active_tools,
+	                                &mut active_collab_thread_id,
+	                                &mut assistant_parts,
+	                                &mut reasoning_parts,
+	                            )
+	                            .await;
+	                        }
+	                    }
+	                }
+	            }
+	        })
     }
 }
 
@@ -729,10 +734,7 @@ impl BackendSession for CodexSession {
         let codex_turn = self.codex_turn_id.read().await.clone();
         if let (Some(tid), Some(ctid)) = (thread, codex_turn) {
             let _ = self
-                .send_notification(
-                    "turn/interrupt",
-                    json!({ "threadId": tid, "turnId": ctid }),
-                )
+                .send_notification("turn/interrupt", json!({ "threadId": tid, "turnId": ctid }))
                 .await;
         }
 
@@ -766,6 +768,7 @@ impl BackendSession for CodexSession {
     }
 
     async fn set_permission_mode(&self, mode: String) -> Result<(), BackendError> {
+        validate_permission_mode(&mode)?;
         *self.permission_mode.write().await = mode;
         Ok(())
     }
@@ -808,14 +811,26 @@ mod tests {
 
     #[test]
     fn final_tool_status_for_command_requires_zero_exit_code() {
-        assert_eq!(final_tool_status("command_execution", "completed", Some(0)), "completed");
-        assert_eq!(final_tool_status("command_execution", "completed", Some(1)), "error");
-        assert_eq!(final_tool_status("command_execution", "completed", None), "error");
+        assert_eq!(
+            final_tool_status("command_execution", "completed", Some(0)),
+            "completed"
+        );
+        assert_eq!(
+            final_tool_status("command_execution", "completed", Some(1)),
+            "error"
+        );
+        assert_eq!(
+            final_tool_status("command_execution", "completed", None),
+            "error"
+        );
     }
 
     #[test]
     fn final_tool_status_for_non_command_uses_item_status() {
-        assert_eq!(final_tool_status("web_search", "completed", None), "completed");
+        assert_eq!(
+            final_tool_status("web_search", "completed", None),
+            "completed"
+        );
         assert_eq!(final_tool_status("web_search", "failed", None), "error");
     }
 
@@ -855,13 +870,22 @@ mod tests {
     #[test]
     fn sandbox_policy_mapping() {
         let default = CodexSession::sandbox_policy("default");
-        assert_eq!(default.get("type").and_then(|v| v.as_str()), Some("readOnly"));
+        assert_eq!(
+            default.get("type").and_then(|v| v.as_str()),
+            Some("readOnly")
+        );
 
         let edit = CodexSession::sandbox_policy("acceptEdits");
-        assert_eq!(edit.get("type").and_then(|v| v.as_str()), Some("workspaceWrite"));
+        assert_eq!(
+            edit.get("type").and_then(|v| v.as_str()),
+            Some("workspaceWrite")
+        );
 
         let bypass = CodexSession::sandbox_policy("bypassPermissions");
-        assert_eq!(bypass.get("type").and_then(|v| v.as_str()), Some("dangerFullAccess"));
+        assert_eq!(
+            bypass.get("type").and_then(|v| v.as_str()),
+            Some("dangerFullAccess")
+        );
     }
 
     #[test]
@@ -870,5 +894,23 @@ mod tests {
         assert_eq!(CodexSession::effort_from_thinking("low"), "low");
         assert_eq!(CodexSession::effort_from_thinking("medium"), "medium");
         assert_eq!(CodexSession::effort_from_thinking(""), "medium");
+    }
+
+    #[test]
+    fn permission_mode_validation_accepts_known_modes() {
+        for mode in crate::backends::session::VALID_PERMISSION_MODES {
+            assert!(crate::backends::session::validate_permission_mode(mode).is_ok());
+        }
+    }
+
+    #[test]
+    fn permission_mode_validation_rejects_unknown_mode() {
+        let err = crate::backends::session::validate_permission_mode("allAccess")
+            .expect_err("invalid mode should fail");
+        assert_eq!(
+            err.message,
+            "Invalid permission mode: allAccess. Expected one of: default, acceptEdits, bypassPermissions"
+        );
+        assert!(err.recoverable);
     }
 }

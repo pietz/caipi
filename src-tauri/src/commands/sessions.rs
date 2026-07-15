@@ -284,6 +284,17 @@ fn group_sessions_by_project(sessions: Vec<(SessionInfo, String)>) -> Vec<Projec
         .collect()
 }
 
+fn get_claude_projects_dir() -> Result<PathBuf, String> {
+    if let Some(override_dir) = std::env::var_os("CAIPI_CLAUDE_PROJECTS_DIR") {
+        if !override_dir.is_empty() {
+            return Ok(PathBuf::from(override_dir));
+        }
+    }
+
+    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
+    Ok(home_dir.join(".claude").join("projects"))
+}
+
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -309,8 +320,7 @@ async fn get_recent_sessions_by_backend(
         return Ok(group_sessions_by_project(all_sessions));
     }
 
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let projects_dir = home_dir.join(".claude").join("projects");
+    let projects_dir = get_claude_projects_dir()?;
 
     if !projects_dir.exists() {
         return Ok(Vec::new());
@@ -416,8 +426,7 @@ pub async fn get_project_sessions(
         return Ok(sessions);
     }
 
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let projects_dir = home_dir.join(".claude").join("projects");
+    let projects_dir = get_claude_projects_dir()?;
 
     // Encode the folder path to match Claude's format
     let encoded = encode_folder_path(&folder_path);
@@ -454,6 +463,39 @@ pub async fn get_session_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
+
+    const CLAUDE_PROJECTS_DIR_ENV: &str = "CAIPI_CLAUDE_PROJECTS_DIR";
+
+    fn env_var_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let original = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value.as_ref()) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(value) = &self.original {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
 
     #[test]
     fn test_get_folder_name_unix() {
@@ -495,5 +537,15 @@ mod tests {
         assert!(!is_uuid_filename("not-a-uuid"));
         assert!(!is_uuid_filename("sessions-index"));
         assert!(!is_uuid_filename(""));
+    }
+
+    #[test]
+    fn test_get_claude_projects_dir_respects_env_override() {
+        let _guard = env_var_lock().lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let _env = ScopedEnvVar::set(CLAUDE_PROJECTS_DIR_ENV, temp_dir.path().as_os_str());
+
+        let root = get_claude_projects_dir().unwrap();
+        assert_eq!(root, temp_dir.path());
     }
 }

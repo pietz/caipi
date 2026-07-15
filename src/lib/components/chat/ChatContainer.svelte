@@ -22,10 +22,11 @@
   let messagesContainer = $state<HTMLDivElement | null>(null);
   let unlisten: (() => void) | null = null;
   let cleanupKeyboardShortcuts: (() => void) | null = null;
+  let shouldAutoScroll = $state(true);
 
   onMount(async () => {
     // Register scroll callback for content changes (e.g., buffer flush)
-    setOnContentChange(scrollToBottom);
+    setOnContentChange(() => scrollToBottom());
 
     // Listen for backend-neutral chat events
     debug('Chat event listener registered');
@@ -44,7 +45,7 @@
     const count = chat.messages.length;
     // History loaded: went from 0 to multiple messages at once
     if (prevMessageCount === 0 && count > 1) {
-      scrollToBottom();
+      scrollToBottom(true);
     }
     prevMessageCount = count;
   });
@@ -94,7 +95,7 @@
     // Start streaming
     chat.setStreaming(true);
 
-    scrollToBottom();
+    scrollToBottom(true);
 
     try {
       await api.sendMessage(app.sessionId, message, turnId);
@@ -108,7 +109,7 @@
   function queueMessage(message: string) {
     // Add to queue - message will be added to UI when processed
     chat.enqueueMessage(message);
-    scrollToBottom();
+    scrollToBottom(true);
   }
 
   async function processQueuedMessages() {
@@ -123,7 +124,7 @@
     // Keep streaming state active
     chat.setStreaming(true);
 
-    scrollToBottom();
+    scrollToBottom(true);
 
     try {
       await api.sendMessage(app.sessionId, nextMessage, turnId);
@@ -134,7 +135,19 @@
     }
   }
 
-  async function scrollToBottom() {
+  function updateAutoScroll() {
+    if (!messagesContainer) return;
+    const distanceFromBottom =
+      messagesContainer.scrollHeight -
+      messagesContainer.scrollTop -
+      messagesContainer.clientHeight;
+    shouldAutoScroll = distanceFromBottom < 120;
+  }
+
+  async function scrollToBottom(force = false) {
+    if (!force && !shouldAutoScroll) {
+      return;
+    }
     // Wait for Svelte to update the DOM with new content
     await tick();
 
@@ -145,6 +158,7 @@
           top: messagesContainer.scrollHeight,
           behavior: 'instant'
         });
+        updateAutoScroll();
       }
     });
   }
@@ -225,6 +239,7 @@
         <div
           bind:this={messagesContainer}
           class="flex-1 overflow-y-auto"
+          onscroll={updateAutoScroll}
         >
           {#if chat.messages.length === 0 && !chat.isStreaming}
             <!-- Empty State -->

@@ -168,7 +168,9 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
                 "id",
                 "ids",
                 "senderThreadId",
+                "sender_thread_id",
                 "receiverThreadIds",
+                "receiver_thread_ids",
                 "agentsStates",
                 "status",
             ],
@@ -195,7 +197,14 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         let arguments = merge_input_with_metadata(
             parse_arguments(item),
             item,
-            &["threadId", "thread_id", "senderThreadId", "receiverThreadIds"],
+            &[
+                "threadId",
+                "thread_id",
+                "senderThreadId",
+                "sender_thread_id",
+                "receiverThreadIds",
+                "receiver_thread_ids",
+            ],
         );
 
         if function_name == "web.run" {
@@ -230,6 +239,49 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         return (tool_type, target, arguments);
     }
 
+    // Some Codex builds emit collab tools directly as raw item types.
+    if matches!(
+        raw_tool_type,
+        "spawn_agent"
+            | "spawnAgent"
+            | "send_input"
+            | "sendInput"
+            | "resume_agent"
+            | "resumeAgent"
+            | "close_agent"
+            | "closeAgent"
+            | "wait"
+    ) {
+        let tool_type = normalize_collab_tool_name(raw_tool_type);
+        let input = merge_input_with_metadata(
+            parse_arguments(item),
+            item,
+            &[
+                "prompt",
+                "message",
+                "id",
+                "ids",
+                "senderThreadId",
+                "sender_thread_id",
+                "receiverThreadIds",
+                "receiver_thread_ids",
+                "agentsStates",
+                "status",
+            ],
+        );
+        let target = input
+            .as_ref()
+            .and_then(target_from_args)
+            .or_else(|| {
+                item.get("prompt")
+                    .or_else(|| item.get("message"))
+                    .and_then(Value::as_str)
+                    .map(std::string::ToString::to_string)
+            })
+            .unwrap_or_default();
+        return (tool_type, target, input);
+    }
+
     if raw_tool_type == "web_search_call" {
         let target = item
             .get("action")
@@ -244,8 +296,26 @@ pub(crate) fn normalized_tool_from_item(item: &Value) -> (String, String, Option
         return ("web_search".to_string(), target, None);
     }
 
+    if raw_tool_type == "web_search" || raw_tool_type == "web_fetch" {
+        let target = item
+            .get("action")
+            .and_then(|action| action.get("query").or_else(|| action.get("url")))
+            .and_then(Value::as_str)
+            .map(std::string::ToString::to_string)
+            .or_else(|| {
+                merge_input_with_metadata(parse_arguments(item), item, &[])
+                    .as_ref()
+                    .map(web_run_target_from_args)
+            })
+            .unwrap_or_default();
+        return (raw_tool_type.to_string(), target, None);
+    }
+
     let target = item
         .get("command")
+        .or_else(|| item.pointer("/commandCall/command"))
+        .or_else(|| item.get("commandCall").and_then(|call| call.get("command")))
+        .or_else(|| item.get("cmd"))
         .or_else(|| item.get("query"))
         .or_else(|| item.get("name"))
         .and_then(Value::as_str)
@@ -326,6 +396,32 @@ mod tests {
     }
 
     #[test]
+    fn normalized_tool_preserves_snake_case_thread_metadata() {
+        let item = json!({
+            "type": "function_call",
+            "name": "spawn_agent",
+            "receiver_thread_ids": ["thread-child"],
+            "sender_thread_id": "thread-parent",
+            "arguments": {
+                "message": "Investigate logs"
+            }
+        });
+        let (_tool_type, _target, input) = normalized_tool_from_item(&item);
+        assert_eq!(
+            input
+                .as_ref()
+                .and_then(|value| value.get("receiver_thread_ids").cloned()),
+            Some(json!(["thread-child"]))
+        );
+        assert_eq!(
+            input
+                .as_ref()
+                .and_then(|value| value.get("sender_thread_id").cloned()),
+            Some(json!("thread-parent"))
+        );
+    }
+
+    #[test]
     fn payload_tool_maps_collab_wait() {
         let payload = json!({
             "type": "collabAgentToolCall",
@@ -381,5 +477,31 @@ mod tests {
         let (tool_type, target, _) = normalized_tool_from_item(&item);
         assert_eq!(tool_type, "command_execution");
         assert_eq!(target, "ls -la");
+    }
+
+    #[test]
+    fn normalized_raw_wait_uses_ids_as_target_and_input() {
+        let item = json!({
+            "type": "wait",
+            "ids": ["thread-child-1"]
+        });
+        let (tool_type, target, input) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "wait");
+        assert_eq!(target, "thread-child-1");
+        assert_eq!(
+            input.and_then(|value| value.get("ids").cloned()),
+            Some(json!(["thread-child-1"]))
+        );
+    }
+
+    #[test]
+    fn normalized_raw_web_search_reads_action_query() {
+        let item = json!({
+            "type": "web_search",
+            "action": { "query": "latest hacker news" }
+        });
+        let (tool_type, target, _) = normalized_tool_from_item(&item);
+        assert_eq!(tool_type, "web_search");
+        assert_eq!(target, "latest hacker news");
     }
 }

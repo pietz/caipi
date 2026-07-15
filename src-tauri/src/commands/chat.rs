@@ -11,6 +11,19 @@ use crate::storage;
 // imports from `commands::chat` continue to work.
 pub use crate::backends::types::{ChatEvent, Message, SessionStore};
 
+const VALID_PERMISSION_MODES: [&str; 3] = ["default", "acceptEdits", "bypassPermissions"];
+
+fn validate_permission_mode_input(mode: &str) -> Result<(), String> {
+    if VALID_PERMISSION_MODES.contains(&mode) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid permission mode: {mode}. Expected one of: {}",
+            VALID_PERMISSION_MODES.join(", ")
+        ))
+    }
+}
+
 async fn get_session_from_store(
     sessions: &SessionStore,
     session_id: &str,
@@ -43,6 +56,10 @@ pub async fn create_session(
 ) -> Result<String, String> {
     let sessions: tauri::State<'_, SessionStore> = app.state();
     let registry: tauri::State<'_, Arc<BackendRegistry>> = app.state();
+
+    if let Some(mode) = permission_mode.as_deref() {
+        validate_permission_mode_input(mode)?;
+    }
 
     let selected_backend = if let Some(backend_name) = backend {
         backend_name
@@ -195,7 +212,7 @@ pub async fn send_message(
 
 #[tauri::command]
 pub async fn respond_permission(
-    _session_id: String,
+    session_id: String,
     request_id: String,
     allowed: bool,
     app: AppHandle,
@@ -206,12 +223,13 @@ pub async fn respond_permission(
     // Take the sender from the channels map
     let sender = {
         let mut channels = permission_channels.lock().await;
-        channels.remove(&request_id)
+        channels.remove(&(session_id.clone(), request_id.clone()))
     };
 
     if let Some(tx) = sender {
         log::debug!(
-            "Permission response: request={}, allowed={}",
+            "Permission response: session={}, request={}, allowed={}",
+            session_id,
             request_id,
             allowed
         );
@@ -219,8 +237,8 @@ pub async fn respond_permission(
         Ok(())
     } else {
         Err(format!(
-            "No pending permission request with id: {}",
-            request_id
+            "No pending permission request with id: {} for session: {}",
+            request_id, session_id
         ))
     }
 }
@@ -246,6 +264,18 @@ pub async fn set_permission_mode(
 
     // Get the session Arc, releasing the lock immediately
     let session = get_session_from_store(&sessions, &session_id).await?;
+
+    let validation = session.validate_permission_mode_value(&mode);
+    if let Err(err) = validation {
+        let current_mode = session.get_permission_mode().await;
+        let current_model = session.get_model().await;
+        let state_event = ChatEvent::StateChanged {
+            permission_mode: current_mode,
+            model: current_model,
+        };
+        emit_chat_event(&app, Some(session_id.as_str()), None, &state_event);
+        return Err(err.to_string());
+    }
 
     let result = session.set_permission_mode(mode).await;
 
@@ -301,7 +331,10 @@ pub async fn set_thinking_level(
 
 #[cfg(test)]
 mod tests {
-    use super::{get_session_from_store, remove_session_from_store, BackendSession, SessionStore};
+    use super::{
+        get_session_from_store, remove_session_from_store, validate_permission_mode_input,
+        BackendSession, SessionStore, VALID_PERMISSION_MODES,
+    };
     use crate::backends::{BackendError, BackendKind, SessionRecord};
     use async_trait::async_trait;
     use std::collections::HashMap;
@@ -419,5 +452,22 @@ mod tests {
     fn test_session_creation() {
         let sessions = test_store();
         assert!(Arc::strong_count(&sessions) >= 1);
+    }
+
+    #[test]
+    fn permission_mode_validation_accepts_known_modes() {
+        for mode in VALID_PERMISSION_MODES {
+            assert!(validate_permission_mode_input(mode).is_ok());
+        }
+    }
+
+    #[test]
+    fn permission_mode_validation_rejects_unknown_mode() {
+        let invalid = "allAccess";
+        let err = validate_permission_mode_input(invalid).expect_err("invalid mode should fail");
+        assert_eq!(
+            err,
+            "Invalid permission mode: allAccess. Expected one of: default, acceptEdits, bypassPermissions"
+        );
     }
 }

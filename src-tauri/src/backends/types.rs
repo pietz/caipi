@@ -109,6 +109,8 @@ pub enum ChatEvent {
         #[serde(rename = "thinkingId")]
         thinking_id: String,
         content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input: Option<serde_json::Value>,
     },
     ThinkingEnd {
         #[serde(rename = "thinkingId")]

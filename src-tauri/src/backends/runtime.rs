@@ -67,5 +67,9 @@ pub struct PermissionResponse {
     pub allowed: bool,
 }
 
-/// Maps permission request IDs to one-shot response senders.
-pub type PermissionChannels = Arc<Mutex<HashMap<String, oneshot::Sender<PermissionResponse>>>>;
+/// Key for a pending permission request, scoped to a chat session.
+pub type PermissionChannelKey = (String, String);
+
+/// Maps (session_id, request_id) to one-shot response senders.
+pub type PermissionChannels =
+    Arc<Mutex<HashMap<PermissionChannelKey, oneshot::Sender<PermissionResponse>>>>;

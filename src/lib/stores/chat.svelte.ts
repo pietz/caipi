@@ -154,6 +154,25 @@ class ChatState {
   // --- Tool methods ---
 
   addTool(tool: Omit<ToolState, 'insertionIndex' | 'startOrder'>) {
+    const existing = this.tools.get(tool.id);
+    if (existing) {
+      // Guard against duplicate ToolStart events that reuse the same tool id.
+      // This happens with some backends/protocol versions and otherwise creates
+      // duplicate streamItems referencing the same id, which breaks grouping/rendering.
+      const updatedTool: ToolState = {
+        ...existing,
+        ...tool,
+        insertionIndex: existing.insertionIndex,
+        startOrder: existing.startOrder,
+        endOrder: existing.endOrder,
+      };
+
+      const newTools = new SvelteMap(this.tools);
+      newTools.set(tool.id, updatedTool);
+      this.tools = newTools;
+      return;
+    }
+
     const toolState: ToolState = {
       ...tool,
       insertionIndex: this.streamItemCounter,

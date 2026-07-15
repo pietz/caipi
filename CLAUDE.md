@@ -20,6 +20,7 @@ Single monorepo: `pietz/caipi` (private) at `/Users/pietz/Private/caipi`
 npm run tauri dev      # Run app in dev mode
 npm run check          # Type check frontend
 npm run test:all       # Run all tests
+npm run test:cli-real  # Opt-in smoke test against real Claude/Codex CLIs
 
 # Website (from website/ directory)
 cd website && npm run dev    # Local dev server
@@ -85,7 +86,8 @@ gh release edit v0.X.X --repo pietz/caipi --notes "## What's New
 - **Events**: `chat:event`
 - **Stores**: `app` (screen, folder, settings), `chat` (messages, tools, streaming), `files` (tree state)
 - **Permission modes**: Default (prompts), Edit (auto-allow edits), Danger (bypass all)
-- **Models**: Opus 4.6, Sonnet 4.5, Haiku 4.5
+- **Configured Claude models**: Opus 4.6, Sonnet 4.6, Haiku 4.5
+- **Configured Codex models**: GPT-5.3 Codex, GPT-5.2, GPT-5.1 Codex Mini
 
 ### Backend module structure
 
@@ -113,3 +115,46 @@ Uses `$state()`, `$derived()`, `$effect()`, `$props()` syntax.
 1. Run `npm run test:all`
 2. Test manually with `npm run tauri dev`
 3. App flow: Onboarding → Folder Picker → Chat
+
+## LLM Live Testing (Qualitative)
+
+Use this when we want high-signal manual testing with an LLM watching runtime logs in parallel.
+
+### Goal
+- No strict pass/fail gate.
+- Capture qualitative behavior: what feels right, suspicious, or broken.
+- Correlate UI observations with backend/frontend log events in real time.
+
+### Workflow
+1. LLM starts and monitors app logs:
+   - `npm run tauri dev`
+2. Human drives the UI and reports what they see (with screenshot if needed).
+3. LLM checks logs for correlated events and reports:
+   - likely root cause
+   - confidence level
+   - smallest safe fix
+4. Repeat quickly after each patch.
+
+### What to watch in logs
+- `Tool START` / `ToolEnd`
+- `Ignoring unknown Codex notification`
+- `[ERROR]` / `[WARN]`
+- `Turn complete`
+
+Optional focused filter:
+```bash
+npm run tauri dev 2>&1 | rg "Tool START|ToolEnd|Ignoring unknown Codex notification|\\[ERROR\\]|\\[WARN\\]|Turn complete"
+```
+
+### Suggested Codex UI flow
+1. `hello` (check for phantom tools)
+2. `list all files in this folder` (check target and completion)
+3. `use a subagent to find the latest hacker news stories` (check subagent grouping)
+4. Expand/collapse accordions during streaming (check click reliability + scroll behavior)
+
+### Reporting format
+- **Working well**
+- **Suspicious**
+- **Likely bug**
+
+For each issue: include 1 screenshot + 5–15 relevant log lines.

@@ -16,6 +16,27 @@ pub(crate) fn codex_session_id_from_path(path: &Path) -> Option<String> {
     trailing_uuid_like(stem)
 }
 
+fn codex_sessions_root_dir_from(
+    env_override: Option<String>,
+    home_dir: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = env_override
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        return Ok(PathBuf::from(dir));
+    }
+    let home = home_dir.ok_or("Could not find home directory")?;
+    Ok(home.join(".codex").join("sessions"))
+}
+
+pub(crate) fn codex_sessions_root_dir() -> Result<PathBuf, String> {
+    codex_sessions_root_dir_from(
+        std::env::var("CAIPI_CODEX_SESSIONS_DIR").ok(),
+        dirs::home_dir(),
+    )
+}
+
 pub(crate) fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -86,6 +107,9 @@ pub(crate) fn parse_codex_session_summary_fast(
     path: &Path,
     mtime: std::time::SystemTime,
 ) -> Option<SessionInfo> {
+    const FAST_SCAN_LINE_LIMIT: u32 = 30;
+    const META_EXTRA_SCAN_LINE_LIMIT: u32 = 120;
+
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -94,6 +118,8 @@ pub(crate) fn parse_codex_session_summary_fast(
     let mut created = String::new();
     let mut first_prompt = String::new();
     let mut lines_read = 0u32;
+    let mut max_lines = FAST_SCAN_LINE_LIMIT;
+    let mut extended_for_meta = false;
 
     for line in reader.lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -150,8 +176,13 @@ pub(crate) fn parse_codex_session_summary_fast(
             break;
         }
 
-        // Safety limit: don't read more than 30 lines
-        if lines_read >= 30 {
+        if lines_read >= max_lines {
+            // session_meta can appear after event lines in some logs; allow one bounded extension.
+            if folder_path.is_empty() && !extended_for_meta {
+                max_lines = FAST_SCAN_LINE_LIMIT + META_EXTRA_SCAN_LINE_LIMIT;
+                extended_for_meta = true;
+                continue;
+            }
             break;
         }
     }
@@ -200,8 +231,7 @@ pub(crate) fn load_codex_session_index(limit: Option<usize>) -> Result<Vec<Sessi
         return Ok(Vec::new());
     }
 
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let sessions_root = home_dir.join(".codex").join("sessions");
+    let sessions_root = codex_sessions_root_dir()?;
     if !sessions_root.exists() {
         return Ok(Vec::new());
     }
@@ -252,8 +282,7 @@ pub(crate) fn load_recent_codex_sessions(
         return Ok(Vec::new());
     }
 
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let sessions_root = home_dir.join(".codex").join("sessions");
+    let sessions_root = codex_sessions_root_dir()?;
     if !sessions_root.exists() {
         return Ok(Vec::new());
     }
@@ -321,8 +350,7 @@ pub(crate) fn resolve_codex_session_file(
     session_id: &str,
     folder_path: Option<&str>,
 ) -> Result<Option<PathBuf>, String> {
-    let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let sessions_root = home_dir.join(".codex").join("sessions");
+    let sessions_root = codex_sessions_root_dir()?;
     if !sessions_root.exists() {
         return Ok(None);
     }
@@ -350,6 +378,11 @@ pub(crate) fn load_codex_history_messages(
     folder_path: Option<&str>,
 ) -> Result<Vec<HistoryMessage>, String> {
     let Some(session_file) = resolve_codex_session_file(session_id, folder_path)? else {
+        log::warn!(
+            "Codex session history file not resolved for session_id={} folder_path={:?}",
+            session_id,
+            folder_path
+        );
         return Ok(Vec::new());
     };
 
@@ -612,6 +645,45 @@ mod tests {
         // No session_meta means no folder_path => should return None
         let result = parse_codex_session_summary_fast(&path, mtime);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_codex_sessions_root_dir_from_uses_env_override() {
+        let home_dir = Some(PathBuf::from("/home/fallback"));
+        let root = codex_sessions_root_dir_from(Some("/tmp/custom-sessions".to_string()), home_dir)
+            .unwrap();
+        assert_eq!(root, PathBuf::from("/tmp/custom-sessions"));
+    }
+
+    #[test]
+    fn test_codex_sessions_root_dir_from_falls_back_to_home() {
+        let root = codex_sessions_root_dir_from(None, Some(PathBuf::from("/home/tester"))).unwrap();
+        assert_eq!(root, PathBuf::from("/home/tester/.codex/sessions"));
+    }
+
+    #[test]
+    fn test_codex_session_summary_fast_delayed_session_meta_within_extra_scan_limit() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("session-019a4b60-a492-7f12-9abe-73797723f5b1.jsonl");
+
+        let mut lines = Vec::new();
+        lines.push(r#"{"type":"event_msg","payload":{"type":"user_message","message":"first prompt"},"timestamp":"2026-01-01T00:00:00Z"}"#.to_string());
+        for i in 0..35 {
+            lines.push(format!(
+                r#"{{"type":"event_msg","payload":{{"type":"agent_message","message":"a-{i}"}},"timestamp":"2026-01-01T00:00:{:02}Z"}}"#,
+                i + 1
+            ));
+        }
+        lines.push(r#"{"type":"session_meta","payload":{"id":"019a4b60-a492-7f12-9abe-73797723f5b1","cwd":"/tmp/project-delayed"},"timestamp":"2026-01-01T00:02:00Z"}"#.to_string());
+        std::fs::write(&path, lines.join("\n")).unwrap();
+
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let result = parse_codex_session_summary_fast(&path, mtime);
+        assert!(result.is_some());
+        let session = result.unwrap();
+        assert_eq!(session.folder_path, "/tmp/project-delayed");
+        assert_eq!(session.first_prompt, "first prompt");
+        assert_eq!(session.session_id, "019a4b60-a492-7f12-9abe-73797723f5b1");
     }
 
     #[test]

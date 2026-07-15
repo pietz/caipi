@@ -2,6 +2,7 @@
   import { Check, Loader2, X, Ban, Clock } from 'lucide-svelte';
   import type { ToolState } from '$lib/stores';
   import { getToolConfig } from './tool-configs';
+  import { getCompactToolTarget } from './tool-target-format';
 
   interface Props {
     tool: ToolState;
@@ -14,6 +15,7 @@
   const config = $derived(getToolConfig(tool.toolType));
   const ToolIcon = $derived(config.icon);
   const isAwaitingPermission = $derived(tool.status === 'awaiting_permission');
+  const displayTarget = $derived(getCompactToolTarget(tool.toolType, tool.target));
 </script>
 
 <div class="flex items-center justify-between py-0.5 px-2">
@@ -22,7 +24,7 @@
       <ToolIcon size={14} />
     </div>
     <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground shrink-0">{config.label}</span>
-    <span class="text-xs text-muted-foreground/70 truncate min-w-0 flex-1">{tool.target}</span>
+    <span class="text-xs text-muted-foreground/70 truncate min-w-0 flex-1">{displayTarget}</span>
   </div>
 
   <div class="flex items-center gap-1.5 h-6 ml-3">
